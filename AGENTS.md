@@ -32,6 +32,11 @@ and speaker diarization.
   timeout, retry, fallback, or cache settings, read
   `docs/engineering-constraint-policy.md`. Validate individual limits and their
   product-profile composition with the same calculation and tests.
+- Before every commit, follow the commit conventions in `CONTRIBUTING.md`:
+  an imperative English subject and a detailed technical body that records
+  intent, background, the work itself, and verification, written so the body
+  alone reconstructs the change and is safe to publish globally (no personal
+  information or sensitive content).
 - Do not add AI co-author trailers or session links to commit messages. Do not
   describe implementation authorship in public documentation or the repository
   description (decided 2026-08-04).

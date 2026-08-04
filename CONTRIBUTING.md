@@ -71,6 +71,19 @@ requested model).
 ## Commit conventions
 
 - English, imperative subject line, one logical change per commit.
+- Write a detailed body for every non-trivial commit. The body alone — without
+  the diff, an issue tracker, or chat history — must let a later reader
+  reconstruct three things:
+  1. **Intent and background**: what problem or observation motivated the
+     change, and any constraint or prior decision that shaped it.
+  2. **The work**: what was changed, at the level of behavior and structure,
+     not a file-by-file paraphrase of the diff.
+  3. **Verification**: the commands run and the results observed.
+- Keep the body dry and technical, and write it to be globally publishable:
+  no personal information, no private paths or hostnames, no profanity, and
+  no sensitive or legally encumbered content. If a detail cannot be published,
+  it does not belong in the message; keep it in local notes and reference the
+  public evidence instead.
 - No co-author trailers and no tool/session links in commit messages.
 - Never commit: real recordings, model caches, audio files (public or
   synthetic fixtures under `Tests/**/Fixtures/` are the only exception),
