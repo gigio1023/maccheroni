@@ -111,16 +111,22 @@ Requisiti: Mac con Apple Silicon, macOS 26, Xcode 26, [uv](https://docs.astral.s
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 153 tests
+swift build && swift test          # 156 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-L’app stampa il percorso del bundle quando la compilazione, l’inventario della lista delle risorse consentite e i controlli rigorosi della firma del codice hanno esito positivo. I pesi dei modelli vengono scaricati al primo utilizzo; `maccheroni doctor` verifica i runtime e gli snapshot fissati:
+L’app stampa il percorso del bundle quando la compilazione, l’inventario della lista delle risorse consentite e i controlli rigorosi della firma del codice hanno esito positivo. I pesi dei modelli vengono scaricati al primo utilizzo. L’eseguibile non include i pesi dei modelli né gli ambienti Python; `maccheroni doctor` verifica i runtime e gli snapshot fissati.
+
+L’eseguibile offre quattro comandi del prodotto:
 
 ```bash
-.build/debug/maccheroni doctor
+.build/debug/maccheroni help [run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
+.build/debug/maccheroni capabilities [--json]
 ```
+
+Usa `maccheroni help`, `maccheroni doctor --json` e `maccheroni capabilities --json` per consultare la guida e ottenere output strutturato. La trascrizione e la diarizzazione vengono eseguite su questo Mac, quindi l’audio rimane in locale.
 
 Sono inclusi profili per riunioni in coreano (`ko-meeting`, VibeVoice) e dialoghi in italiano (`it-dialogue`, MOSS). Per il modello locale facoltativo di post-elaborazione, esegui `zsh scripts/setup-postprocess-runtime.zsh`.
 
@@ -151,7 +157,7 @@ Issue e pull request mirate sono benvenute. I comandi di build e test, lo standa
 | Percorso | Contenuto |
 |---|---|
 | `Sources/` | Pacchetto Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 153 test basati su fixture in 17 suite |
+| `Tests/` | 156 test basati su fixture in 17 suite |
 | `benchmarks/scripts/` | Runner e script di valutazione con verdetti derivati e test negativi |
 | `docs/` | Sintesi della ricerca, analisi del codice sorgente, regole sui vincoli, contratti (schemi JSON), progettazione dell’interfaccia |
 | `scripts/` | Compilazione del bundle dell’app, compilazione dell’harness MOSS, configurazione del runtime di post-elaborazione |

@@ -111,16 +111,22 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 153 tests
+swift build && swift test          # 156 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-После успешной сборки, инвентаризации разрешённых ресурсов и строгих проверок подписи кода приложение выводит путь к своему bundle. Веса моделей загружаются при первом использовании; `maccheroni doctor` проверяет среды выполнения и закреплённые снимки:
+После успешной сборки, инвентаризации разрешённых ресурсов и строгих проверок подписи кода приложение выводит путь к своему bundle. Веса моделей загружаются при первом использовании. Исполняемый файл не содержит веса моделей или среды Python; `maccheroni doctor` проверяет среды выполнения и закреплённые снимки.
+
+Исполняемый файл предоставляет четыре команды продукта:
 
 ```bash
-.build/debug/maccheroni doctor
+.build/debug/maccheroni help [run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
+.build/debug/maccheroni capabilities [--json]
 ```
+
+Используйте `maccheroni help`, `maccheroni doctor --json` и `maccheroni capabilities --json` для просмотра справки и получения структурированного вывода. Транскрибирование и диаризация выполняются на этом Mac, поэтому аудио остаётся локальным.
 
 В комплект входят профили для корейских совещаний (`ko-meeting`, VibeVoice) и итальянских диалогов (`it-dialogue`, MOSS). Для необязательной локальной модели постобработки выполните `zsh scripts/setup-postprocess-runtime.zsh`.
 
@@ -151,7 +157,7 @@ zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 | Путь | Содержимое |
 |---|---|
 | `Sources/` | Пакет Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 153 теста на основе fixtures в 17 наборах |
+| `Tests/` | 156 тестов на основе fixtures в 17 наборах |
 | `benchmarks/scripts/` | Средства запуска и оценки с производными вердиктами и негативными тестами |
 | `docs/` | Обзор исследований, проверки исходного кода, политика ограничений, контракты (схемы JSON), дизайн интерфейса |
 | `scripts/` | Сборка bundle приложения, сборка harness MOSS, настройка среды постобработки |

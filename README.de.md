@@ -111,16 +111,22 @@ Voraussetzungen: Apple-Silicon-Mac, macOS 26, Xcode 26, [uv](https://docs.astral
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 153 tests
+swift build && swift test          # 156 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-Die App gibt ihren Bundle-Pfad aus, wenn Build, Ressourcen-Allowlist-Inventur und strenge Codesign-Prüfungen erfolgreich sind. Modellgewichte werden bei der ersten Nutzung heruntergeladen; `maccheroni doctor` prüft Laufzeitumgebungen und festgeschriebene Snapshots:
+Die App gibt ihren Bundle-Pfad aus, wenn Build, Ressourcen-Allowlist-Inventur und strenge Codesign-Prüfungen erfolgreich sind. Modellgewichte werden bei der ersten Nutzung heruntergeladen. Die ausführbare Datei enthält weder Modellgewichte noch Python-Umgebungen; `maccheroni doctor` prüft Laufzeitumgebungen und festgeschriebene Snapshots.
+
+Die ausführbare Datei bietet vier Produktbefehle:
 
 ```bash
-.build/debug/maccheroni doctor
+.build/debug/maccheroni help [run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
+.build/debug/maccheroni capabilities [--json]
 ```
+
+`maccheroni help`, `maccheroni doctor --json` und `maccheroni capabilities --json` liefern auffindbare Hilfe und strukturierte Ausgaben. Transkription und Sprechertrennung laufen auf diesem Mac, sodass das Audio lokal bleibt.
 
 Mitgeliefert werden Profile für koreanische Meetings (`ko-meeting`, VibeVoice) und italienische Dialoge (`it-dialogue`, MOSS). Führe für das optionale lokale Nachbearbeitungsmodell `zsh scripts/setup-postprocess-runtime.zsh` aus.
 
@@ -151,7 +157,7 @@ Issues und gezielte Pull Requests sind willkommen. Build- und Testbefehle, der V
 | Pfad | Inhalt |
 |---|---|
 | `Sources/` | Swift-Paket: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 153 fixturebasierte Tests in 17 Suites |
+| `Tests/` | 156 fixturebasierte Tests in 17 Suites |
 | `benchmarks/scripts/` | Runner und Scorer mit abgeleiteten Urteilen und Negativtests |
 | `docs/` | Forschungsübersicht, Quellcodeprüfungen, Richtlinie für Beschränkungen, Verträge (JSON-Schemas), UI-Design |
 | `scripts/` | App-Bundle-Build, MOSS-Harness-Build, Einrichtung der Nachbearbeitungslaufzeit |

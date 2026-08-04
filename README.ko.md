@@ -110,16 +110,22 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 153 tests
+swift build && swift test          # 156 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-build, resource allowlist inventory, strict codesign 검사를 모두 통과하면 앱이 bundle 경로를 출력합니다. 모델 weight는 처음 사용할 때 다운로드합니다. `maccheroni doctor`는 runtime과 고정된 snapshot을 검증합니다.
+build, resource allowlist inventory, strict codesign 검사를 모두 통과하면 앱이 bundle 경로를 출력합니다. 모델 weight는 처음 사용할 때 다운로드합니다. 실행 파일은 모델 weight나 Python 환경을 포함하지 않습니다. `maccheroni doctor`는 runtime과 고정된 snapshot을 검증합니다.
+
+실행 파일은 네 가지 제품 명령을 제공합니다.
 
 ```bash
-.build/debug/maccheroni doctor
+.build/debug/maccheroni help [run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
+.build/debug/maccheroni capabilities [--json]
 ```
+
+`maccheroni help`, `maccheroni doctor --json`, `maccheroni capabilities --json`으로 도움말과 구조화된 출력을 확인할 수 있습니다. 전사와 화자 분리는 이 Mac에서 실행하므로 오디오는 로컬에 남습니다.
 
 한국어 회의용 profile(`ko-meeting`, VibeVoice)과 이탈리아어 대화용 profile(`it-dialogue`, MOSS)을 제공합니다. 선택 기능인 로컬 후처리 모델을 사용하려면 `zsh scripts/setup-postprocess-runtime.zsh`를 실행하세요.
 
@@ -150,7 +156,7 @@ Issue와 범위를 명확히 한 pull request를 환영합니다. Build 및 test
 | 경로 | 내용 |
 |---|---|
 | `Sources/` | Swift 패키지: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 17개 suite에 걸친 fixture 기반 test 153개 |
+| `Tests/` | 17개 suite에 걸친 fixture 기반 test 156개 |
 | `benchmarks/scripts/` | Derived verdict와 negative test를 포함한 runner 및 scorer |
 | `docs/` | 조사 digest, source audit, constraint policy, 계약(JSON schema), UI design |
 | `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |

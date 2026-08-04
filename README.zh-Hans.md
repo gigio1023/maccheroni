@@ -110,16 +110,22 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 153 tests
+swift build && swift test          # 156 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-build、resource allowlist inventory 和 strict codesign 检查全部通过后，应用会输出 bundle path。模型 weight 会在首次使用时下载；`maccheroni doctor` 用于验证 runtime 和固定的 snapshot：
+build、resource allowlist inventory 和 strict codesign 检查全部通过后，应用会输出 bundle path。模型 weight 会在首次使用时下载。可执行文件不包含模型 weight 或 Python 环境；`maccheroni doctor` 用于验证 runtime 和固定的 snapshot。
+
+可执行文件提供四个产品命令：
 
 ```bash
-.build/debug/maccheroni doctor
+.build/debug/maccheroni help [run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
+.build/debug/maccheroni capabilities [--json]
 ```
+
+使用 `maccheroni help`、`maccheroni doctor --json` 和 `maccheroni capabilities --json` 可查看帮助并获取结构化输出。转写和说话人分离在这台 Mac 上运行，因此音频始终留在本地。
 
 内置韩语会议 profile（`ko-meeting`，VibeVoice）和意大利语对话 profile（`it-dialogue`，MOSS）。若要使用可选的本地后处理模型，请运行 `zsh scripts/setup-postprocess-runtime.zsh`。
 
@@ -150,7 +156,7 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 | 路径 | 内容 |
 |---|---|
 | `Sources/` | Swift 包：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
-| `Tests/` | 分布于17个 suite 的153项 fixture test |
+| `Tests/` | 分布于17个 suite 的156项 fixture test |
 | `benchmarks/scripts/` | 带有 derived verdict 和 negative test 的 runner 与 scorer |
 | `docs/` | 调研 digest、source audit、constraint policy、契约（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |
