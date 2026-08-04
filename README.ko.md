@@ -34,6 +34,11 @@
 
 불확실한 교정은 조용히 치환하지 않고 표시합니다. 화자 라벨은 전체 파일을 한 번에 분석한 결과에서 가져오므로 두 시간짜리 녹음에서도 일관성을 유지합니다.
 
+<p align="center">
+  <img src="docs/assets/screenshots/transcript.png" alt="Maccheroni 전사 화면: 전역 라벨이 붙은 두 화자와 세그먼트별 증거 칩, 오른쪽에는 run 상태와 고정된 모델 revision, glossary 기록을 보여주는 인스펙터" width="100%">
+</p>
+<p align="center"><em>모든 run은 증거를 남깁니다. 인스펙터는 고정된 모델과 run 상태, glossary가 디코더에 도달했는지를 보여줍니다.</em></p>
+
 ## 이 프로젝트를 만든 이유
 
 2026-08-02에 macOS 로컬 전사 앱 7개를 소스 수준에서 검토했습니다. 실제 혼용 언어 회의에 필요한 조합을 충족한 앱은 없었습니다.
@@ -91,6 +96,11 @@ flowchart LR
 
 모든 결과는 공개 또는 합성 fixture에서 얻었습니다. 평가 ID와 artifact hash는 [docs/](docs/)에 기록했습니다.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
+  <img src="docs/assets/benchmarks-light.svg" alt="막대 그래프: 테스트 자료별 CER과 WER(한국어 대화 0.081/0.128, 이탈리아어 2화자 0.033/0.081), glossary 용어 재현율(게이트 0.75 대비 0.95와 0.778), 화자분리 오류율(합성 0.048, VoxConverse 0.152)" width="100%">
+</picture>
+
 | 테스트 자료 | 모델 | CER | WER | 용어 재현율 | 누락 | DER |
 |---|---|---:|---:|---:|---:|---:|
 | 한국어 대화, 20개 용어집 | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
@@ -98,6 +108,11 @@ flowchart LR
 | VoxConverse 샘플(78분) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 78분 샘플에서 chunk 경계의 화자 안정성은 두 기준 화자 모두 1.0이었습니다. 고정된 600초 matrix에서는 120초를 넘긴 MOSS leaf가 timestamp 구조를 완전히 잃었습니다. 이 결과를 근거로 production leaf 상한을 120초로 정했습니다. 자세한 내용은 [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md)에 있습니다.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/leaf-cap-dark.svg">
+  <img src="docs/assets/leaf-cap-light.svg" alt="막대 그래프: 같은 600초 입력에서 120초 leaf는 정준 EOS leaf 5개를 생성(통과), 240초와 300초 leaf는 유효 leaf 0개(타입이 지정된 invalid_eos_output 실패), 240초 부모의 강제 복구는 유효한 120초 자식 5개를 생성" width="100%">
+</picture>
 
 ## 설치
 
@@ -122,6 +137,10 @@ build, resource allowlist inventory, strict codesign 검사를 모두 통과하�
 한국어 회의용 profile(`ko-meeting`, VibeVoice)과 이탈리아어 대화용 profile(`it-dialogue`, MOSS)을 제공합니다. 선택 기능인 로컬 후처리 모델을 사용하려면 `zsh scripts/setup-postprocess-runtime.zsh`를 실행하세요.
 
 ## 개인정보 보호
+
+<p align="center">
+  <img src="docs/assets/screenshots/capture.png" alt="Maccheroni 캡처 화면: 측정된 지표가 붙은 프로필 선택, Codex/Local/None 후처리 선택, 오디오가 이 Mac을 떠나지 않는다는 안내" width="100%">
+</p>
 
 - 전사, VAD, 화자 분리는 모두 로컬에서 실행합니다. 오디오 byte는 어떤 network path로도 전달하지 않습니다. 정책 선언에 그치지 않고 test로 강제합니다.
 - 선택 기능인 Codex 후처리 경로는 텍스트만 보내며 실행마다 사용자가 선택합니다. 빈 임시 workspace에서 read-only sandbox와 사용자 설정 격리를 적용해 `codex exec`를 실행합니다. prompt에는 segment text, 활성 용어집, 지침이 들어갑니다. 로컬 MLX 모델을 선택하면 텍스트도 기기를 떠나지 않습니다.

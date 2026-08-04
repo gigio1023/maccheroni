@@ -35,6 +35,11 @@ Así se ve una exportación (muestra ilustrativa, no es una salida del modelo):
 
 Las correcciones dudosas se marcan y nunca se sustituyen de forma silenciosa. Las etiquetas de los hablantes proceden de una única diarización del archivo completo, por lo que se mantienen coherentes durante una grabación de dos horas.
 
+<p align="center">
+  <img src="docs/assets/screenshots/transcript.png" alt="Vista de transcripción de Maccheroni: dos hablantes con etiquetas globales y chips de evidencia por segmento, junto a un inspector que muestra el estado de la ejecución, las revisiones fijadas de los modelos y el registro del glosario" width="100%">
+</p>
+<p align="center"><em>Cada ejecución conserva su evidencia: el inspector muestra los modelos fijados exactos, el estado de la ejecución y si el glosario llegó al decodificador.</em></p>
+
 ## Por qué existe
 
 El 2 de agosto de 2026 auditamos a nivel de código fuente siete aplicaciones macOS de transcripción local. Ninguna ofrecía la combinación que necesitan las reuniones realmente multilingües:
@@ -92,6 +97,11 @@ Cada modelo se fija mediante ID de Hugging Face + revisión + cuantización y qu
 
 Todos proceden de fixtures públicas o sintéticas. Los ID de evaluación y los hashes de los artefactos están registrados en [docs/](docs/).
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
+  <img src="docs/assets/benchmarks-light.svg" alt="Gráficos de barras: CER y WER por fixture (diálogo coreano 0.081/0.128, dos hablantes en italiano 0.033/0.081), recuperación de términos del glosario (0.95 y 0.778 frente al umbral de 0.75) y tasa de error de diarización (0.048 sintético, 0.152 VoxConverse)" width="100%">
+</picture>
+
 | Fixture | Modelo | CER | WER | Recuperación de términos | Omisiones | DER |
 |---|---|---:|---:|---:|---:|---:|
 | Diálogo en coreano, glosario de 20 términos | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
@@ -99,6 +109,11 @@ Todos proceden de fixtures públicas o sintéticas. Los ID de evaluación y los 
 | Muestra de VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 La estabilidad de los hablantes en los límites de los segmentos de la muestra de 78 minutos fue de 1.0 para ambos hablantes de referencia. Una matriz fija de 600 segundos demostró que los segmentos MOSS de más de 120 s pierden por completo la estructura de marcas de tiempo. Por eso, el límite de producción es de 120 s; los detalles están en [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/leaf-cap-dark.svg">
+  <img src="docs/assets/leaf-cap-light.svg" alt="Gráfico de barras: con la misma entrada de 600 segundos, los segmentos de 120 s producen 5 hojas canónicas con fin de secuencia (aprobado), los de 240 y 300 s producen 0 hojas válidas (fallos tipados invalid_eos_output) y la recuperación forzada desde padres de 240 s produce 5 hijos válidos de 120 s" width="100%">
+</picture>
 
 ## Instalación
 
@@ -123,6 +138,10 @@ La aplicación muestra la ruta de su paquete cuando la compilación, el inventar
 Se incluyen perfiles para reuniones en coreano (`ko-meeting`, VibeVoice) y diálogos en italiano (`it-dialogue`, MOSS). Para utilizar el modelo local opcional de posprocesamiento, ejecuta `zsh scripts/setup-postprocess-runtime.zsh`.
 
 ## Privacidad
+
+<p align="center">
+  <img src="docs/assets/screenshots/capture.png" alt="Vista de captura de Maccheroni: selector de perfil con métricas medidas, elección de posprocesamiento entre Codex, Local y None, y el aviso de que el audio nunca sale de este Mac" width="100%">
+</p>
 
 - La transcripción, el VAD y la diarización se ejecutan por completo de forma local. Los bytes del audio nunca llegan a una ruta de red: lo garantizan las pruebas, no una mera política.
 - La vía opcional de posprocesamiento con Codex solo envía texto y requiere consentimiento en cada ejecución. Inicia `codex exec` en un espacio de trabajo temporal vacío, con un entorno aislado de solo lectura y la configuración del usuario separada; el prompt contiene el texto de los segmentos, el glosario activo y las instrucciones. Si eliges el modelo MLX local, incluso el texto permanece en el dispositivo.

@@ -35,6 +35,11 @@ Exemplo de exportação (amostra ilustrativa, não é uma saída do modelo):
 
 As correções incertas são marcadas e nunca substituídas silenciosamente. Os rótulos dos falantes vêm de uma única diarização do arquivo inteiro, por isso permanecem consistentes ao longo de uma gravação de duas horas.
 
+<p align="center">
+  <img src="docs/assets/screenshots/transcript.png" alt="Visão de transcrição do Maccheroni: dois falantes com rótulos globais e chips de evidência por segmento, ao lado de um inspetor que mostra o status da execução, as revisões fixadas dos modelos e o registro do glossário" width="100%">
+</p>
+<p align="center"><em>Cada execução guarda sua evidência: o inspetor mostra os modelos fixados exatos, o status da execução e se o glossário chegou ao decodificador.</em></p>
+
 ## Por que este projeto existe
 
 Em 2 de agosto de 2026, auditamos no nível do código-fonte sete aplicativos macOS de transcrição local. Nenhum ofereceu a combinação de que reuniões realmente multilíngues precisam:
@@ -92,6 +97,11 @@ Cada modelo é fixado por ID do Hugging Face + revisão + quantização e regist
 
 Todos vêm de fixtures públicas ou sintéticas. Os IDs de avaliação e hashes dos artefatos estão registrados em [docs/](docs/).
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
+  <img src="docs/assets/benchmarks-light.svg" alt="Gráficos de barras: CER e WER por fixture (diálogo coreano 0.081/0.128, dois falantes em italiano 0.033/0.081), recuperação de termos do glossário (0.95 e 0.778 frente ao limite de 0.75) e taxa de erro de diarização (0.048 sintético, 0.152 VoxConverse)" width="100%">
+</picture>
+
 | Fixture | Modelo | CER | WER | Recuperação de termos | Omissões | DER |
 |---|---|---:|---:|---:|---:|---:|
 | Diálogo em coreano, glossário de 20 termos | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
@@ -99,6 +109,11 @@ Todos vêm de fixtures públicas ou sintéticas. Os IDs de avaliação e hashes 
 | Amostra do VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 A estabilidade dos falantes nos limites dos segmentos da amostra de 78 minutos foi 1.0 para ambos os falantes de referência. Uma matriz fixa de 600 segundos mostrou que segmentos MOSS com mais de 120 s perdem completamente a estrutura dos timestamps. Por isso, o limite de produção é 120 s; os detalhes estão em [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/leaf-cap-dark.svg">
+  <img src="docs/assets/leaf-cap-light.svg" alt="Gráfico de barras: na mesma entrada de 600 segundos, folhas de 120 s produzem 5 folhas canônicas com fim de sequência (aprovado), folhas de 240 e 300 s produzem 0 folhas válidas (falhas tipadas invalid_eos_output), e a recuperação forçada de pais de 240 s produz 5 filhos válidos de 120 s" width="100%">
+</picture>
 
 ## Instalação
 
@@ -123,6 +138,10 @@ O aplicativo exibe o caminho do bundle quando a compilação, o inventário da l
 O projeto inclui perfis para reuniões em coreano (`ko-meeting`, VibeVoice) e diálogos em italiano (`it-dialogue`, MOSS). Para usar o modelo local opcional de pós-processamento, execute `zsh scripts/setup-postprocess-runtime.zsh`.
 
 ## Privacidade
+
+<p align="center">
+  <img src="docs/assets/screenshots/capture.png" alt="Visão de captura do Maccheroni: seletor de perfil com métricas medidas, escolha de pós-processamento entre Codex, Local e None, e o aviso de que o áudio nunca sai deste Mac" width="100%">
+</p>
 
 - A transcrição, o VAD e a diarização são totalmente locais. Os bytes de áudio nunca chegam a nenhum caminho de rede: isso é garantido por testes, não por uma simples política.
 - A via opcional de pós-processamento com Codex envia somente texto e exige adesão a cada execução. Ela inicia `codex exec` em um espaço de trabalho temporário vazio, com sandbox somente de leitura e isolamento da configuração do usuário; o prompt contém o texto dos segmentos, o glossário ativo e as instruções. Se você escolher o modelo MLX local, até o texto permanecerá no dispositivo.

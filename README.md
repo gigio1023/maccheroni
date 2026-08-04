@@ -35,6 +35,11 @@ What an export looks like (illustrative sample, not model output):
 
 Uncertain corrections are flagged, never silently substituted. Speaker labels come from one whole-file diarization pass, so they stay consistent across a two-hour recording.
 
+<p align="center">
+  <img src="docs/assets/screenshots/transcript.png" alt="Maccheroni transcript view: two speakers with global labels and per-segment evidence chips, next to a run inspector listing run status, pinned model revisions, and the glossary record" width="100%">
+</p>
+<p align="center"><em>Every run keeps its evidence: the inspector shows the exact pinned models, the run status, and whether the glossary reached the decoder.</em></p>
+
 ## Why this exists
 
 On 2026-08-02 we audited seven macOS local transcription apps at source level. None passed the combination that real mixed-language meetings need:
@@ -92,6 +97,11 @@ Everything is pinned by Hugging Face ID + revision + quantization and recorded i
 
 All from public or synthetic fixtures; evaluation IDs and artifact hashes are recorded in [docs/](docs/).
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
+  <img src="docs/assets/benchmarks-light.svg" alt="Bar charts: CER and WER per fixture (Korean dialogue 0.081/0.128, Italian two-speaker 0.033/0.081), glossary term recall (0.95 and 0.778 against the 0.75 gate), and diarization error rate (0.048 synthetic, 0.152 VoxConverse)" width="100%">
+</picture>
+
 | Fixture | Model | CER | WER | Term recall | Omissions | DER |
 |---|---|---:|---:|---:|---:|---:|
 | Korean dialogue, 20-term glossary | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
@@ -99,6 +109,11 @@ All from public or synthetic fixtures; evaluation IDs and artifact hashes are re
 | VoxConverse sample (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 Chunk-boundary speaker stability on the 78-minute sample: 1.0 for both reference speakers. A fixed 600-second matrix showed that MOSS leaves above 120 s lose timestamp structure entirely, which is why the production leaf cap is 120 s — details in [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/leaf-cap-dark.svg">
+  <img src="docs/assets/leaf-cap-light.svg" alt="Bar chart: on the same 600-second input, 120-second leaves yield 5 canonical end-of-sequence leaves (pass), 240- and 300-second leaves yield 0 valid leaves (typed invalid_eos_output failures), and forced recovery from 240-second parents yields 5 valid 120-second children" width="100%">
+</picture>
 
 ## Install
 
@@ -123,6 +138,10 @@ The app prints its bundle path when the build, resource-allowlist inventory, and
 Profiles ship for Korean meetings (`ko-meeting`, VibeVoice) and Italian dialogue (`it-dialogue`, MOSS). For the optional local post-processing model, run `zsh scripts/setup-postprocess-runtime.zsh`.
 
 ## Privacy
+
+<p align="center">
+  <img src="docs/assets/screenshots/capture.png" alt="Maccheroni capture view: profile picker with measured metrics, post-processing choice between Codex, Local, and None, and the notice that audio never leaves this Mac" width="100%">
+</p>
 
 - Transcription, VAD, and diarization are fully local. Audio bytes never reach any network path — this is enforced by tests, not policy.
 - The optional Codex post-processing lane is text-only and opt-in per run. It launches `codex exec` in an empty ephemeral workspace with a read-only sandbox and user-config isolation; the prompt contains segment text, the active glossary, and instructions. Choosing the local MLX model instead keeps even text on-device.

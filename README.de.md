@@ -35,6 +35,11 @@ So sieht ein Export aus (anschauliches Beispiel, keine Modellausgabe):
 
 Unsichere Korrekturen werden gekennzeichnet und niemals stillschweigend ersetzt. Die Sprecherbezeichnungen stammen aus einem einzigen Diarisierungslauf über die gesamte Datei und bleiben dadurch auch in einer zweistündigen Aufnahme konsistent.
 
+<p align="center">
+  <img src="docs/assets/screenshots/transcript.png" alt="Maccheroni-Transkriptansicht: zwei Sprecher mit globalen Labels und Evidenz-Chips pro Segment, daneben ein Run-Inspektor mit Run-Status, gepinnten Modellrevisionen und dem Glossareintrag" width="100%">
+</p>
+<p align="center"><em>Jeder Lauf behält seine Evidenz: Der Inspektor zeigt die exakt gepinnten Modelle, den Status des Laufs und ob das Glossar den Decoder erreicht hat.</em></p>
+
 ## Warum es dieses Projekt gibt
 
 Am 2. August 2026 haben wir sieben lokale macOS-Transkriptions-Apps auf Quellcodeebene geprüft. Keine erfüllte die Kombination, die echte gemischtsprachige Meetings brauchen:
@@ -92,6 +97,11 @@ Alle Modelle sind durch Hugging-Face-ID + Revision + Quantisierung festgeschrieb
 
 Alle Ergebnisse stammen aus öffentlichen oder synthetischen Fixtures. Auswertungs-IDs und Artefakt-Hashes sind unter [docs/](docs/) dokumentiert.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
+  <img src="docs/assets/benchmarks-light.svg" alt="Balkendiagramme: CER und WER je Fixture (koreanischer Dialog 0.081/0.128, italienisches Zwei-Sprecher-Beispiel 0.033/0.081), Begriffstrefferquote des Glossars (0.95 und 0.778 gegenüber der Schwelle 0.75) und Diarisierungsfehlerrate (0.048 synthetisch, 0.152 VoxConverse)" width="100%">
+</picture>
+
 | Fixture | Modell | CER | WER | Begriffstrefferquote | Auslassungen | DER |
 |---|---|---:|---:|---:|---:|---:|
 | Koreanischer Dialog, Glossar mit 20 Begriffen | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
@@ -99,6 +109,11 @@ Alle Ergebnisse stammen aus öffentlichen oder synthetischen Fixtures. Auswertun
 | VoxConverse-Beispiel (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 Stabilität der Sprecher an Abschnittsgrenzen im 78-Minuten-Beispiel: 1.0 für beide Referenzsprecher. Eine feste Matrix von 600 Sekunden zeigte, dass MOSS-Blätter über 120 s ihre Zeitstempelstruktur vollständig verlieren. Deshalb liegt die Obergrenze für produktive Blätter bei 120 s. Einzelheiten stehen unter [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/leaf-cap-dark.svg">
+  <img src="docs/assets/leaf-cap-light.svg" alt="Balkendiagramm: Auf demselben 600-Sekunden-Input liefern 120-Sekunden-Blätter 5 kanonische End-of-Sequence-Blätter (bestanden), 240- und 300-Sekunden-Blätter 0 gültige Blätter (typisierte invalid_eos_output-Fehler), und die erzwungene Wiederherstellung aus 240-Sekunden-Eltern liefert 5 gültige 120-Sekunden-Kinder" width="100%">
+</picture>
 
 ## Installation
 
@@ -123,6 +138,10 @@ Die App gibt ihren Bundle-Pfad aus, wenn Build, Ressourcen-Allowlist-Inventur un
 Mitgeliefert werden Profile für koreanische Meetings (`ko-meeting`, VibeVoice) und italienische Dialoge (`it-dialogue`, MOSS). Führe für das optionale lokale Nachbearbeitungsmodell `zsh scripts/setup-postprocess-runtime.zsh` aus.
 
 ## Datenschutz
+
+<p align="center">
+  <img src="docs/assets/screenshots/capture.png" alt="Maccheroni-Aufnahmeansicht: Profilauswahl mit gemessenen Metriken, Nachbearbeitungswahl zwischen Codex, Local und None sowie der Hinweis, dass Audio diesen Mac nie verlässt" width="100%">
+</p>
 
 - Transkription, VAD und Diarisierung laufen vollständig lokal. Audiobytes gelangen auf keinen Netzwerkpfad. Tests erzwingen dies, nicht bloß eine Richtlinie.
 - Der optionale Codex-Nachbearbeitungspfad arbeitet ausschließlich mit Text und muss für jeden Lauf aktiviert werden. Er startet `codex exec` in einem leeren temporären Arbeitsbereich mit einer schreibgeschützten Sandbox und isolierter Benutzerkonfiguration. Der Prompt enthält Segmenttext, das aktive Glossar und Anweisungen. Wer stattdessen das lokale MLX-Modell wählt, behält auch den Text auf dem Gerät.
