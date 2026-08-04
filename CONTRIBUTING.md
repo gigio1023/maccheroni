@@ -34,8 +34,13 @@ Python contract suites:
 uv run --project Sources/MaccheroniASR/Python python -m unittest discover -s Sources/MaccheroniASR/Python/tests
 uv run --project benchmarks/scripts/scoring python -m unittest benchmarks/scripts/scoring/tests/test_evaluate_moss_long_audio.py
 uv run --project benchmarks/scripts/scoring python -m unittest benchmarks/scripts/scoring/tests/test_evaluate_t14.py
-/usr/bin/python3 -m unittest benchmarks/scripts/runners/tests/test_moss_long_audio_eval_gate.py
+uv run --no-project python -m unittest benchmarks/scripts/runners/tests/test_moss_long_audio_eval_gate.py
 ```
+
+All Python tooling runs through [uv](https://docs.astral.sh/uv/): each Python
+project in the tree carries its own `pyproject.toml` and `uv.lock`, and
+`uv run --project <dir>` creates and reuses the pinned environment on demand.
+No system Python, manual virtualenv, or `pip install` step is required.
 
 Benchmark run artifacts are create-only local directories under
 `benchmarks/runs/` and are gitignored. Never commit them, never overwrite or
@@ -51,7 +56,7 @@ What "verified" means for the core claims:
 
 | Claim | Evidence | Reproduce |
 |---|---|---|
-| Glossary reaches the decoder per leaf | Hash-sealed payloads in run manifests; T14 glossary contract | `swift test`; owner-side: `python3 benchmarks/scripts/scoring/evaluate_t14.py` |
+| Glossary reaches the decoder per leaf | Hash-sealed payloads in run manifests; T14 glossary contract | `swift test`; owner-side: `uv run --project benchmarks/scripts/scoring python benchmarks/scripts/scoring/evaluate_t14.py` |
 | Global speaker consistency | 78-min chunk-boundary stability 1.0; zero mismatches at all root boundaries | same |
 | No promotion of truncated output | Typed `invalid_eos_output` / limit outcomes; EOS-only promotion fixtures | `swift test` |
 | Originals immutable through post-processing | Byte-identical hash assertions before/after correction and translation | `swift test` |
