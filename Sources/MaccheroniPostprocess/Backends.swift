@@ -8,12 +8,16 @@ private let postprocessResourcesBundle = PackagedResourceBundle.resolve(
 public enum CodexAvailability: Equatable, Sendable {
     case unavailable
     case unauthenticated(version: String)
+    case authenticationUnknown(version: String)
     case authenticated(version: String)
 
     public var version: String {
         switch self {
         case .unavailable: "unavailable"
-        case let .unauthenticated(version), let .authenticated(version): version
+        case let .unauthenticated(version),
+             let .authenticationUnknown(version),
+             let .authenticated(version):
+            version
         }
     }
 
@@ -23,6 +27,11 @@ public enum CodexAvailability: Equatable, Sendable {
 
     public var isAuthenticated: Bool {
         if case .authenticated = self { return true }
+        return false
+    }
+
+    public var authenticationCheckFailed: Bool {
+        if case .authenticationUnknown = self { return true }
         return false
     }
 }
@@ -109,7 +118,7 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
                 prefix: "maccheroni-codex-auth-"
             )
         } catch {
-            return .unauthenticated(version: version)
+            return .authenticationUnknown(version: version)
         }
         defer { try? FileManager.default.removeItem(at: workspace) }
         do {
@@ -122,7 +131,7 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
                 ? .authenticated(version: version)
                 : .unauthenticated(version: version)
         } catch {
-            return .unauthenticated(version: version)
+            return .authenticationUnknown(version: version)
         }
     }
 

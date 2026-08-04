@@ -468,6 +468,8 @@
 	<string>Codex est installé, mais non connecté. Exécutez codex login dans Terminal, ou sélectionnez Local entre-temps.</string>
 	<key>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</key>
 	<string>Codex n’est pas connecté. Exécutez codex login dans Terminal, puis réessayez, ou sélectionnez Local.</string>
+	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
+	<string>Codex est installé, mais son état de connexion n’a pas pu être vérifié. Réessayez ou sélectionnez Local pour le moment.</string>
 	<key>Codex is signed in and ready.</key>
 	<string>Codex est connecté et prêt.</string>
 	<key>Correct</key>
@@ -478,6 +480,8 @@
 	<string>Installé et connecté</string>
 	<key>Installed, not signed in. Run codex login in Terminal.</key>
 	<string>Installé, non connecté. Exécutez codex login dans Terminal.</string>
+	<key>Installed, but sign-in status could not be checked.</key>
+	<string>Installé, mais l’état de connexion n’a pas pu être vérifié.</string>
 	<key>Largest Accepted Output Bound</key>
 	<string>Plus grande limite de sortie acceptée</string>
 	<key>Largest Batch Estimate</key>

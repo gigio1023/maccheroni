@@ -447,6 +447,7 @@ struct AppShellTests {
             "Codex CLI",
             "Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio and source artifacts stay on this Mac unchanged.",
             "Codex CLI was not found. Install it and run codex login in Terminal, or select Local meanwhile.",
+            "Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.",
             "Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile.",
             "Codex is not signed in. Run codex login in Terminal, then try again, or select Local.",
             "Codex is signed in and ready.",
@@ -454,6 +455,7 @@ struct AppShellTests {
             "Directory choices apply the next time Maccheroni launches. Existing recordings and run artifacts stay where they are.",
             "Input Mode",
             "Installed and signed in",
+            "Installed, but sign-in status could not be checked.",
             "Installed, not signed in. Run codex login in Terminal.",
             "Largest Accepted Output Bound",
             "Largest Batch Estimate",
@@ -489,7 +491,7 @@ struct AppShellTests {
         )
 
         #expect(catalog.sourceLanguage == "en")
-        #expect(catalog.strings.count == 266)
+        #expect(catalog.strings.count == 268)
         #expect(requiredFinalKeys.isSubset(of: Set(catalog.strings.keys)))
         for (key, entry) in catalog.strings {
             #expect(Set(entry.localizations.keys) == Set(locales), "locale parity: \(key)")

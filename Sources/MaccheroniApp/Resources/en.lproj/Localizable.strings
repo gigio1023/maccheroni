@@ -468,6 +468,8 @@
 	<string>Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile.</string>
 	<key>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</key>
 	<string>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</string>
+	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
+	<string>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</string>
 	<key>Codex is signed in and ready.</key>
 	<string>Codex is signed in and ready.</string>
 	<key>Correct</key>
@@ -478,6 +480,8 @@
 	<string>Installed and signed in</string>
 	<key>Installed, not signed in. Run codex login in Terminal.</key>
 	<string>Installed, not signed in. Run codex login in Terminal.</string>
+	<key>Installed, but sign-in status could not be checked.</key>
+	<string>Installed, but sign-in status could not be checked.</string>
 	<key>Largest Accepted Output Bound</key>
 	<string>Largest Accepted Output Bound</string>
 	<key>Largest Batch Estimate</key>

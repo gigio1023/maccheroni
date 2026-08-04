@@ -719,6 +719,12 @@ import Testing
             executableURL: executable,
             appServerExecutor: MockCodexAppServerExecutor(reportedAccountState: .unsupported)
         ) == .unauthenticated(version: "codex-cli fixture"))
+        #expect(await CodexPostprocessBackend.detectAvailability(
+            executableURL: executable,
+            appServerExecutor: MockCodexAppServerExecutor(
+                accountStateError: .backendFailed("fixture probe failed")
+            )
+        ) == .authenticationUnknown(version: "codex-cli fixture"))
     }
 
     @Test func codexVersionProbeHasABoundedTimeout() throws {
@@ -743,6 +749,7 @@ import Testing
     @Test func appServerOwnsAuthenticationAtRunTime() async throws {
         let recorder = CodexInvocationRecorder()
         let backend = CodexPostprocessBackend(
+            codexExecutableURL: URL(fileURLWithPath: "/tests/codex"),
             availability: .unauthenticated(version: "codex-cli fixture"),
             appServerExecutor: MockCodexAppServerExecutor(
                 recorder: recorder,
@@ -858,9 +865,8 @@ import Testing
               forbiddenStructureFieldsAbsent,
               invocations.count == 2,
               invocations.allSatisfy({
-                  $0.requiredIsolationArgumentsPresent
+                  $0.requiredInvocationContractPresent
                       && $0.standardInputUTF8Bytes > 0
-                      && $0.exitStatus == 0
               })
         else {
             throw ActualCodexEvidenceError.verificationFailed(
@@ -895,22 +901,26 @@ import Testing
     }
 
     @Test func actualCodexAppServerEvidenceProjectionRedactsPromptAndWorkspacePaths() async throws {
+        let root = try freshDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: false)
         let recorder = ActualCodexInvocationRecorder()
         await recorder.record(CodexAppServerInvocation(
             executableURL: URL(fileURLWithPath: "/Users/someone/.local/bin/codex"),
             model: "gpt-5.6-sol",
             prompt: "synthetic prompt must not be persisted",
             outputSchema: Data(#"{"type":"object"}"#.utf8),
-            workspaceURL: URL(fileURLWithPath: "/private/tmp/private")
+            workspaceURL: workspace
         ))
 
         let projection = try #require(await recorder.snapshot().first)
         let encoded = String(decoding: try sortedJSONData(projection), as: UTF8.self)
-        #expect(projection.requiredIsolationArgumentsPresent)
+        #expect(projection.requiredInvocationContractPresent)
         #expect(projection.transport == "app-server-stdio")
         #expect(projection.model == "gpt-5.6-sol")
         #expect(!encoded.contains("synthetic prompt must not be persisted"))
-        #expect(!encoded.contains("/private/tmp/private"))
+        #expect(!encoded.contains(workspace.path))
         #expect(!encoded.contains("/Users/someone"))
         #expect(projection.executableLocationClass == "user-or-custom")
     }
@@ -1019,6 +1029,7 @@ private struct MockCodexAppServerExecutor: CodexAppServerExecuting {
     var recorder: CodexInvocationRecorder?
     var output: Data = Data(#"{"proposals":[]}"#.utf8)
     var reportedAccountState: CodexAppServerAccountState = .chatGPT
+    var accountStateError: PostprocessError?
     var runError: PostprocessError?
 
     func accountState(
@@ -1026,7 +1037,8 @@ private struct MockCodexAppServerExecutor: CodexAppServerExecuting {
         workspaceURL: URL,
         timeoutS: TimeInterval
     ) async throws -> CodexAppServerAccountState {
-        reportedAccountState
+        if let accountStateError { throw accountStateError }
+        return reportedAccountState
     }
 
     func run(_ invocation: CodexAppServerInvocation) async throws -> Data {
@@ -1305,8 +1317,10 @@ private struct ActualCodexInvocationRecord: Codable {
     var model: String
     var standardInputUTF8Bytes: Int
     var standardInputSHA256: String
-    var exitStatus: Int32
-    var requiredIsolationArgumentsPresent: Bool
+    var timeoutSeconds: Int
+    var outputSchemaSupplied: Bool
+    var workspaceWasEmpty: Bool
+    var requiredInvocationContractPresent: Bool
 
     init(invocation: CodexAppServerInvocation) {
         executableName = invocation.executableURL.lastPathComponent
@@ -1316,11 +1330,18 @@ private struct ActualCodexInvocationRecord: Codable {
         let promptData = Data(invocation.prompt.utf8)
         standardInputUTF8Bytes = promptData.count
         standardInputSHA256 = sha256Hex(promptData)
-        exitStatus = 0
-        requiredIsolationArgumentsPresent = invocation.model
+        timeoutSeconds = Int(invocation.timeoutS)
+        outputSchemaSupplied = !invocation.outputSchema.isEmpty
+        workspaceWasEmpty = (try? FileManager.default.contentsOfDirectory(
+            at: invocation.workspaceURL,
+            includingPropertiesForKeys: nil
+        ).isEmpty) == true
+        requiredInvocationContractPresent = invocation.model
             == CodexPostprocessBackend.modelName
             && invocation.workspaceURL.isFileURL
-            && !invocation.outputSchema.isEmpty
+            && outputSchemaSupplied
+            && workspaceWasEmpty
+            && invocation.timeoutS == 600
     }
 
     private static func locationClass(_ url: URL) -> String {

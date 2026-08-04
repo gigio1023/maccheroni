@@ -468,6 +468,8 @@
 	<string>Codex è installato ma non hai effettuato l'accesso. Esegui codex login in Terminale, oppure seleziona Local nel frattempo.</string>
 	<key>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</key>
 	<string>Codex non ha effettuato l'accesso. Esegui codex login in Terminale, poi riprova, oppure seleziona Local.</string>
+	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
+	<string>Codex è installato, ma non è stato possibile verificarne lo stato di accesso. Riprova o seleziona Local nel frattempo.</string>
 	<key>Codex is signed in and ready.</key>
 	<string>Codex ha effettuato l'accesso ed è pronto.</string>
 	<key>Correct</key>
@@ -478,6 +480,8 @@
 	<string>Installato e con accesso effettuato</string>
 	<key>Installed, not signed in. Run codex login in Terminal.</key>
 	<string>Installato, senza accesso. Esegui codex login in Terminale.</string>
+	<key>Installed, but sign-in status could not be checked.</key>
+	<string>Installato, ma non è stato possibile verificare lo stato di accesso.</string>
 	<key>Largest Accepted Output Bound</key>
 	<string>Massimo limite di output accettato</string>
 	<key>Largest Batch Estimate</key>

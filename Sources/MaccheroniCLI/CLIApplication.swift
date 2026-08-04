@@ -3216,6 +3216,7 @@ private func productionPostprocessDoctorChecks(
             "postprocess_model=\(CodexPostprocessBackend.modelName)",
             "postprocess_input_mode=text-only",
             "check.postprocess_installed=\(availability.isInstalled)",
+            "check.postprocess_authentication_known=\(!availability.authenticationCheckFailed)",
             "check.postprocess_authenticated=\(availability.isAuthenticated)",
             "check.postprocess=\(availability.isAuthenticated)",
         ]

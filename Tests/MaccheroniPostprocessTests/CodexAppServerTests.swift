@@ -23,13 +23,20 @@ struct CodexAppServerTests {
 
         #expect(String(decoding: output, as: UTF8.self) == #"{"answer":"ok"}"#)
         let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
-        #expect(transcript.contains("ARGS:app-server --listen stdio://"))
+        #expect(transcript.contains(#"ARGS:app-server -c openai_base_url="" -c chatgpt_base_url="https://chatgpt.com/backend-api/" --listen stdio://"#))
+        #expect(transcript.contains("ENV:unset|unset|unset"))
         #expect(transcript.contains(#""method":"initialize""#))
         #expect(transcript.contains(#""experimentalApi":true"#))
         #expect(transcript.contains(#""method":"initialized""#))
         #expect(transcript.contains(#""method":"account/read""#))
         #expect(transcript.contains(#""method":"config/read""#))
+        #expect(transcript.contains(#""includeLayers":true"#))
+        #expect(transcript.contains(#""method":"configRequirements/read""#))
+        #expect(transcript.contains(#""method":"model/list""#))
         #expect(transcript.contains(#""method":"thread/start""#))
+        #expect(transcript.contains(#""openai_base_url":"""#))
+        #expect(transcript.contains(#""chatgpt_base_url":"https://chatgpt.com/backend-api/""#))
+        #expect(transcript.contains(#""model_reasoning_effort":"high""#))
         #expect(transcript.contains(#""ephemeral":true"#))
         #expect(transcript.contains(#""environments":[]"#))
         #expect(transcript.contains(#""dynamicTools":[]"#))
@@ -41,8 +48,10 @@ struct CodexAppServerTests {
         #expect(transcript.contains(#""fixture-mcp":{"enabled":false}"#))
         #expect(!transcript.contains("persistExtendedHistory"))
         #expect(transcript.contains(#""approvalPolicy":"never""#))
+        #expect(transcript.contains(#""method":"mcpServerStatus/list""#))
         #expect(transcript.contains(#""method":"turn/start""#))
         #expect(transcript.contains(#""outputSchema""#))
+        #expect(transcript.contains(#""effort":"high""#))
         #expect(transcript.contains("bounded private prompt"))
         #expect(transcript.contains(#""decision":"decline""#))
         #expect(!transcript.contains(#""method":"command/exec""#))
@@ -81,6 +90,95 @@ struct CodexAppServerTests {
             workspaceURL: signedOut.workspace,
             timeoutS: 2
         ) == .signedOut)
+    }
+
+    @Test func drainsAnAccountResponseWrittenImmediatelyBeforeProcessExit() async throws {
+        let fixture = try AppServerFixture(
+            accountType: "chatgpt",
+            exitsAfterAccountResponse: true
+        )
+        defer { fixture.remove() }
+
+        #expect(try await FoundationCodexAppServerExecutor().accountState(
+            executableURL: fixture.executable,
+            workspaceURL: fixture.workspace,
+            timeoutS: 2
+        ) == .chatGPT)
+    }
+
+    @Test func rejectsManagedHooksThatTheThreadCannotOverride() async throws {
+        let fixture = try AppServerFixture(
+            accountType: "chatgpt",
+            requirementsJSON: #"{"hooks":{"SessionStart":[{"command":"managed"}]}}"#
+        )
+        defer { fixture.remove() }
+
+        await #expect(throws: PostprocessError.backendFailed(
+            "codex app server protocol error: cannot override managed hooks"
+        )) {
+            _ = try await FoundationCodexAppServerExecutor().run(
+                CodexAppServerInvocation(
+                    executableURL: fixture.executable,
+                    model: "gpt-test",
+                    prompt: "x",
+                    outputSchema: Data(#"{"type":"object"}"#.utf8),
+                    workspaceURL: fixture.workspace,
+                    timeoutS: 2
+                )
+            )
+        }
+        let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
+        #expect(!transcript.contains(#""method":"thread/start""#))
+    }
+
+    @Test func rejectsAManagedHooksOnlyPolicyBeforeStartingAThread() async throws {
+        let fixture = try AppServerFixture(
+            accountType: "chatgpt",
+            requirementsJSON: #"{"allowManagedHooksOnly":true}"#
+        )
+        defer { fixture.remove() }
+
+        await #expect(throws: PostprocessError.backendFailed(
+            "codex app server protocol error: cannot override managed hooks"
+        )) {
+            _ = try await FoundationCodexAppServerExecutor().run(
+                CodexAppServerInvocation(
+                    executableURL: fixture.executable,
+                    model: "gpt-test",
+                    prompt: "x",
+                    outputSchema: Data(#"{"type":"object"}"#.utf8),
+                    workspaceURL: fixture.workspace,
+                    timeoutS: 2
+                )
+            )
+        }
+        let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
+        #expect(!transcript.contains(#""method":"thread/start""#))
+    }
+
+    @Test func rejectsAnMCPServerThatRemainsEnabledAfterThreadStart() async throws {
+        let fixture = try AppServerFixture(
+            accountType: "chatgpt",
+            mcpDataJSON: #"[{"name":"managed-mcp"}]"#
+        )
+        defer { fixture.remove() }
+
+        await #expect(throws: PostprocessError.backendFailed(
+            "codex app server protocol error: mcpServerStatus/list found an active or unexpected server"
+        )) {
+            _ = try await FoundationCodexAppServerExecutor().run(
+                CodexAppServerInvocation(
+                    executableURL: fixture.executable,
+                    model: "gpt-test",
+                    prompt: "x",
+                    outputSchema: Data(#"{"type":"object"}"#.utf8),
+                    workspaceURL: fixture.workspace,
+                    timeoutS: 2
+                )
+            )
+        }
+        let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
+        #expect(!transcript.contains(#""method":"turn/start""#))
     }
 
     @Test func rejectsNonChatGPTAccountBeforeStartingAThread() async throws {
@@ -291,7 +389,13 @@ private struct AppServerFixture {
     let executable: URL
     let log: URL
 
-    init(accountType: String?, completesTurn: Bool = true) throws {
+    init(
+        accountType: String?,
+        completesTurn: Bool = true,
+        exitsAfterAccountResponse: Bool = false,
+        requirementsJSON: String = "null",
+        mcpDataJSON: String = #"[{"name":"fixture-mcp","tools":{},"resources":[],"resourceTemplates":[],"serverInfo":null,"authStatus":"unsupported"}]"#
+    ) throws {
         root = try freshDirectory(prefix: "maccheroni-app-server-fixture-")
         workspace = root.appendingPathComponent("workspace", isDirectory: true)
         executable = root.appendingPathComponent("codex")
@@ -299,6 +403,7 @@ private struct AppServerFixture {
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: false)
         try Data().write(to: log, options: .withoutOverwriting)
         let accountJSON = accountType.map { #"{"type":"\#($0)"}"# } ?? "null"
+        let accountExit = exitsAfterAccountResponse ? "exit 0" : ""
         let turnCompletion = completesTurn ? """
                   printf '%s\\n' '{"id":90,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-1","turnId":"turn-1"}}'
                   IFS= read -r approval
@@ -310,6 +415,7 @@ private struct AppServerFixture {
             """
             #!/bin/sh
             printf 'ARGS:%s\\n' "$*" >> '\(log.path)'
+            printf 'ENV:%s|%s|%s\\n' "${OPENAI_API_KEY-unset}" "${CODEX_API_KEY-unset}" "${CODEX_ACCESS_TOKEN-unset}" >> '\(log.path)'
             while IFS= read -r line; do
               printf '%s\\n' "$line" >> '\(log.path)'
               case "$line" in
@@ -318,19 +424,32 @@ private struct AppServerFixture {
                   ;;
                 *'"method":"account/read"'*)
                   printf '%s\\n' '{"id":2,"result":{"account":\(accountJSON),"requiresOpenaiAuth":true}}'
+                  \(accountExit)
                   ;;
                 *'"method":"config/read"'*)
-                  printf '%s\\n' '{"id":3,"result":{"config":{"mcp_servers":{"fixture-mcp":{"command":"fixture"}}}}}'
+                  printf '%s\\n' '{"id":3,"result":{"config":{"mcp_servers":{"fixture-mcp":{"command":"fixture"}}},"layers":[{"name":{"type":"user"}},{"name":{"type":"sessionFlags"}}]}}'
+                  ;;
+                *'"method":"configRequirements/read"'*)
+                  printf '%s\\n' '{"id":4,"result":{"requirements":\(requirementsJSON)}}'
+                  ;;
+                *'"method":"model/list"'*)
+                  printf '%s\\n' '{"id":5,"result":{"data":[{"id":"gpt-test","model":"gpt-test","defaultReasoningEffort":"high"}],"nextCursor":null}}'
                   ;;
                 *'"method":"thread/start"'*)
-                  printf '%s\\n' '{"id":4,"result":{"thread":{"id":"thread-1"}}}'
+                  printf '%s\\n' '{"id":6,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-1"}}'
+                  IFS= read -r collision_response
+                  printf '%s\\n' "$collision_response" >> '\(log.path)'
+                  printf '%s\\n' '{"id":6,"result":{"thread":{"id":"thread-1"}}}'
+                  ;;
+                *'"method":"mcpServerStatus/list"'*)
+                  printf '%s\\n' '{"id":7,"result":{"data":\(mcpDataJSON),"nextCursor":null}}'
                   ;;
                 *'"method":"turn/start"'*)
-                  printf '%s\\n' '{"id":5,"result":{"turn":{"id":"turn-1","status":"inProgress","items":[]}}}'
+                  printf '%s\\n' '{"id":8,"result":{"turn":{"id":"turn-1","status":"inProgress","items":[]}}}'
             \(turnCompletion)
                   ;;
                 *'"method":"turn/interrupt"'*)
-                  printf '%s\\n' '{"id":6,"result":{}}'
+                  printf '%s\\n' '{"id":9,"result":{}}'
                   ;;
               esac
             done

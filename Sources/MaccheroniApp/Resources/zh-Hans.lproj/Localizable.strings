@@ -468,6 +468,8 @@
 	<string>Codex 已安装但尚未登录。请在终端中运行 codex login，或暂时选择 Local。</string>
 	<key>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</key>
 	<string>尚未登录 Codex。请在终端中运行 codex login，然后重试，或选择 Local。</string>
+	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
+	<string>Codex 已安装，但无法检查登录状态。请重试或暂时选择 Local。</string>
 	<key>Codex is signed in and ready.</key>
 	<string>Codex 已登录并可使用。</string>
 	<key>Correct</key>
@@ -478,6 +480,8 @@
 	<string>已安装且已登录</string>
 	<key>Installed, not signed in. Run codex login in Terminal.</key>
 	<string>已安装但尚未登录。请在终端中运行 codex login。</string>
+	<key>Installed, but sign-in status could not be checked.</key>
+	<string>已安装，但无法检查登录状态。</string>
 	<key>Largest Accepted Output Bound</key>
 	<string>最大已接受输出上限</string>
 	<key>Largest Batch Estimate</key>

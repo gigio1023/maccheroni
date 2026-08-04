@@ -468,6 +468,8 @@
 	<string>Codex está instalado, pero no has iniciado sesión. Ejecuta codex login en Terminal, o selecciona Local mientras tanto.</string>
 	<key>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</key>
 	<string>No has iniciado sesión en Codex. Ejecuta codex login en Terminal y vuelve a intentarlo, o selecciona Local.</string>
+	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
+	<string>Codex está instalado, pero no se pudo comprobar el estado de inicio de sesión. Inténtalo de nuevo o selecciona Local mientras tanto.</string>
 	<key>Codex is signed in and ready.</key>
 	<string>Codex ha iniciado sesión y está listo.</string>
 	<key>Correct</key>
@@ -478,6 +480,8 @@
 	<string>Instalado y con sesión iniciada</string>
 	<key>Installed, not signed in. Run codex login in Terminal.</key>
 	<string>Instalado, sin sesión iniciada. Ejecuta codex login en Terminal.</string>
+	<key>Installed, but sign-in status could not be checked.</key>
+	<string>Instalado, pero no se pudo comprobar el estado de inicio de sesión.</string>
 	<key>Largest Accepted Output Bound</key>
 	<string>Mayor límite de salida aceptado</string>
 	<key>Largest Batch Estimate</key>

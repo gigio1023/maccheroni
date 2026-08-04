@@ -468,6 +468,8 @@
 	<string>Codex는 설치되어 있지만 로그인하지 않았습니다. 터미널에서 codex login을 실행하거나 그동안 Local을 선택하세요.</string>
 	<key>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</key>
 	<string>Codex에 로그인하지 않았습니다. 터미널에서 codex login을 실행한 다음 다시 시도하거나 Local을 선택하세요.</string>
+	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
+	<string>Codex가 설치되어 있지만 로그인 상태를 확인하지 못했습니다. 다시 시도하거나 그동안 Local을 선택하세요.</string>
 	<key>Codex is signed in and ready.</key>
 	<string>Codex에 로그인되어 사용할 수 있습니다.</string>
 	<key>Correct</key>
@@ -478,6 +480,8 @@
 	<string>설치됨, 로그인됨</string>
 	<key>Installed, not signed in. Run codex login in Terminal.</key>
 	<string>설치되었지만 로그인하지 않았습니다. 터미널에서 codex login을 실행하세요.</string>
+	<key>Installed, but sign-in status could not be checked.</key>
+	<string>설치되어 있지만 로그인 상태를 확인하지 못했습니다.</string>
 	<key>Largest Accepted Output Bound</key>
 	<string>최대 허용 출력 한도</string>
 	<key>Largest Batch Estimate</key>

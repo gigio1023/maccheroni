@@ -179,6 +179,8 @@ private struct CodexReadinessNotice: View {
                         Text(verbatim: availability.version)
                             .foregroundStyle(.secondary)
                     }
+                } else if availability.authenticationCheckFailed {
+                    Text(appLocalized("Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile."))
                 } else if availability.isInstalled {
                     Text(appLocalized("Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile."))
                 } else {

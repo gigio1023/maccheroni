@@ -468,6 +468,8 @@
 	<string>Codex установлен, но вход не выполнен. Выполните codex login в Терминале или пока выберите Local.</string>
 	<key>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</key>
 	<string>В Codex не выполнен вход. Выполните codex login в Терминале, затем повторите попытку или выберите Local.</string>
+	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
+	<string>Codex установлен, но не удалось проверить состояние входа. Повторите попытку или пока выберите Local.</string>
 	<key>Codex is signed in and ready.</key>
 	<string>В Codex выполнен вход, всё готово.</string>
 	<key>Correct</key>
@@ -478,6 +480,8 @@
 	<string>Установлен, вход выполнен</string>
 	<key>Installed, not signed in. Run codex login in Terminal.</key>
 	<string>Установлен, вход не выполнен. Выполните codex login в Терминале.</string>
+	<key>Installed, but sign-in status could not be checked.</key>
+	<string>Установлен, но не удалось проверить состояние входа.</string>
 	<key>Largest Accepted Output Bound</key>
 	<string>Наибольшая допустимая граница вывода</string>
 	<key>Largest Batch Estimate</key>

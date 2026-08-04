@@ -468,6 +468,8 @@
 	<string>Codex はインストールされていますが、サインインしていません。ターミナルで codex login を実行するか、当面は Local を選択してください。</string>
 	<key>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</key>
 	<string>Codex にサインインしていません。ターミナルで codex login を実行してからもう一度試すか、Local を選択してください。</string>
+	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
+	<string>Codex はインストールされていますが、サインイン状態を確認できませんでした。再試行するか、当面は Local を選択してください。</string>
 	<key>Codex is signed in and ready.</key>
 	<string>Codex はサインイン済みで使用できます。</string>
 	<key>Correct</key>
@@ -478,6 +480,8 @@
 	<string>インストール済み、サインイン済み</string>
 	<key>Installed, not signed in. Run codex login in Terminal.</key>
 	<string>インストール済み、未サインインです。ターミナルで codex login を実行してください。</string>
+	<key>Installed, but sign-in status could not be checked.</key>
+	<string>インストール済みですが、サインイン状態を確認できませんでした。</string>
 	<key>Largest Accepted Output Bound</key>
 	<string>最大許容出力上限</string>
 	<key>Largest Batch Estimate</key>

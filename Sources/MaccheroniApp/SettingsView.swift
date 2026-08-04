@@ -358,6 +358,8 @@ private struct CodexStatusLabel: View {
                     .accessibilityHidden(true)
                 if availability.isAuthenticated {
                     Text(appLocalized("Installed and signed in"))
+                } else if availability.authenticationCheckFailed {
+                    Text(appLocalized("Installed, but sign-in status could not be checked."))
                 } else if availability.isInstalled {
                     Text(appLocalized("Installed, not signed in. Run codex login in Terminal."))
                 } else {

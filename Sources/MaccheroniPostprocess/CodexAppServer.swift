@@ -112,6 +112,12 @@ public struct FoundationCodexAppServerExecutor: CodexAppServerExecuting {
 }
 
 private final class CodexAppServerSession: @unchecked Sendable {
+    private static let officialChatGPTBaseURL = "https://chatgpt.com/backend-api/"
+    private static let strippedCredentialEnvironmentKeys = [
+        "CODEX_ACCESS_TOKEN",
+        "CODEX_API_KEY",
+        "OPENAI_API_KEY",
+    ]
     private let process: Process
     private let input: FileHandle
     private let output: FileHandle
@@ -168,12 +174,21 @@ private final class CodexAppServerSession: @unchecked Sendable {
         self.channel = CodexJSONLChannel(handle: output)
         self.process = Process()
         process.executableURL = executableURL
-        process.arguments = ["app-server", "--listen", "stdio://"]
+        process.arguments = [
+            "app-server",
+            "-c", #"openai_base_url="""#,
+            "-c", #"chatgpt_base_url="https://chatgpt.com/backend-api/""#,
+            "--listen", "stdio://",
+        ]
+        var environment = ProcessInfo.processInfo.environment
+        for key in Self.strippedCredentialEnvironmentKeys {
+            environment.removeValue(forKey: key)
+        }
+        process.environment = environment
         process.currentDirectoryURL = workspaceURL
         process.standardInput = standardInput
         process.standardOutput = standardOutput
         process.standardError = errorOutput
-        process.terminationHandler = { [channel] _ in channel.finish() }
         do {
             try process.run()
         } catch {
@@ -235,6 +250,10 @@ private final class CodexAppServerSession: @unchecked Sendable {
         let inheritedMCPServerNames = try readInheritedMCPServerNames(
             workspaceURL: invocation.workspaceURL
         )
+        try assertNoManagedToolRequirements()
+        let defaultReasoningEffort = try readDefaultReasoningEffort(
+            model: invocation.model
+        )
 
         let threadResult = try request(
             method: "thread/start",
@@ -248,7 +267,8 @@ private final class CodexAppServerSession: @unchecked Sendable {
                 "baseInstructions": "",
                 "developerInstructions": Self.developerInstructions,
                 "config": Self.boundedThreadConfig(
-                    inheritedMCPServerNames: inheritedMCPServerNames
+                    inheritedMCPServerNames: inheritedMCPServerNames,
+                    reasoningEffort: defaultReasoningEffort
                 ),
                 "environments": [],
                 "dynamicTools": [],
@@ -262,6 +282,10 @@ private final class CodexAppServerSession: @unchecked Sendable {
               !threadID.isEmpty else {
             throw protocolFailure("thread/start returned no thread id")
         }
+        try attestNoMCPServers(
+            threadID: threadID,
+            expectedDisabledNames: Set(inheritedMCPServerNames)
+        )
 
         var collector = CodexTurnCollector(threadID: threadID)
         let turnResult = try request(
@@ -271,7 +295,7 @@ private final class CodexAppServerSession: @unchecked Sendable {
                 "input": [["type": "text", "text": invocation.prompt]],
                 "approvalPolicy": "never",
                 "model": invocation.model,
-                "effort": "low",
+                "effort": defaultReasoningEffort,
                 "outputSchema": schemaValue,
             ],
             onNotification: { collector.consume($0) }
@@ -317,17 +341,156 @@ private final class CodexAppServerSession: @unchecked Sendable {
     private func readInheritedMCPServerNames(workspaceURL: URL) throws -> [String] {
         let result = try request(
             method: "config/read",
-            params: ["cwd": workspaceURL.path, "includeLayers": false]
+            params: ["cwd": workspaceURL.path, "includeLayers": true]
         )
         guard let object = result as? [String: Any],
-              let config = object["config"] as? [String: Any] else {
+              let config = object["config"] as? [String: Any],
+              let layers = object["layers"] as? [[String: Any]] else {
             throw protocolFailure("config/read returned no effective config")
+        }
+        for layer in layers {
+            guard let name = layer["name"] as? [String: Any],
+                  let type = name["type"] as? String else {
+                throw protocolFailure("config/read returned invalid effective config layers")
+            }
+            if Self.unoverridableConfigLayerTypes.contains(type) {
+                throw protocolFailure("cannot override managed config layer \(type)")
+            }
+            guard Self.overridableConfigLayerTypes.contains(type) else {
+                throw protocolFailure("unrecognized config layer \(type)")
+            }
         }
         guard let servers = config["mcp_servers"] else { return [] }
         guard let serverObject = servers as? [String: Any] else {
             throw protocolFailure("config/read returned invalid mcp_servers")
         }
         return serverObject.keys.sorted()
+    }
+
+    private func assertNoManagedToolRequirements() throws {
+        let result = try request(method: "configRequirements/read", params: nil)
+        guard let object = result as? [String: Any],
+              object.keys.contains("requirements") else {
+            throw protocolFailure("configRequirements/read returned an invalid response")
+        }
+        guard let requirements = object["requirements"], !(requirements is NSNull) else {
+            return
+        }
+        guard let requirementObject = requirements as? [String: Any] else {
+            throw protocolFailure("configRequirements/read returned invalid requirements")
+        }
+        for key in ["hooks", "managedHooks", "managed_hooks"] {
+            guard let hooks = requirementObject[key], !(hooks is NSNull) else { continue }
+            guard let hookObject = hooks as? [String: Any] else {
+                throw protocolFailure("configRequirements/read returned invalid managed hooks")
+            }
+            if Self.hasNonEmptyJSONValue(hookObject) {
+                throw protocolFailure("cannot override managed hooks")
+            }
+        }
+        if requirementObject["allowManagedHooksOnly"] as? Bool == true {
+            throw protocolFailure("cannot override managed hooks")
+        }
+        if requirementObject["allowRemoteControl"] as? Bool == true {
+            throw protocolFailure("cannot override managed remote control")
+        }
+        for key in ["computerUse", "browserUse", "network"] {
+            guard let policy = requirementObject[key], !(policy is NSNull) else { continue }
+            if Self.hasNonEmptyJSONValue(policy) {
+                throw protocolFailure("cannot override managed \(key) policy")
+            }
+        }
+        for key in ["featureRequirements", "feature_requirements"] {
+            guard let features = requirementObject[key], !(features is NSNull) else { continue }
+            guard let featureObject = features as? [String: Any] else {
+                throw protocolFailure("configRequirements/read returned invalid feature requirements")
+            }
+            for (feature, rawValue) in featureObject {
+                guard let enabled = rawValue as? Bool else {
+                    throw protocolFailure("configRequirements/read returned invalid feature requirements")
+                }
+                if enabled, Self.restrictedFeatures.contains(feature) {
+                    throw protocolFailure("cannot override required feature \(feature)")
+                }
+            }
+        }
+    }
+
+    private func readDefaultReasoningEffort(model: String) throws -> String {
+        var cursor: String?
+        var seenCursors: Set<String> = []
+        while true {
+            var params: [String: Any] = ["limit": 100, "includeHidden": true]
+            if let cursor { params["cursor"] = cursor }
+            let result = try request(method: "model/list", params: params)
+            guard let object = result as? [String: Any],
+                  let models = object["data"] as? [[String: Any]] else {
+                throw protocolFailure("model/list returned an invalid response")
+            }
+            if let match = models.first(where: {
+                $0["model"] as? String == model || $0["id"] as? String == model
+            }) {
+                guard let effort = match["defaultReasoningEffort"] as? String,
+                      !effort.isEmpty else {
+                    throw protocolFailure("model/list returned no default reasoning effort")
+                }
+                return effort
+            }
+            guard let next = object["nextCursor"], !(next is NSNull) else {
+                throw protocolFailure("model/list did not contain the configured model")
+            }
+            guard let nextCursor = next as? String,
+                  !nextCursor.isEmpty,
+                  seenCursors.insert(nextCursor).inserted else {
+                throw protocolFailure("model/list returned an invalid cursor")
+            }
+            cursor = nextCursor
+        }
+    }
+
+    private func attestNoMCPServers(
+        threadID: String,
+        expectedDisabledNames: Set<String>
+    ) throws {
+        var cursor: String?
+        var seenCursors: Set<String> = []
+        while true {
+            var params: [String: Any] = [
+                "threadId": threadID,
+                "limit": 100,
+                "detail": "toolsAndAuthOnly",
+            ]
+            if let cursor { params["cursor"] = cursor }
+            let result = try request(method: "mcpServerStatus/list", params: params)
+            guard let object = result as? [String: Any],
+                  let data = object["data"] as? [Any] else {
+                throw protocolFailure("mcpServerStatus/list returned an invalid attestation")
+            }
+            for rawEntry in data {
+                guard let entry = rawEntry as? [String: Any],
+                      let name = entry["name"] as? String,
+                      expectedDisabledNames.contains(name),
+                      entry.keys.contains("tools"),
+                      entry.keys.contains("resources"),
+                      entry.keys.contains("resourceTemplates"),
+                      entry.keys.contains("serverInfo"),
+                      Self.isEmptyOrMissing(entry["tools"]),
+                      Self.isEmptyOrMissing(entry["resources"]),
+                      Self.isEmptyOrMissing(entry["resourceTemplates"]),
+                      Self.isEmptyOrMissing(entry["serverInfo"]) else {
+                    throw protocolFailure(
+                        "mcpServerStatus/list found an active or unexpected server"
+                    )
+                }
+            }
+            guard let next = object["nextCursor"], !(next is NSNull) else { return }
+            guard let nextCursor = next as? String,
+                  !nextCursor.isEmpty,
+                  seenCursors.insert(nextCursor).inserted else {
+                throw protocolFailure("mcpServerStatus/list returned an invalid cursor")
+            }
+            cursor = nextCursor
+        }
     }
 
     private func requestInterrupt(threadID: String, turnID: String) throws {
@@ -344,7 +507,7 @@ private final class CodexAppServerSession: @unchecked Sendable {
                 deadline: interruptDeadline,
                 honorCancellation: false
             )
-            if rpcID(message["id"]) == requestID { return }
+            if isResponse(message, matching: requestID) { return }
             try route(message, onNotification: nil)
         }
     }
@@ -367,15 +530,17 @@ private final class CodexAppServerSession: @unchecked Sendable {
 
     private func request(
         method: String,
-        params: [String: Any],
+        params: [String: Any]?,
         onNotification: (([String: Any]) -> Void)? = nil
     ) throws -> Any {
         let requestID = nextRequestID
         nextRequestID += 1
-        try write(["id": requestID, "method": method, "params": params])
+        var request: [String: Any] = ["id": requestID, "method": method]
+        if let params { request["params"] = params }
+        try write(request)
         while true {
             let message = try nextMessage()
-            if rpcID(message["id"]) == requestID {
+            if isResponse(message, matching: requestID) {
                 if let error = message["error"] as? [String: Any] {
                     _ = error
                     throw protocolFailure("\(method) failed")
@@ -489,12 +654,17 @@ private final class CodexAppServerSession: @unchecked Sendable {
         return (value as? NSNumber)?.intValue
     }
 
+    private func isResponse(_ message: [String: Any], matching requestID: Int) -> Bool {
+        message["method"] == nil && rpcID(message["id"]) == requestID
+    }
+
     private static let developerInstructions = """
     You are Maccheroni's bounded text post-processing worker. Transform only the supplied transcript text and return only the JSON required by the output schema. Do not call tools, inspect files, execute commands, edit anything, ask questions, or include secrets.
     """
 
     private static func boundedThreadConfig(
-        inheritedMCPServerNames: [String]
+        inheritedMCPServerNames: [String],
+        reasoningEffort: String
     ) -> [String: Any] {
         let disabledMCPServers = Dictionary(
             uniqueKeysWithValues: inheritedMCPServerNames.map {
@@ -502,6 +672,9 @@ private final class CodexAppServerSession: @unchecked Sendable {
             }
         )
         return [
+            "openai_base_url": "",
+            "chatgpt_base_url": officialChatGPTBaseURL,
+            "model_reasoning_effort": reasoningEffort,
             "agents.enabled": false,
             "features.multi_agent": false,
             "features.multi_agent_v2": false,
@@ -512,6 +685,16 @@ private final class CodexAppServerSession: @unchecked Sendable {
             "web_search": "disabled",
             "features.code_mode": false,
             "features.code_mode_only": false,
+            "features.code_mode_buffered_exec": false,
+            "features.code_mode_host": false,
+            "features.js_repl": false,
+            "features.js_repl_tools_only": false,
+            "features.network_proxy": false,
+            "features.auth_elicitation": false,
+            "features.mcp_2026_07_28": false,
+            "features.remote_control": false,
+            "features.remote_plugin": false,
+            "features.tool_suggest": false,
             "features.goals": false,
             "features.hooks": false,
             "features.memories": false,
@@ -541,6 +724,66 @@ private final class CodexAppServerSession: @unchecked Sendable {
             ],
             "mcp_servers": disabledMCPServers,
         ]
+    }
+
+    private static let overridableConfigLayerTypes: Set<String> = [
+        "mdm",
+        "system",
+        "enterpriseManaged",
+        "user",
+        "project",
+        "sessionFlags",
+    ]
+
+    private static let unoverridableConfigLayerTypes: Set<String> = [
+        "legacyManagedConfigTomlFromFile",
+        "legacyManagedConfigTomlFromMdm",
+    ]
+
+    private static let restrictedFeatures: Set<String> = [
+        "apps",
+        "auth_elicitation",
+        "code_mode",
+        "code_mode_buffered_exec",
+        "code_mode_host",
+        "code_mode_only",
+        "current_time_reminder",
+        "deferred_executor",
+        "enable_fanout",
+        "goals",
+        "hooks",
+        "image_generation",
+        "js_repl",
+        "js_repl_tools_only",
+        "mcp_2026_07_28",
+        "memories",
+        "multi_agent",
+        "multi_agent_v2",
+        "plugins",
+        "network_proxy",
+        "remote_control",
+        "remote_plugin",
+        "standalone_web_search",
+        "token_budget",
+        "tool_suggest",
+    ]
+
+    private static func hasNonEmptyJSONValue(_ value: Any) -> Bool {
+        if value is NSNull { return false }
+        if let bool = value as? Bool { return bool }
+        if let string = value as? String { return !string.isEmpty }
+        if let array = value as? [Any] { return !array.isEmpty }
+        if let object = value as? [String: Any] {
+            return object.values.contains(where: hasNonEmptyJSONValue)
+        }
+        return true
+    }
+
+    private static func isEmptyOrMissing(_ value: Any?) -> Bool {
+        if value == nil || value is NSNull { return true }
+        if let array = value as? [Any] { return array.isEmpty }
+        if let object = value as? [String: Any] { return object.isEmpty }
+        return false
     }
 }
 
