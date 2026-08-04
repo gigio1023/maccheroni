@@ -569,6 +569,11 @@ public struct CLIDependencies: Sendable {
     )
 }
 
+struct CLIDoctorReport: Equatable, Sendable {
+    var diagnostics: String
+    var isReady: Bool
+}
+
 public struct CLIApplication: Sendable {
     public var dependencies: CLIDependencies
     public var now: @Sendable () -> Date
@@ -598,6 +603,32 @@ public struct CLIApplication: Sendable {
         case let .doctor(profile, profiles):
             return try await doctor(profileName: profile, profilesURL: profiles)
         }
+    }
+
+    func executeRun(
+        audioPath: String,
+        profileName: String,
+        profilesPath: String?,
+        outputRootPath: String?,
+        glossaryPath: String?
+    ) async throws -> String {
+        try await run(
+            audio: URL(fileURLWithPath: audioPath),
+            profileName: profileName,
+            profilesURL: profilesPath.map(URL.init(fileURLWithPath:)),
+            outputRoot: outputRootPath.map(URL.init(fileURLWithPath:)),
+            glossaryURL: glossaryPath.map(URL.init(fileURLWithPath:))
+        )
+    }
+
+    func inspectDoctor(
+        profileName: String?,
+        profilesPath: String?
+    ) async throws -> CLIDoctorReport {
+        try await doctorReport(
+            profileName: profileName,
+            profilesURL: profilesPath.map(URL.init(fileURLWithPath:))
+        )
     }
 
     private func run(
@@ -1774,6 +1805,20 @@ public struct CLIApplication: Sendable {
     }
 
     private func doctor(profileName: String?, profilesURL: URL?) async throws -> String {
+        let report = try await doctorReport(
+            profileName: profileName,
+            profilesURL: profilesURL
+        )
+        guard report.isReady else {
+            throw CLIError.run(report.diagnostics)
+        }
+        return report.diagnostics
+    }
+
+    private func doctorReport(
+        profileName: String?,
+        profilesURL: URL?
+    ) async throws -> CLIDoctorReport {
         let profile = try resolveProfile(
             name: profileName ?? "ko-meeting",
             profilesURL: profilesURL
@@ -1809,10 +1854,10 @@ public struct CLIApplication: Sendable {
         let failed = lines.contains {
             $0.hasPrefix("check.") && $0.hasSuffix("=false")
         }
-        if failed {
-            throw CLIError.run(lines.joined(separator: "\n"))
-        }
-        return lines.joined(separator: "\n")
+        return CLIDoctorReport(
+            diagnostics: lines.joined(separator: "\n"),
+            isReady: !failed
+        )
     }
 
     private func resolveProfile(name: String, profilesURL: URL?) throws -> ResolvedProfile {

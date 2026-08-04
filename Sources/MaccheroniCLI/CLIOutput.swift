@@ -42,7 +42,7 @@ enum CLIOutput {
             name: "doctor",
             summary: "Inspect local profile and dependency readiness.",
             sideEffect: "None; performs read-only local checks.",
-            output: "key=value diagnostics or a JSON values envelope on stdout.",
+            output: "key=value diagnostics or a JSON readiness envelope on stdout.",
             supportsJSON: true
         ),
         CommandCapability(
@@ -62,9 +62,13 @@ enum CLIOutput {
         ))
     }
 
-    static func doctorJSON(diagnostics: String) throws -> String {
+    static func doctorJSON(
+        diagnostics: String,
+        ready: Bool = true
+    ) throws -> String {
         try encode(DoctorEnvelope(
             command: "doctor",
+            ready: ready,
             schemaVersion: schemaVersion,
             values: try doctorValues(from: diagnostics)
         ))
@@ -113,7 +117,7 @@ enum CLIOutput {
             guard values[key] == nil else {
                 throw CLIOutputError.duplicateDoctorKey(key)
             }
-            values[key] = value
+            values[key] = privacyBoundDoctorValue(value)
         }
         return values
     }
@@ -141,6 +145,28 @@ enum CLIOutput {
         } catch {
             throw CLIOutputError.encoding(error.localizedDescription)
         }
+    }
+
+    private static func privacyBoundDoctorValue(_ value: String) -> String {
+        var output = ""
+        var token = ""
+        for character in value {
+            if character.isWhitespace {
+                output += redactedPathToken(token)
+                output.append(character)
+                token = ""
+            } else {
+                token.append(character)
+            }
+        }
+        return output + redactedPathToken(token)
+    }
+
+    private static func redactedPathToken(_ token: String) -> String {
+        if token.hasPrefix("/") || token.hasPrefix("file:///") {
+            return "<redacted-path>"
+        }
+        return token
     }
 }
 
@@ -172,11 +198,12 @@ private struct RunEnvelope: Codable {
 
 private struct DoctorEnvelope: Codable {
     var command: String
+    var ready: Bool
     var schemaVersion: String
     var values: [String: String]
 
     enum CodingKeys: String, CodingKey {
-        case command, values
+        case command, ready, values
         case schemaVersion = "schema_version"
     }
 }

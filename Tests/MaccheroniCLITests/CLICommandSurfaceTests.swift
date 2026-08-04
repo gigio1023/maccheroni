@@ -57,7 +57,7 @@ struct CLICommandSurfaceTests {
     }
 
     @Test
-    func legacyRunAndDoctorInvocationsNormalizeToExistingArguments() throws {
+    func legacyAndLeadingDashValuesParseWithoutLoss() throws {
         let parsedRun = try #require(
             MaccheroniCommand.parseAsRoot([
                 "run", "recording.wav",
@@ -73,19 +73,6 @@ struct CLICommandSurfaceTests {
         #expect(parsedRun.outputRoot == "runs")
         #expect(parsedRun.glossary == "terms.txt")
         #expect(!parsedRun.json)
-        #expect(CLICommandSurface.runArguments(
-            audio: parsedRun.audio,
-            profile: parsedRun.profile,
-            profiles: parsedRun.profiles,
-            outputRoot: parsedRun.outputRoot,
-            glossary: parsedRun.glossary
-        ) == [
-            "run", "recording.wav",
-            "--profile", "it-dialogue",
-            "--profiles", "profiles.json",
-            "--output-root", "runs",
-            "--glossary", "terms.txt",
-        ])
 
         let parsedDoctor = try #require(
             MaccheroniCommand.parseAsRoot([
@@ -96,13 +83,20 @@ struct CLICommandSurfaceTests {
         #expect(parsedDoctor.profile == "ko-meeting")
         #expect(parsedDoctor.profiles == "profiles.json")
         #expect(!parsedDoctor.json)
-        #expect(CLICommandSurface.doctorArguments(
-            profile: parsedDoctor.profile,
-            profiles: parsedDoctor.profiles
-        ) == [
-            "doctor", "--profile", "ko-meeting",
-            "--profiles", "profiles.json",
-        ])
+
+        let leadingProfile = try #require(
+            MaccheroniCommand.parseAsRoot([
+                "run", "recording.wav", "--profile=--profile-name",
+            ]) as? RunCommand
+        )
+        #expect(leadingProfile.profile == "--profile-name")
+
+        let leadingAudio = try #require(
+            MaccheroniCommand.parseAsRoot([
+                "run", "--profile", "it-dialogue", "--", "--recording.wav",
+            ]) as? RunCommand
+        )
+        #expect(leadingAudio.audio == "--recording.wav")
     }
 
     @Test
@@ -142,11 +136,23 @@ struct CLICommandSurfaceTests {
         #expect(runObject["schema_version"] as? String == "1.0.0")
 
         let doctorObject = try jsonObject(doctor)
-        #expect(Set(doctorObject.keys) == ["command", "schema_version", "values"])
+        #expect(Set(doctorObject.keys) == [
+            "command", "ready", "schema_version", "values",
+        ])
+        #expect(doctorObject["ready"] as? Bool == true)
         #expect(doctorObject["values"] as? [String: String] == [
             "alpha": "one=two",
             "zeta": "last",
         ])
+
+        let privateDoctor = try CLIOutput.doctorJSON(
+            diagnostics: "asr_error=missing /Users/private/model.bin"
+        )
+        let privateDoctorObject = try jsonObject(privateDoctor)
+        let privateValues = try #require(
+            privateDoctorObject["values"] as? [String: String]
+        )
+        #expect(privateValues["asr_error"] == "missing <redacted-path>")
 
         let capabilitiesObject = try jsonObject(capabilities)
         #expect(Set(capabilitiesObject.keys) == [
@@ -194,6 +200,45 @@ struct CLICommandSurfaceTests {
             guard case .malformedDoctorLine("") = error else { return false }
             return true
         }
+    }
+
+    @Test
+    func doctorFailureIsMachineReadableAndProductErrorsStayUnprefixed() throws {
+        let fixtureRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MaccheroniDoctorFailure-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: fixtureRoot,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: fixtureRoot) }
+
+        let failedDoctor = try invoke(
+            ["doctor", "--json"],
+            environment: ["MACCHERONI_BENCHMARK_CACHE": fixtureRoot.path]
+        )
+        #expect(failedDoctor.status == 1)
+        #expect(failedDoctor.stderr.isEmpty)
+        #expect(failedDoctor.stdout.filter { $0 == "\n" }.count == 1)
+        #expect(!failedDoctor.stdout.contains(fixtureRoot.path))
+        #expect(failedDoctor.stdout.contains("<redacted-path>"))
+        let failedObject = try jsonObject(failedDoctor.stdout)
+        #expect(failedObject["command"] as? String == "doctor")
+        #expect(failedObject["ready"] as? Bool == false)
+        let failedValues = try #require(
+            failedObject["values"] as? [String: String]
+        )
+        #expect(failedValues.values.contains("false"))
+
+        let missingRegistry = fixtureRoot.appendingPathComponent("missing.json")
+        let productFailure = try invoke([
+            "doctor", "--profiles", missingRegistry.path,
+        ])
+        #expect(productFailure.status == 1)
+        #expect(productFailure.stdout.isEmpty)
+        #expect(!productFailure.stderr.hasPrefix("Error: "))
+        #expect(productFailure.stderr == (
+            "profile registry is unreadable: \(missingRegistry.path)\n"
+        ))
     }
 
     @Test
@@ -247,6 +292,15 @@ private enum Fixture {
 
     static let commandHelp: [(name: String, fragments: [String])] = [
         (
+            "help",
+            [
+                "Show root or command-specific help.",
+                "Prints help only.",
+                "No audio or transcript data is read or emitted.",
+                "maccheroni help run",
+            ]
+        ),
+        (
             "run",
             [
                 "Create a new local transcription run from an audio file.",
@@ -285,7 +339,8 @@ private enum Fixture {
         "{\"command\":\"run\",\"run_path\":\"/tmp/maccheroni-runs/fixture\","
         + "\"schema_version\":\"1.0.0\"}"
     static let doctorJSON =
-        "{\"command\":\"doctor\",\"schema_version\":\"1.0.0\","
+        "{\"command\":\"doctor\",\"ready\":true,"
+        + "\"schema_version\":\"1.0.0\","
         + "\"values\":{\"alpha\":\"one=two\",\"zeta\":\"last\"}}"
     static let capabilitiesJSON =
         "{\"command\":\"capabilities\",\"commands\":["
@@ -295,7 +350,7 @@ private enum Fixture {
         + "{\"name\":\"run\",\"output\":\"Run directory path or a JSON run_path envelope on stdout.\","
         + "\"side_effect\":\"Creates a new run directory and may download local model assets.\","
         + "\"summary\":\"Create a local transcription run from audio.\",\"supports_json\":true},"
-        + "{\"name\":\"doctor\",\"output\":\"key=value diagnostics or a JSON values envelope on stdout.\","
+        + "{\"name\":\"doctor\",\"output\":\"key=value diagnostics or a JSON readiness envelope on stdout.\","
         + "\"side_effect\":\"None; performs read-only local checks.\","
         + "\"summary\":\"Inspect local profile and dependency readiness.\",\"supports_json\":true},"
         + "{\"name\":\"capabilities\",\"output\":\"Command inventory as text or JSON on stdout.\","
@@ -317,10 +372,20 @@ private struct InvocationResult {
     var stderr: String
 }
 
-private func invoke(_ arguments: [String]) throws -> InvocationResult {
+private func invoke(
+    _ arguments: [String],
+    environment overrides: [String: String] = [:]
+) throws -> InvocationResult {
     let process = Process()
     process.executableURL = try maccheroniExecutableURL()
     process.arguments = arguments
+    var environment = ProcessInfo.processInfo.environment
+    environment.removeValue(forKey: "COLUMNS")
+    environment.removeValue(forKey: "LINES")
+    for (key, value) in overrides {
+        environment[key] = value
+    }
+    process.environment = environment
     let stdout = Pipe()
     let stderr = Pipe()
     process.standardOutput = stdout

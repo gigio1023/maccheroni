@@ -2,6 +2,8 @@ import ArgumentParser
 
 @main
 struct MaccheroniCommand: AsyncParsableCommand {
+    static var _errorPrefix: String { "" }
+
     static let configuration = CommandConfiguration(
         commandName: "maccheroni",
         abstract: "Transcribe mixed-language audio locally on Apple Silicon.",

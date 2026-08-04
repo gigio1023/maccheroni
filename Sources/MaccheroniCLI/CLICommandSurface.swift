@@ -2,34 +2,12 @@ import ArgumentParser
 import Foundation
 
 enum CLICommandSurface {
-    static func runArguments(
-        audio: String,
-        profile: String,
-        profiles: String?,
-        outputRoot: String?,
-        glossary: String?
-    ) -> [String] {
-        var arguments = ["run", audio, "--profile", profile]
-        append("--profiles", value: profiles, to: &arguments)
-        append("--output-root", value: outputRoot, to: &arguments)
-        append("--glossary", value: glossary, to: &arguments)
-        return arguments
-    }
-
-    static func doctorArguments(
-        profile: String?,
-        profiles: String?
-    ) -> [String] {
-        var arguments = ["doctor"]
-        append("--profile", value: profile, to: &arguments)
-        append("--profiles", value: profiles, to: &arguments)
-        return arguments
-    }
-
     static func help(for topic: HelpTopic?) -> String {
         switch topic {
         case nil:
             MaccheroniCommand.helpMessage()
+        case .help:
+            MaccheroniCommand.helpMessage(for: HelpCommand.self)
         case .run:
             MaccheroniCommand.helpMessage(for: RunCommand.self)
         case .doctor:
@@ -38,18 +16,10 @@ enum CLICommandSurface {
             MaccheroniCommand.helpMessage(for: CapabilitiesCommand.self)
         }
     }
-
-    private static func append(
-        _ option: String,
-        value: String?,
-        to arguments: inout [String]
-    ) {
-        guard let value else { return }
-        arguments.append(contentsOf: [option, value])
-    }
 }
 
 enum HelpTopic: String, CaseIterable, ExpressibleByArgument {
+    case help
     case run
     case doctor
     case capabilities
@@ -74,7 +44,7 @@ struct HelpCommand: ParsableCommand {
         """
     )
 
-    @Argument(help: "The command to explain: run, doctor, or capabilities.")
+    @Argument(help: "The command to explain: help, run, doctor, or capabilities.")
     var topic: HelpTopic?
 
     func run() throws {
@@ -126,14 +96,13 @@ struct RunCommand: AsyncParsableCommand {
     var json = false
 
     mutating func run() async throws {
-        let runPath = try await CLIApplication().execute(arguments: CLICommandSurface
-            .runArguments(
-                audio: audio,
-                profile: profile,
-                profiles: profiles,
-                outputRoot: outputRoot,
-                glossary: glossary
-            ))
+        let runPath = try await CLIApplication().executeRun(
+            audioPath: audio,
+            profileName: profile,
+            profilesPath: profiles,
+            outputRootPath: outputRoot,
+            glossaryPath: glossary
+        )
         if json {
             try CLIOutput.write(try CLIOutput.runJSON(runPath: runPath))
         } else {
@@ -152,7 +121,8 @@ struct DoctorCommand: AsyncParsableCommand {
 
         OUTPUT:
           Text mode prints the existing key=value diagnostics. --json prints those
-          values as strings in a stable object.
+          values and a readiness boolean in a stable object. Failed checks remain
+          machine-readable and exit nonzero.
 
         PRIVACY:
           No audio, transcript, or glossary contents are read or emitted.
@@ -172,16 +142,23 @@ struct DoctorCommand: AsyncParsableCommand {
     var json = false
 
     mutating func run() async throws {
-        let diagnostics = try await CLIApplication().execute(
-            arguments: CLICommandSurface.doctorArguments(
-                profile: profile,
-                profiles: profiles
-            )
+        let report = try await CLIApplication().inspectDoctor(
+            profileName: profile,
+            profilesPath: profiles
         )
         if json {
-            try CLIOutput.write(try CLIOutput.doctorJSON(diagnostics: diagnostics))
+            try CLIOutput.write(try CLIOutput.doctorJSON(
+                diagnostics: report.diagnostics,
+                ready: report.isReady
+            ))
+            if !report.isReady {
+                throw ExitCode.failure
+            }
         } else {
-            try CLIOutput.write(diagnostics)
+            guard report.isReady else {
+                throw CLIError.run(report.diagnostics)
+            }
+            try CLIOutput.write(report.diagnostics)
         }
     }
 }
