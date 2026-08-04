@@ -125,7 +125,7 @@ build、resource allowlist inventory、strict codesignの各チェックに合�
 .build/debug/maccheroni capabilities [--json]
 ```
 
-`maccheroni help`、`maccheroni doctor --json`、`maccheroni capabilities --json`でヘルプと構造化出力を利用できます。文字起こしと話者分離はこのMacで実行されるため、音声はローカルに残ります。
+`maccheroni help`、`maccheroni doctor --json`、`maccheroni capabilities --json`でヘルプと構造化出力を利用できます。簡潔な[CLIガイド](docs/cli-guide.md)にコマンドと出力の契約を記載しています。文字起こしと話者分離はこのMacで実行されるため、音声はローカルに残ります。
 
 韓国語会議用profile（`ko-meeting`、VibeVoice）とイタリア語対話用profile（`it-dialogue`、MOSS）が付属します。任意のローカル後処理モデルを使う場合は、`zsh scripts/setup-postprocess-runtime.zsh`を実行してください。
 

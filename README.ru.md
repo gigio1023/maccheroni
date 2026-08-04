@@ -126,7 +126,7 @@ zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 .build/debug/maccheroni capabilities [--json]
 ```
 
-Используйте `maccheroni help`, `maccheroni doctor --json` и `maccheroni capabilities --json` для просмотра справки и получения структурированного вывода. Транскрибирование и диаризация выполняются на этом Mac, поэтому аудио остаётся локальным.
+Используйте `maccheroni help`, `maccheroni doctor --json` и `maccheroni capabilities --json` для просмотра справки и получения структурированного вывода. Краткое [руководство по CLI](docs/cli-guide.md) описывает контракты команд и вывода. Транскрибирование и диаризация выполняются на этом Mac, поэтому аудио остаётся локальным.
 
 В комплект входят профили для корейских совещаний (`ko-meeting`, VibeVoice) и итальянских диалогов (`it-dialogue`, MOSS). Для необязательной локальной модели постобработки выполните `zsh scripts/setup-postprocess-runtime.zsh`.
 

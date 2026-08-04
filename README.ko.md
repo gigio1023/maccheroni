@@ -125,7 +125,7 @@ build, resource allowlist inventory, strict codesign 검사를 모두 통과하�
 .build/debug/maccheroni capabilities [--json]
 ```
 
-`maccheroni help`, `maccheroni doctor --json`, `maccheroni capabilities --json`으로 도움말과 구조화된 출력을 확인할 수 있습니다. 전사와 화자 분리는 이 Mac에서 실행하므로 오디오는 로컬에 남습니다.
+`maccheroni help`, `maccheroni doctor --json`, `maccheroni capabilities --json`으로 도움말과 구조화된 출력을 확인할 수 있습니다. 간결한 [CLI 가이드](docs/cli-guide.md)에서 명령과 출력 계약을 확인하세요. 전사와 화자 분리는 이 Mac에서 실행하므로 오디오는 로컬에 남습니다.
 
 한국어 회의용 profile(`ko-meeting`, VibeVoice)과 이탈리아어 대화용 profile(`it-dialogue`, MOSS)을 제공합니다. 선택 기능인 로컬 후처리 모델을 사용하려면 `zsh scripts/setup-postprocess-runtime.zsh`를 실행하세요.
 

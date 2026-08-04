@@ -126,7 +126,7 @@ O executável oferece quatro comandos do produto:
 .build/debug/maccheroni capabilities [--json]
 ```
 
-Use `maccheroni help`, `maccheroni doctor --json` e `maccheroni capabilities --json` para consultar a ajuda e obter uma saída estruturada. A transcrição e a diarização são executadas neste Mac, portanto o áudio permanece local.
+Use `maccheroni help`, `maccheroni doctor --json` e `maccheroni capabilities --json` para consultar a ajuda e obter uma saída estruturada. O breve [guia da CLI](docs/cli-guide.md) descreve os contratos dos comandos e da saída. A transcrição e a diarização são executadas neste Mac, portanto o áudio permanece local.
 
 O projeto inclui perfis para reuniões em coreano (`ko-meeting`, VibeVoice) e diálogos em italiano (`it-dialogue`, MOSS). Para usar o modelo local opcional de pós-processamento, execute `zsh scripts/setup-postprocess-runtime.zsh`.
 

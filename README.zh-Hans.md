@@ -125,7 +125,7 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 .build/debug/maccheroni capabilities [--json]
 ```
 
-使用 `maccheroni help`、`maccheroni doctor --json` 和 `maccheroni capabilities --json` 可查看帮助并获取结构化输出。转写和说话人分离在这台 Mac 上运行，因此音频始终留在本地。
+使用 `maccheroni help`、`maccheroni doctor --json` 和 `maccheroni capabilities --json` 可查看帮助并获取结构化输出。简明的 [CLI 指南](docs/cli-guide.md)说明了命令和输出约定。转写和说话人分离在这台 Mac 上运行，因此音频始终留在本地。
 
 内置韩语会议 profile（`ko-meeting`，VibeVoice）和意大利语对话 profile（`it-dialogue`，MOSS）。若要使用可选的本地后处理模型，请运行 `zsh scripts/setup-postprocess-runtime.zsh`。
 
