@@ -111,16 +111,22 @@ Requisitos: Mac com Apple Silicon, macOS 26, Xcode 26 e [uv](https://docs.astral
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 147 tests
+swift build && swift test          # 156 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-O aplicativo exibe o caminho do bundle quando a compilação, o inventário da lista de recursos permitidos e as verificações rigorosas de assinatura de código passam. Os pesos dos modelos são baixados no primeiro uso; `maccheroni doctor` verifica os runtimes e snapshots fixados:
+O aplicativo exibe o caminho do bundle quando a compilação, o inventário da lista de recursos permitidos e as verificações rigorosas de assinatura de código passam. Os pesos dos modelos são baixados no primeiro uso. O executável não inclui pesos de modelos nem ambientes Python; `maccheroni doctor` verifica os runtimes e snapshots fixados.
+
+O executável oferece quatro comandos do produto:
 
 ```bash
-.build/debug/maccheroni doctor
+.build/debug/maccheroni help [run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
+.build/debug/maccheroni capabilities [--json]
 ```
+
+Use `maccheroni help`, `maccheroni doctor --json` e `maccheroni capabilities --json` para consultar a ajuda e obter uma saída estruturada. A transcrição e a diarização são executadas neste Mac, portanto o áudio permanece local.
 
 O projeto inclui perfis para reuniões em coreano (`ko-meeting`, VibeVoice) e diálogos em italiano (`it-dialogue`, MOSS). Para usar o modelo local opcional de pós-processamento, execute `zsh scripts/setup-postprocess-runtime.zsh`.
 
@@ -151,7 +157,7 @@ Issues e pull requests focados são bem-vindos. Os comandos de compilação e te
 | Caminho | Conteúdo |
 |---|---|
 | `Sources/` | Pacote Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 147 testes baseados em fixtures, distribuídos em 16 suites |
+| `Tests/` | 156 testes baseados em fixtures, distribuídos em 17 suites |
 | `benchmarks/scripts/` | Executores e avaliadores com veredictos derivados e testes negativos |
 | `docs/` | Resumo da pesquisa, auditorias de código-fonte, política de restrições, contratos (esquemas JSON), design da interface |
 | `scripts/` | Compilação do bundle do aplicativo, compilação do harness MOSS, configuração do runtime de pós-processamento |

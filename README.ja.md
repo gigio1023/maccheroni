@@ -110,16 +110,22 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 147 tests
+swift build && swift test          # 156 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-build、resource allowlist inventory、strict codesignの各チェックに合格すると、アプリがbundle pathを表示します。モデルweightは初回使用時にダウンロードされます。`maccheroni doctor`はruntimeと固定snapshotを検証します。
+build、resource allowlist inventory、strict codesignの各チェックに合格すると、アプリがbundle pathを表示します。モデルweightは初回使用時にダウンロードされます。実行ファイルにはモデルweightもPython環境も含まれません。`maccheroni doctor`はruntimeと固定snapshotを検証します。
+
+実行ファイルには4つの製品コマンドがあります。
 
 ```bash
-.build/debug/maccheroni doctor
+.build/debug/maccheroni help [run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
+.build/debug/maccheroni capabilities [--json]
 ```
+
+`maccheroni help`、`maccheroni doctor --json`、`maccheroni capabilities --json`でヘルプと構造化出力を利用できます。文字起こしと話者分離はこのMacで実行されるため、音声はローカルに残ります。
 
 韓国語会議用profile（`ko-meeting`、VibeVoice）とイタリア語対話用profile（`it-dialogue`、MOSS）が付属します。任意のローカル後処理モデルを使う場合は、`zsh scripts/setup-postprocess-runtime.zsh`を実行してください。
 
@@ -150,7 +156,7 @@ Issueと対象を絞ったpull requestを歓迎します。Buildとtestのコマ
 | パス | 内容 |
 |---|---|
 | `Sources/` | Swiftパッケージ：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
-| `Tests/` | 16 suite、147件のfixtureベースtest |
+| `Tests/` | 17 suite、156件のfixtureベースtest |
 | `benchmarks/scripts/` | Derived verdictとnegative testを備えたrunnerとscorer |
 | `docs/` | 調査digest、source audit、constraint policy、契約（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |

@@ -111,16 +111,22 @@ Requirements: Apple Silicon Mac, macOS 26, Xcode 26, [uv](https://docs.astral.sh
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 147 tests
+swift build && swift test          # 156 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-The app prints its bundle path when the build, resource-allowlist inventory, and strict codesign checks all pass. Model weights download on first use; `maccheroni doctor` verifies runtimes and pinned snapshots:
+The app prints its bundle path when the build, resource-allowlist inventory, and strict codesign checks all pass. Model weights download on first use. The executable does not bundle model weights or Python environments; `maccheroni doctor` verifies runtimes and pinned snapshots.
+
+The executable provides four product commands:
 
 ```bash
-.build/debug/maccheroni doctor
+.build/debug/maccheroni help [run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
+.build/debug/maccheroni capabilities [--json]
 ```
+
+Use `maccheroni help`, `maccheroni doctor --json`, and `maccheroni capabilities --json` for discoverable help and structured output. Transcription and diarization run on this Mac, so audio remains local.
 
 Profiles ship for Korean meetings (`ko-meeting`, VibeVoice) and Italian dialogue (`it-dialogue`, MOSS). For the optional local post-processing model, run `zsh scripts/setup-postprocess-runtime.zsh`.
 
@@ -151,7 +157,7 @@ Issues and focused pull requests are welcome. Build and test commands, the verif
 | Path | What it is |
 |---|---|
 | `Sources/` | Swift package: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 147 fixture-based tests across 16 suites |
+| `Tests/` | 156 fixture-based tests across 17 suites |
 | `benchmarks/scripts/` | Runners and scorers with derived verdicts and negative tests |
 | `docs/` | Research digest, source audits, constraint policy, contracts (JSON schemas), UI design |
 | `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |

@@ -111,16 +111,22 @@ Requisitos: Mac con Apple Silicon, macOS 26, Xcode 26 y [uv](https://docs.astral
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 147 tests
+swift build && swift test          # 156 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-La aplicación muestra la ruta de su paquete cuando la compilación, el inventario de recursos permitidos y las comprobaciones estrictas de firma de código terminan correctamente. Los pesos de los modelos se descargan con el primer uso; `maccheroni doctor` verifica los entornos de ejecución y las instantáneas fijadas:
+La aplicación muestra la ruta de su paquete cuando la compilación, el inventario de recursos permitidos y las comprobaciones estrictas de firma de código terminan correctamente. Los pesos de los modelos se descargan con el primer uso. El ejecutable no incluye pesos de modelos ni entornos de Python; `maccheroni doctor` verifica los entornos de ejecución y las instantáneas fijadas.
+
+El ejecutable ofrece cuatro comandos de producto:
 
 ```bash
-.build/debug/maccheroni doctor
+.build/debug/maccheroni help [run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
+.build/debug/maccheroni capabilities [--json]
 ```
+
+Usa `maccheroni help`, `maccheroni doctor --json` y `maccheroni capabilities --json` para consultar la ayuda y obtener resultados estructurados. La transcripción y la separación de hablantes se ejecutan en este Mac, por lo que el audio permanece en local.
 
 Se incluyen perfiles para reuniones en coreano (`ko-meeting`, VibeVoice) y diálogos en italiano (`it-dialogue`, MOSS). Para utilizar el modelo local opcional de posprocesamiento, ejecuta `zsh scripts/setup-postprocess-runtime.zsh`.
 
@@ -151,7 +157,7 @@ Se aceptan issues y pull requests específicos. Los comandos de compilación y p
 | Ruta | Contenido |
 |---|---|
 | `Sources/` | Paquete Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 147 pruebas basadas en fixtures en 16 suites |
+| `Tests/` | 156 pruebas basadas en fixtures en 17 suites |
 | `benchmarks/scripts/` | Ejecutores y evaluadores con veredictos derivados y pruebas negativas |
 | `docs/` | Resumen de investigación, auditorías de código fuente, política de restricciones, contratos (esquemas JSON), diseño de interfaz |
 | `scripts/` | Compilación del paquete de la aplicación, compilación del harness MOSS, configuración del entorno de posprocesamiento |

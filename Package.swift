@@ -15,6 +15,12 @@ let package = Package(
         .executable(name: "maccheroni", targets: ["MaccheroniCLI"]),
         .executable(name: "MaccheroniApp", targets: ["MaccheroniApp"]),
     ],
+    dependencies: [
+        .package(
+            url: "https://github.com/apple/swift-argument-parser",
+            exact: "1.8.2"
+        ),
+    ],
     targets: [
         .target(name: "MaccheroniCore"),
         .target(name: "MaccheroniPreprocess", dependencies: ["MaccheroniCore"]),
@@ -49,6 +55,10 @@ let package = Package(
                 "MaccheroniASR",
                 "MaccheroniMerge",
                 "MaccheroniPostprocess",
+                .product(
+                    name: "ArgumentParser",
+                    package: "swift-argument-parser"
+                ),
             ],
             resources: [.process("Resources")]
         ),
