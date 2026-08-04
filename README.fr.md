@@ -58,25 +58,10 @@ Toutes les briques existent dans les bibliothèques. Leur combinaison n’exista
 
 ## Fonctionnement
 
-```mermaid
-flowchart LR
-    accTitle: Pipeline Maccheroni
-    accDescr: L’audio est capturé et traité sur le Mac. Seul le chemin Codex facultatif envoie du texte en blocs limités hors de l’appareil.
-    subgraph mac["Votre Mac (l’audio n’en sort jamais)"]
-        A["Capture<br/>micro + audio système"] --> B["Diarisation du fichier entier<br/>une chronologie globale des locuteurs"]
-        A --> C["Feuilles ASR<br/>maximum 120 s chacune,<br/>glossaire injecté par feuille"]
-        B --> D["Fusion par horodatage<br/>la chronologie détermine les locuteurs"]
-        C --> D
-        D --> E["Post-traitement local<br/>correction / traduction<br/>MLX sur l’appareil"]
-    end
-    D -.-> F["Chemin Codex (facultatif)<br/>texte limité uniquement,<br/>votre abonnement"]
-    style mac fill:#FDF8EC,stroke:#C2410C,color:#431407
-    linkStyle default stroke:#8B5E3C,stroke-width:1.5px
-    classDef step fill:#FFFFFF,stroke:#B45309,color:#431407
-    classDef opt fill:#F1F5F9,stroke:#64748B,color:#1E293B,stroke-dasharray:4 3
-    class A,B,C,D step
-    class E,F opt
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="Diagramme du pipeline : sur le Mac, la capture alimente la diarisation du fichier entier et les feuilles ASR de 120 secondes avec injection du glossaire par feuille ; la fusion par horodatage, où la timeline décide des locuteurs, alimente le post-traitement optionnel sur l'appareil ; seule la voie Codex opt-in quitte le Mac, avec du texte limité uniquement" width="100%">
+</picture>
 
 Les feuilles en échec sont redécoupées dans des limites typées (minimum de 30 s, profondeur 3), et seules les sorties terminées par un marqueur de fin de séquence sont intégrées à la transcription canonique. Le chemin Codex facultatif envoie, par votre propre abonnement ChatGPT/Codex, des blocs limités de texte transcrit, le glossaire actif et des instructions, jamais l’audio ni les chemins de fichiers.
 

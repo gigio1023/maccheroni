@@ -58,25 +58,10 @@ Todas las piezas existen en la capa de bibliotecas. La combinación no existía 
 
 ## Cómo funciona
 
-```mermaid
-flowchart LR
-    accTitle: Flujo de Maccheroni
-    accDescr: El audio se captura y se procesa en el Mac. Solo la vía opcional de Codex envía bloques limitados de texto fuera del dispositivo.
-    subgraph mac["Tu Mac (el audio nunca sale)"]
-        A["Captura<br/>micrófono + audio del sistema"] --> B["Diarización del archivo completo<br/>una línea temporal global de hablantes"]
-        A --> C["Segmentos ASR<br/>máximo 120 s cada uno,<br/>glosario inyectado por segmento"]
-        B --> D["Unión por marcas de tiempo<br/>la línea temporal asigna los hablantes"]
-        C --> D
-        D --> E["Posprocesamiento local<br/>corrección / traducción<br/>MLX en el dispositivo"]
-    end
-    D -.-> F["Vía Codex (opcional)<br/>solo texto en bloques limitados,<br/>tu suscripción"]
-    style mac fill:#FDF8EC,stroke:#C2410C,color:#431407
-    linkStyle default stroke:#8B5E3C,stroke-width:1.5px
-    classDef step fill:#FFFFFF,stroke:#B45309,color:#431407
-    classDef opt fill:#F1F5F9,stroke:#64748B,color:#1E293B,stroke-dasharray:4 3
-    class A,B,C,D step
-    class E,F opt
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="Diagrama del pipeline: en el Mac, la captura alimenta la diarización de archivo completo y los segmentos ASR de 120 segundos con inyección de glosario por segmento; la fusión por marcas de tiempo, donde la línea de tiempo decide los hablantes, alimenta el posprocesamiento opcional en el dispositivo; solo el carril Codex opcional sale del Mac, únicamente con texto limitado" width="100%">
+</picture>
 
 Los segmentos fallidos se vuelven a dividir dentro de límites tipados (mínimo 30 s, profundidad 3). Solo se incorporan a la transcripción canónica las salidas con fin de secuencia. La vía opcional de Codex envía, mediante tu propia suscripción de ChatGPT/Codex, texto de la transcripción en bloques limitados, el glosario activo e instrucciones: nunca audio ni rutas de archivos.
 

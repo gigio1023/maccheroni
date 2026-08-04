@@ -58,25 +58,10 @@ Todas as peças existem na camada de bibliotecas. A combinação não existia na
 
 ## Como funciona
 
-```mermaid
-flowchart LR
-    accTitle: Pipeline do Maccheroni
-    accDescr: O áudio é capturado e processado no Mac. Somente a via opcional do Codex envia blocos limitados de texto para fora do dispositivo.
-    subgraph mac["Seu Mac (o áudio nunca sai)"]
-        A["Captura<br/>microfone + áudio do sistema"] --> B["Diarização do arquivo inteiro<br/>uma linha do tempo global dos falantes"]
-        A --> C["Segmentos ASR<br/>máximo de 120 s cada,<br/>glossário injetado por segmento"]
-        B --> D["União por timestamps<br/>a linha do tempo determina os falantes"]
-        C --> D
-        D --> E["Pós-processamento local<br/>correção / tradução<br/>MLX no dispositivo"]
-    end
-    D -.-> F["Via Codex (opcional)<br/>somente texto em blocos limitados,<br/>sua assinatura"]
-    style mac fill:#FDF8EC,stroke:#C2410C,color:#431407
-    linkStyle default stroke:#8B5E3C,stroke-width:1.5px
-    classDef step fill:#FFFFFF,stroke:#B45309,color:#431407
-    classDef opt fill:#F1F5F9,stroke:#64748B,color:#1E293B,stroke-dasharray:4 3
-    class A,B,C,D step
-    class E,F opt
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="Diagrama do pipeline: no Mac, a captura alimenta a diarização do arquivo inteiro e as folhas ASR de 120 segundos com injeção de glossário por folha; a fusão por timestamps, em que a linha do tempo decide os falantes, alimenta o pós-processamento opcional no dispositivo; apenas a faixa Codex opcional sai do Mac, somente com texto limitado" width="100%">
+</picture>
 
 Os segmentos que falham são subdivididos dentro de limites tipados (mínimo de 30 s, profundidade 3). Somente saídas com fim de sequência são incorporadas à transcrição canônica. A via opcional do Codex envia, pela sua própria assinatura do ChatGPT/Codex, texto da transcrição em blocos limitados, o glossário ativo e instruções: nunca áudio ou caminhos de arquivos.
 

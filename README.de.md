@@ -58,25 +58,10 @@ Auf Bibliotheksebene sind alle Bausteine vorhanden. Auf App-Ebene fehlte ihre Ko
 
 ## Funktionsweise
 
-```mermaid
-flowchart LR
-    accTitle: Maccheroni-Pipeline
-    accDescr: Audio wird auf dem Mac aufgenommen und verarbeitet. Nur der optionale Codex-Pfad sendet begrenzte Textmengen außerhalb des Geräts.
-    subgraph mac["Dein Mac (Audio verlässt ihn nie)"]
-        A["Aufnahme<br/>Mikrofon + Systemaudio"] --> B["Diarisierung der gesamten Datei<br/>eine globale Sprecherzeitleiste"]
-        A --> C["ASR-Blätter<br/>jeweils max. 120 s,<br/>Glossar pro Blatt injiziert"]
-        B --> D["Zusammenführung nach Zeitstempel<br/>die Zeitleiste bestimmt die Sprecher"]
-        C --> D
-        D --> E["Lokale Nachbearbeitung<br/>Korrektur / Übersetzung<br/>MLX auf dem Gerät"]
-    end
-    D -.-> F["Codex-Pfad (optional)<br/>nur begrenzter Text,<br/>dein Abonnement"]
-    style mac fill:#FDF8EC,stroke:#C2410C,color:#431407
-    linkStyle default stroke:#8B5E3C,stroke-width:1.5px
-    classDef step fill:#FFFFFF,stroke:#B45309,color:#431407
-    classDef opt fill:#F1F5F9,stroke:#64748B,color:#1E293B,stroke-dasharray:4 3
-    class A,B,C,D step
-    class E,F opt
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="Pipeline-Diagramm: Auf dem Mac speist die Aufnahme die Ganzdatei-Diarisierung und 120-Sekunden-ASR-Blätter mit Glossar-Injektion pro Blatt; der Zeitstempel-Merge, in dem die Timeline die Sprecher bestimmt, führt zur optionalen Nachbearbeitung auf dem Gerät; nur die Opt-in-Codex-Spur verlässt den Mac, ausschließlich mit begrenztem Text" width="100%">
+</picture>
 
 Fehlgeschlagene Blätter werden innerhalb typisierter Grenzen erneut aufgeteilt (mindestens 30 s, Tiefe 3). Nur Ausgaben mit einem Ende-der-Sequenz-Marker werden in das kanonische Transkript übernommen. Der optionale Codex-Pfad sendet begrenzte Transkriptabschnitte, das aktive Glossar und Anweisungen über dein eigenes ChatGPT/Codex-Abonnement. Audio und Dateipfade werden niemals gesendet.
 

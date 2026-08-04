@@ -58,25 +58,10 @@ The parts all exist at the library layer. The combination didn't exist at the ap
 
 ## How it works
 
-```mermaid
-flowchart LR
-    accTitle: Maccheroni pipeline
-    accDescr: Audio is captured and processed on the Mac. Only the optional Codex lane sends bounded text off the device.
-    subgraph mac["Your Mac (audio never leaves)"]
-        A["Capture<br/>mic + system audio"] --> B["Whole-file diarization<br/>one global speaker timeline"]
-        A --> C["ASR leaves<br/>max 120 s each,<br/>glossary injected per leaf"]
-        B --> D["Timestamp merge<br/>the timeline owns speakers"]
-        C --> D
-        D --> E["Local post-processing<br/>correction / translation<br/>on-device MLX"]
-    end
-    D -.-> F["Codex lane (opt-in)<br/>bounded text only,<br/>your subscription"]
-    style mac fill:#FDF8EC,stroke:#C2410C,color:#431407
-    linkStyle default stroke:#8B5E3C,stroke-width:1.5px
-    classDef step fill:#FFFFFF,stroke:#B45309,color:#431407
-    classDef opt fill:#F1F5F9,stroke:#64748B,color:#1E293B,stroke-dasharray:4 3
-    class A,B,C,D step
-    class E,F opt
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="Pipeline diagram: on your Mac, capture feeds whole-file diarization and 120-second ASR leaves with per-leaf glossary injection; the timestamp merge, where the timeline owns speakers, feeds optional on-device post-processing; only the opt-in Codex lane leaves the Mac, carrying bounded text only" width="100%">
+</picture>
 
 Failed leaves are re-split within typed bounds (30 s minimum, depth 3) and only end-of-sequence outputs are ever promoted to the canonical transcript. The optional Codex lane sends bounded transcript text, the active glossary, and instructions — never audio, never file paths — through your own ChatGPT/Codex subscription.
 

@@ -57,25 +57,10 @@
 
 ## 작동 방식
 
-```mermaid
-flowchart LR
-    accTitle: Maccheroni 파이프라인
-    accDescr: 오디오는 Mac에서 녹음하고 처리합니다. 선택 기능인 Codex 경로만 상한이 정해진 텍스트를 기기 밖으로 전송합니다.
-    subgraph mac["사용자의 Mac(오디오는 기기 밖으로 나가지 않음)"]
-        A["녹음<br/>마이크 + 시스템 오디오"] --> B["전체 파일 화자 분리<br/>하나의 전역 화자 timeline"]
-        A --> C["ASR leaf<br/>각각 최대 120초,<br/>leaf마다 용어집 주입"]
-        B --> D["Timestamp 병합<br/>timeline이 화자를 결정"]
-        C --> D
-        D --> E["로컬 후처리<br/>교정 / 번역<br/>기기 내 MLX"]
-    end
-    D -.-> F["Codex 경로(선택)<br/>상한이 정해진 텍스트만,<br/>사용자 구독"]
-    style mac fill:#FDF8EC,stroke:#C2410C,color:#431407
-    linkStyle default stroke:#8B5E3C,stroke-width:1.5px
-    classDef step fill:#FFFFFF,stroke:#B45309,color:#431407
-    classDef opt fill:#F1F5F9,stroke:#64748B,color:#1E293B,stroke-dasharray:4 3
-    class A,B,C,D step
-    class E,F opt
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="파이프라인 다이어그램: Mac 안에서 캡처가 전체 파일 화자분리와 120초 ASR leaf(leaf마다 glossary 주입)로 이어지고 타임라인이 화자를 결정하는 타임스탬프 병합을 거쳐 선택적 온디바이스 후처리로 연결됩니다. Mac을 떠나는 것은 opt-in Codex lane의 제한된 텍스트뿐입니다" width="100%">
+</picture>
 
 실패한 leaf는 typed bound 안에서 다시 나눕니다. 최소 길이는 30초이고 최대 깊이는 3입니다. End-of-sequence 출력만 canonical transcript로 승격합니다. 선택 기능인 Codex 경로는 사용자 자신의 ChatGPT/Codex 구독을 사용해 상한이 정해진 전사 텍스트, 활성 용어집, 지침만 전송합니다. 오디오와 파일 경로는 보내지 않습니다.
 

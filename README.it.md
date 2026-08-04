@@ -58,25 +58,10 @@ Tutti i componenti esistono già nelle librerie. Mancava la loro combinazione in
 
 ## Come funziona
 
-```mermaid
-flowchart LR
-    accTitle: Pipeline Maccheroni
-    accDescr: L’audio viene acquisito ed elaborato sul Mac. Solo il percorso Codex facoltativo invia fuori dal dispositivo blocchi di testo limitati.
-    subgraph mac["Il tuo Mac (l’audio non esce mai)"]
-        A["Acquisizione<br/>microfono + audio di sistema"] --> B["Diarizzazione dell’intero file<br/>una timeline globale dei parlanti"]
-        A --> C["Segmenti ASR<br/>massimo 120 s ciascuno,<br/>glossario inserito in ogni segmento"]
-        B --> D["Unione tramite timestamp<br/>la timeline determina i parlanti"]
-        C --> D
-        D --> E["Post-elaborazione locale<br/>correzione / traduzione<br/>MLX sul dispositivo"]
-    end
-    D -.-> F["Percorso Codex (facoltativo)<br/>solo testo in blocchi limitati,<br/>il tuo abbonamento"]
-    style mac fill:#FDF8EC,stroke:#C2410C,color:#431407
-    linkStyle default stroke:#8B5E3C,stroke-width:1.5px
-    classDef step fill:#FFFFFF,stroke:#B45309,color:#431407
-    classDef opt fill:#F1F5F9,stroke:#64748B,color:#1E293B,stroke-dasharray:4 3
-    class A,B,C,D step
-    class E,F opt
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="Diagramma della pipeline: sul Mac, l'acquisizione alimenta la diarizzazione dell'intero file e i segmenti ASR da 120 secondi con iniezione del glossario per segmento; la fusione per timestamp, in cui la timeline decide i parlanti, alimenta la post-elaborazione opzionale sul dispositivo; solo la corsia Codex opzionale lascia il Mac, con solo testo limitato" width="100%">
+</picture>
 
 I segmenti non riusciti vengono suddivisi di nuovo entro limiti tipizzati (minimo 30 s, profondità 3). Solo gli output con token di fine sequenza vengono promossi nella trascrizione canonica. Il percorso Codex facoltativo invia, tramite il tuo abbonamento ChatGPT/Codex, testo della trascrizione in blocchi limitati, glossario attivo e istruzioni: mai l’audio e mai i percorsi dei file.
 

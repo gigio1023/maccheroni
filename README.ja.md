@@ -57,25 +57,10 @@
 
 ## 仕組み
 
-```mermaid
-flowchart LR
-    accTitle: Maccheroniパイプライン
-    accDescr: 音声はMacで収録して処理します。デバイス外へ送信するのは任意のCodex経路で扱う上限付きテキストだけです。
-    subgraph mac["あなたのMac（音声は外部に出ません）"]
-        A["収録<br/>マイク + システム音声"] --> B["ファイル全体の話者分離<br/>1本のグローバルな話者timeline"]
-        A --> C["ASR leaf<br/>各leafは最大120秒、<br/>leafごとに用語集を注入"]
-        B --> D["Timestamp結合<br/>timelineが話者を決定"]
-        C --> D
-        D --> E["ローカル後処理<br/>修正 / 翻訳<br/>デバイス上のMLX"]
-    end
-    D -.-> F["Codex経路（任意）<br/>上限付きテキストのみ、<br/>自分のサブスクリプション"]
-    style mac fill:#FDF8EC,stroke:#C2410C,color:#431407
-    linkStyle default stroke:#8B5E3C,stroke-width:1.5px
-    classDef step fill:#FFFFFF,stroke:#B45309,color:#431407
-    classDef opt fill:#F1F5F9,stroke:#64748B,color:#1E293B,stroke-dasharray:4 3
-    class A,B,C,D step
-    class E,F opt
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="パイプライン図: Mac内でキャプチャがファイル全体の話者分離と120秒のASR leaf(leafごとにglossary注入)につながり、タイムラインが話者を決めるタイムスタンプmergeを経て任意のオンデバイス後処理へ続く。Macから出るのはopt-inのCodexレーンの制限されたテキストのみ" width="100%">
+</picture>
 
 失敗したleafはtyped bound内で再分割します。最小30秒、深さは最大3です。End-of-sequence出力だけをcanonical transcriptへ昇格させます。任意のCodex経路は、自分のChatGPT/Codexサブスクリプションを使い、上限を設けた文字起こしテキスト、有効な用語集、指示だけを送信します。音声もファイルパスも送信しません。
 

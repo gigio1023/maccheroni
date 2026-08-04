@@ -57,25 +57,10 @@
 
 ## 工作原理
 
-```mermaid
-flowchart LR
-    accTitle: Maccheroni 处理流程
-    accDescr: 音频在 Mac 上采集和处理。只有可选的 Codex 路径会将有长度上限的文本发送到设备外。
-    subgraph mac["你的 Mac（音频绝不离开设备）"]
-        A["采集<br/>麦克风 + 系统音频"] --> B["全文件说话人分离<br/>一条全局说话人 timeline"]
-        A --> C["ASR leaf<br/>每段最长 120 秒，<br/>每个 leaf 注入术语表"]
-        B --> D["按 Timestamp 合并<br/>timeline 决定说话人"]
-        C --> D
-        D --> E["本地后处理<br/>修正 / 翻译<br/>设备端 MLX"]
-    end
-    D -.-> F["Codex 路径（可选）<br/>仅发送有长度上限的文本，<br/>使用你的订阅"]
-    style mac fill:#FDF8EC,stroke:#C2410C,color:#431407
-    linkStyle default stroke:#8B5E3C,stroke-width:1.5px
-    classDef step fill:#FFFFFF,stroke:#B45309,color:#431407
-    classDef opt fill:#F1F5F9,stroke:#64748B,color:#1E293B,stroke-dasharray:4 3
-    class A,B,C,D step
-    class E,F opt
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="流水线图:在 Mac 上,采集送入整文件说话人分离和120秒 ASR leaf(每个 leaf 注入词汇表);时间戳合并由时间线决定说话人,再送入可选的设备端后处理;只有可选的 Codex 通道离开 Mac,且仅携带受限文本" width="100%">
+</picture>
 
 失败的 leaf 会在 typed bound 内重新分割，最短30秒，最大深度为3。只有 end-of-sequence 输出才能升级为 canonical transcript。可选的 Codex 路径通过你自己的 ChatGPT/Codex 订阅发送有长度上限的转写文本、当前术语表和指令。它绝不发送音频或文件路径。
 
