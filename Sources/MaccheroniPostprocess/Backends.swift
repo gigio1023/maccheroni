@@ -45,7 +45,7 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
     public let selectedModelName: String
     public let availability: CodexAvailability
     public let schemaURL: URL
-    public let executor: any SubprocessExecuting
+    public let appServerExecutor: any CodexAppServerExecuting
     public let batchPolicy: PostprocessBatchPolicy
     private let temporaryDirectory: URL
 
@@ -66,12 +66,17 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
         schemaURL: URL? = nil,
         batchPolicy: PostprocessBatchPolicy = Self.defaultBatchPolicy,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory,
-        executor: any SubprocessExecuting = FoundationSubprocessExecutor()
+        appServerExecutor: any CodexAppServerExecuting = FoundationCodexAppServerExecutor()
     ) {
         self.codexExecutableURL = codexExecutableURL
         let resolvedAvailability = availability
             ?? codexVersion.map(CodexAvailability.authenticated(version:))
-            ?? Self.detectAvailability(executableURL: codexExecutableURL)
+            ?? codexExecutableURL.map {
+                CodexAvailability.unauthenticated(
+                    version: Self.detectVersion(executableURL: $0)
+                )
+            }
+            ?? .unavailable
         self.availability = resolvedAvailability
         self.codexVersion = codexVersion
             ?? resolvedAvailability.version
@@ -81,28 +86,44 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
         ) ?? temporaryDirectory.appendingPathComponent("missing-postprocess-output.schema.json")
         self.batchPolicy = batchPolicy
         self.temporaryDirectory = temporaryDirectory
-        self.executor = executor
+        self.appServerExecutor = appServerExecutor
     }
 
-    /// Detects both installation/version and subscription authentication.
+    /// Detects installation/version and ChatGPT subscription authentication through app-server.
     public static func detectAvailability(
         executableURL: URL? = CodexPostprocessBackend.defaultExecutableURL,
-        timeoutS: TimeInterval = 5
-    ) -> CodexAvailability {
+        timeoutS: TimeInterval = 5,
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory,
+        appServerExecutor: any CodexAppServerExecuting = FoundationCodexAppServerExecutor()
+    ) async -> CodexAvailability {
         guard let executableURL else { return .unavailable }
         let version = detectVersion(
             executableURL: executableURL,
             timeoutS: timeoutS
         )
         guard version != "unavailable" else { return .unavailable }
-        guard runCommand(
-            executableURL: executableURL,
-            arguments: ["login", "status"],
-            timeoutS: timeoutS
-        )?.status == 0 else {
+        let workspace: URL
+        do {
+            workspace = try makeEmptyDirectory(
+                in: temporaryDirectory,
+                prefix: "maccheroni-codex-auth-"
+            )
+        } catch {
             return .unauthenticated(version: version)
         }
-        return .authenticated(version: version)
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        do {
+            let state = try await appServerExecutor.accountState(
+                executableURL: executableURL,
+                workspaceURL: workspace,
+                timeoutS: timeoutS
+            )
+            return state == .chatGPT
+                ? .authenticated(version: version)
+                : .unauthenticated(version: version)
+        } catch {
+            return .unauthenticated(version: version)
+        }
     }
 
     /// Allows the production caller to record the installed CLI version while tests inject a value.
@@ -126,7 +147,7 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
     public var model: ModelDescriptor? { nil }
     public var manifestPostprocess: ManifestPostprocess {
         ManifestPostprocess(
-            backend: BackendDescriptor(name: "codex-cli", version: codexVersion),
+            backend: BackendDescriptor(name: "codex-app-server", version: codexVersion),
             modelID: selectedModelName
         )
     }
@@ -162,64 +183,52 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
     }
 
     private func execute(prompt: String, schema: SchemaSource) async throws -> Data {
-        guard availability.isAuthenticated else {
-            throw PostprocessError.authenticationRequired(
-                "Codex is not authenticated. Run `codex login` in Terminal, then try again, or select Local."
-            )
-        }
         guard let codexExecutableURL else {
             throw PostprocessError.launchFailed("codex CLI executable was not found")
         }
         let workspace = try makeEmptyDirectory(prefix: "maccheroni-codex-")
         defer { try? FileManager.default.removeItem(at: workspace) }
-        let resolvedSchemaURL: URL
+        let schemaData: Data
         switch schema {
         case let .packaged(url):
-            resolvedSchemaURL = url
+            do {
+                schemaData = try Data(contentsOf: url)
+            } catch {
+                throw PostprocessError.malformedOutput(
+                    "Codex output schema could not be read"
+                )
+            }
         case let .generated(name, data):
-            resolvedSchemaURL = workspace.appendingPathComponent(name)
-            try data.write(to: resolvedSchemaURL, options: .withoutOverwriting)
+            _ = name
+            schemaData = data
         }
-        let outputURL = workspace.appendingPathComponent("last-message.json")
-        let arguments = [
-            "exec", "--json", "--output-schema", resolvedSchemaURL.path,
-            "--output-last-message", outputURL.path,
-            "--model", selectedModelName,
-            "--sandbox", "read-only", "--ephemeral", "--ignore-rules", "--skip-git-repo-check",
-            "--ignore-user-config",
-            "-C", workspace.path, "-",
-        ]
-        let result = try await executor.run(SubprocessInvocation(
+        return try await appServerExecutor.run(CodexAppServerInvocation(
             executableURL: codexExecutableURL,
-            arguments: arguments,
-            standardInput: Data(prompt.utf8)
+            model: selectedModelName,
+            prompt: prompt,
+            outputSchema: schemaData,
+            workspaceURL: workspace
         ))
-        guard result.exitStatus == 0 else {
-            throw PostprocessError.backendFailed(
-                "codex exec exited \(result.exitStatus): "
-                    + SubprocessFailureMessage.sanitized(standardError: result.standardError)
-            )
-        }
-        guard FileManager.default.fileExists(atPath: outputURL.path) else {
-            throw PostprocessError.missingOutput("codex backend did not create its schema-constrained output")
-        }
-        do {
-            return try Data(contentsOf: outputURL)
-        } catch {
-            throw PostprocessError.malformedOutput(
-                "codex backend output could not be read: \(error.localizedDescription)"
-            )
-        }
     }
 
     private func makeEmptyDirectory(prefix: String) throws -> URL {
-        let path = temporaryDirectory.appendingPathComponent("\(prefix)\(UUID().uuidString.lowercased())", isDirectory: true)
         do {
-            try FileManager.default.createDirectory(at: path, withIntermediateDirectories: false)
-            return path
+            return try Self.makeEmptyDirectory(in: temporaryDirectory, prefix: prefix)
         } catch {
-            throw PostprocessError.launchFailed("cannot create isolated Codex workspace: \(error.localizedDescription)")
+            throw PostprocessError.launchFailed("cannot create isolated Codex workspace")
         }
+    }
+
+    private static func makeEmptyDirectory(in root: URL, prefix: String) throws -> URL {
+        let path = root.appendingPathComponent(
+            "\(prefix)\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: path,
+            withIntermediateDirectories: false
+        )
+        return path
     }
 
     private struct CommandResult {

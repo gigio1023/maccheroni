@@ -131,7 +131,7 @@ import Testing
     }
 
     @Test func bothBackendsReceiveTheIdenticalTextOnlyGlossaryPrompt() async throws {
-        let codexRecorder = InvocationRecorder()
+        let codexRecorder = CodexInvocationRecorder()
         let localRecorder = InvocationRecorder()
         let root = try freshDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -142,7 +142,10 @@ import Testing
             codexVersion: "9.9.9",
             schemaURL: schema,
             temporaryDirectory: root,
-            executor: MockExecutor(recorder: codexRecorder, output: validOutput, writeCodexLastMessage: true)
+            appServerExecutor: MockCodexAppServerExecutor(
+                recorder: codexRecorder,
+                output: validOutput
+            )
         )
         let local = LocalPostprocessBackend(
             runtime: LocalPostprocessRuntime(pythonExecutableURL: URL(fileURLWithPath: "/tests/python"), runnerURL: URL(fileURLWithPath: "/tests/runner.py"), modelSnapshotURL: URL(fileURLWithPath: "/snapshot")),
@@ -152,7 +155,7 @@ import Testing
         _ = try await TranscriptPostprocessor(backend: codex).process(request)
         _ = try await TranscriptPostprocessor(backend: local).process(request)
 
-        let codexInput = String(decoding: try #require(codexRecorder.invocations.first).standardInput, as: UTF8.self)
+        let codexInput = try #require(codexRecorder.invocations.first).prompt
         let localInput = String(decoding: try #require(localRecorder.invocations.first).standardInput, as: UTF8.self)
         #expect(codexInput == localInput)
         #expect(codexInput.contains(try glossary().sha256))
@@ -163,8 +166,8 @@ import Testing
         #expect(!codexInput.contains("start_s"))
     }
 
-    @Test func codexUsesExactArgumentsAndSchemaConstrainedLastMessage() async throws {
-        let recorder = InvocationRecorder()
+    @Test func codexUsesSchemaConstrainedAppServerInvocation() async throws {
+        let recorder = CodexInvocationRecorder()
         let root = try freshDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let schema = root.appendingPathComponent("schema.json")
@@ -174,46 +177,55 @@ import Testing
             codexVersion: "1.2.3",
             schemaURL: schema,
             temporaryDirectory: root,
-            executor: MockExecutor(recorder: recorder, output: validOutput, writeCodexLastMessage: true)
+            appServerExecutor: MockCodexAppServerExecutor(
+                recorder: recorder,
+                output: validOutput
+            )
         )
         _ = try await TranscriptPostprocessor(backend: backend).process(PostprocessRequest(document: document()))
 
-        #expect(backend.manifestPostprocess.backend == BackendDescriptor(name: "codex-cli", version: "1.2.3"))
+        #expect(backend.manifestPostprocess.backend == BackendDescriptor(name: "codex-app-server", version: "1.2.3"))
         #expect(backend.manifestPostprocess.modelID == "gpt-5.6-sol")
         #expect(backend.manifestPostprocess.modelRevision == nil)
         #expect(backend.manifestPostprocess.quantization == nil)
         #expect(backend.model == nil)
         let invocation = try #require(recorder.invocations.first)
-        let outputIndex = try #require(invocation.arguments.firstIndex(of: "--output-last-message"))
-        let workspaceIndex = try #require(invocation.arguments.firstIndex(of: "-C"))
         #expect(invocation.executableURL.path == "/tests/codex")
-        #expect(invocation.arguments == [
-            "exec", "--json", "--output-schema", schema.path,
-            "--output-last-message", invocation.arguments[outputIndex + 1],
-            "--model", "gpt-5.6-sol", "--sandbox", "read-only", "--ephemeral",
-            "--ignore-rules", "--skip-git-repo-check", "--ignore-user-config",
-            "-C", invocation.arguments[workspaceIndex + 1], "-",
-        ])
-        #expect(URL(fileURLWithPath: invocation.arguments[workspaceIndex + 1]).deletingLastPathComponent() == root)
-        #expect(String(decoding: invocation.standardInput, as: UTF8.self).contains("Codex clii 실행"))
-        #expect(!String(decoding: invocation.standardInput, as: UTF8.self).contains("private.m4a"))
+        #expect(invocation.model == "gpt-5.6-sol")
+        #expect(invocation.outputSchema == Data("{}".utf8))
+        #expect(invocation.workspaceURL.deletingLastPathComponent() == root)
+        #expect(invocation.prompt.contains("Codex clii 실행"))
+        #expect(!invocation.prompt.contains("private.m4a"))
     }
 
-    @Test func codexRejectsNonzeroMissingAndMalformedOutput() async throws {
+    @Test func codexPropagatesAppServerFailureAndRejectsMalformedOutput() async throws {
         let root = try freshDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let schema = root.appendingPathComponent("schema.json")
         try Data("{}".utf8).write(to: schema)
         let authenticated = CodexAvailability.authenticated(version: "codex-cli fixture")
-        let failing = CodexPostprocessBackend(codexExecutableURL: URL(fileURLWithPath: "/tests/codex"), availability: authenticated, schemaURL: schema, temporaryDirectory: root, executor: MockExecutor(output: validOutput, exitStatus: 9))
-        await #expect(throws: PostprocessError.backendFailed("codex exec exited 9: ")) {
+        let failing = CodexPostprocessBackend(
+            codexExecutableURL: URL(fileURLWithPath: "/tests/codex"),
+            availability: authenticated,
+            schemaURL: schema,
+            temporaryDirectory: root,
+            appServerExecutor: MockCodexAppServerExecutor(
+                output: validOutput,
+                runError: .backendFailed("codex app server exited 9")
+            )
+        )
+        await #expect(throws: PostprocessError.backendFailed("codex app server exited 9")) {
             _ = try await failing.propose(prompt: "x")
         }
-        let missing = CodexPostprocessBackend(codexExecutableURL: URL(fileURLWithPath: "/tests/codex"), availability: authenticated, schemaURL: schema, temporaryDirectory: root, executor: MockExecutor(output: validOutput))
-        await #expect(throws: PostprocessError.missingOutput("codex backend did not create its schema-constrained output")) {
-            _ = try await missing.propose(prompt: "x")
-        }
-        let malformed = CodexPostprocessBackend(codexExecutableURL: URL(fileURLWithPath: "/tests/codex"), availability: authenticated, schemaURL: schema, temporaryDirectory: root, executor: MockExecutor(output: Data("not-json".utf8), writeCodexLastMessage: true))
+        let malformed = CodexPostprocessBackend(
+            codexExecutableURL: URL(fileURLWithPath: "/tests/codex"),
+            availability: authenticated,
+            schemaURL: schema,
+            temporaryDirectory: root,
+            appServerExecutor: MockCodexAppServerExecutor(
+                output: Data("not-json".utf8)
+            )
+        )
         do {
             _ = try await malformed.propose(prompt: "x")
             Issue.record("expected malformed Codex output to fail")
@@ -259,11 +271,7 @@ import Testing
         #expect(multibyte.utf8.count == limit)
     }
 
-    @Test func backendFailuresCarrySanitizedAndBoundedStandardError() async throws {
-        let root = try freshDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let schema = root.appendingPathComponent("schema.json")
-        try Data("{}".utf8).write(to: schema)
+    @Test func localBackendFailuresCarrySanitizedAndBoundedStandardError() async throws {
         let standardError = Data((
             "traceback at /Users/someone/Library/Caches/runner.py line 4: "
                 + String(repeating: "e", count: 900) + "\n"
@@ -275,23 +283,6 @@ import Testing
                 - SubprocessFailureMessage.truncationMarker.utf8.count
                 - leadIn.utf8.count
         ) + SubprocessFailureMessage.truncationMarker
-
-        let codex = CodexPostprocessBackend(
-            codexExecutableURL: URL(fileURLWithPath: "/tests/codex"),
-            availability: .authenticated(version: "codex-cli fixture"),
-            schemaURL: schema,
-            temporaryDirectory: root,
-            executor: MockExecutor(
-                output: validOutput,
-                exitStatus: 7,
-                standardError: standardError
-            )
-        )
-        await #expect(throws: PostprocessError.backendFailed(
-            "codex exec exited 7: " + expectedTail
-        )) {
-            _ = try await codex.propose(prompt: "x")
-        }
 
         let local = LocalPostprocessBackend(
             runtime: LocalPostprocessRuntime(
@@ -360,7 +351,7 @@ import Testing
 
         expectStructure(result.document, equals: input)
         expectGlossaryCorrection(in: result)
-        #expect(result.manifestPostprocess.backend.name == "codex-cli")
+        #expect(result.manifestPostprocess.backend.name == "codex-app-server")
         #expect(result.manifestPostprocess.modelID
             == CodexPostprocessBackend.modelName)
         #expect(result.manifestPostprocess.modelRevision == nil)
@@ -488,7 +479,7 @@ import Testing
     }
 
     @Test func codexTranslationUsesGeneratedSchemaAndAuthenticatedModel() async throws {
-        let recorder = InvocationRecorder()
+        let recorder = CodexInvocationRecorder()
         let root = try freshDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let output = Data(#"{"translations":[{"segment_index":0,"translated_text":"Hello"}]}"#.utf8)
@@ -496,10 +487,9 @@ import Testing
             codexExecutableURL: URL(fileURLWithPath: "/tests/codex"),
             availability: .authenticated(version: "codex-cli 9.9.9"),
             temporaryDirectory: root,
-            executor: MockExecutor(
+            appServerExecutor: MockCodexAppServerExecutor(
                 recorder: recorder,
-                output: output,
-                writeCodexLastMessage: true
+                output: output
             )
         )
         let input = SegmentsDocument(
@@ -525,11 +515,13 @@ import Testing
         #expect(result.manifestPostprocess.modelID == "gpt-5.6-sol")
         #expect(result.manifestPostprocess.backend.version == "codex-cli 9.9.9")
         let invocation = try #require(recorder.invocations.first)
-        let schemaIndex = try #require(invocation.arguments.firstIndex(of: "--output-schema"))
-        #expect(invocation.arguments[schemaIndex + 1].hasSuffix("translation-output.schema.json"))
-        #expect(invocation.arguments.contains("--ignore-user-config"))
-        #expect(String(decoding: invocation.standardInput, as: UTF8.self).contains("Ciao"))
-        #expect(!String(decoding: invocation.standardInput, as: UTF8.self).contains("S01"))
+        let schemaObject = try #require(
+            JSONSerialization.jsonObject(with: invocation.outputSchema)
+                as? [String: Any]
+        )
+        #expect(schemaObject["required"] as? [String] == ["translations"])
+        #expect(invocation.prompt.contains("Ciao"))
+        #expect(!invocation.prompt.contains("S01"))
     }
 
     @Test func codexExecutableLocatorFindsFallbackOutsideGUIPath() throws {
@@ -582,19 +574,22 @@ import Testing
             fallbackDirectories: []
         )
         #expect(resolved == nil)
-        #expect(CodexPostprocessBackend.detectAvailability(
+        #expect(await CodexPostprocessBackend.detectAvailability(
             executableURL: resolved
         ) == .unavailable)
 
-        let recorder = InvocationRecorder()
+        let recorder = CodexInvocationRecorder()
         let backend = CodexPostprocessBackend(
             codexExecutableURL: resolved,
-            executor: MockExecutor(recorder: recorder, output: validOutput)
+            appServerExecutor: MockCodexAppServerExecutor(
+                recorder: recorder,
+                output: validOutput
+            )
         )
         #expect(backend.availability == .unavailable)
         #expect(backend.codexVersion == "unavailable")
-        await #expect(throws: PostprocessError.authenticationRequired(
-            "Codex is not authenticated. Run `codex login` in Terminal, then try again, or select Local."
+        await #expect(throws: PostprocessError.launchFailed(
+            "codex CLI executable was not found"
         )) {
             _ = try await backend.propose(prompt: "x")
         }
@@ -702,33 +697,31 @@ import Testing
         }
     }
 
-    @Test func codexAvailabilitySeparatesInstallFromAuthentication() throws {
-        let authenticated = try executableScript(#"""
+    @Test func codexAvailabilitySeparatesInstallFromSubscriptionAuthentication() async throws {
+        let executable = try executableScript(#"""
         #!/bin/sh
         if [ "$1" = "--version" ]; then echo "codex-cli fixture"; exit 0; fi
-        if [ "$1" = "login" ] && [ "$2" = "status" ]; then exit 0; fi
-        exit 2
-        """#)
-        let loggedOut = try executableScript(#"""
-        #!/bin/sh
-        if [ "$1" = "--version" ]; then echo "codex-cli fixture"; exit 0; fi
-        if [ "$1" = "login" ] && [ "$2" = "status" ]; then exit 1; fi
         exit 2
         """#)
         defer {
-            try? FileManager.default.removeItem(at: authenticated.deletingLastPathComponent())
-            try? FileManager.default.removeItem(at: loggedOut.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: executable.deletingLastPathComponent())
         }
 
-        #expect(CodexPostprocessBackend.detectAvailability(
-            executableURL: authenticated
+        #expect(await CodexPostprocessBackend.detectAvailability(
+            executableURL: executable,
+            appServerExecutor: MockCodexAppServerExecutor(reportedAccountState: .chatGPT)
         ) == .authenticated(version: "codex-cli fixture"))
-        #expect(CodexPostprocessBackend.detectAvailability(
-            executableURL: loggedOut
+        #expect(await CodexPostprocessBackend.detectAvailability(
+            executableURL: executable,
+            appServerExecutor: MockCodexAppServerExecutor(reportedAccountState: .signedOut)
+        ) == .unauthenticated(version: "codex-cli fixture"))
+        #expect(await CodexPostprocessBackend.detectAvailability(
+            executableURL: executable,
+            appServerExecutor: MockCodexAppServerExecutor(reportedAccountState: .unsupported)
         ) == .unauthenticated(version: "codex-cli fixture"))
     }
 
-    @Test func codexAvailabilityProbeHasABoundedTimeout() throws {
+    @Test func codexVersionProbeHasABoundedTimeout() throws {
         let hanging = try executableScript(#"""
         #!/bin/sh
         /bin/sleep 2
@@ -740,60 +733,31 @@ import Testing
             )
         }
         let started = Date()
-        #expect(CodexPostprocessBackend.detectAvailability(
+        #expect(CodexPostprocessBackend.detectVersion(
             executableURL: hanging,
             timeoutS: 0.05
-        ) == .unavailable)
+        ) == "unavailable")
         #expect(Date().timeIntervalSince(started) < 1.5)
     }
 
-    @Test func codexLoginProbeTimeoutTerminatesItsExactProcessTree() throws {
-        let executable = try executableScript(#"""
-        #!/bin/sh
-        if [ "$1" = "--version" ]; then echo "codex-cli fixture"; exit 0; fi
-        if [ "$1" = "login" ] && [ "$2" = "status" ]; then
-          fixture_dir=$(dirname "$0")
-          echo $$ > "$fixture_dir/root.pid"
-          trap '' TERM
-          sleep 30 &
-          echo $! > "$fixture_dir/child.pid"
-          wait
-        fi
-        exit 2
-        """#)
-        let directory = executable.deletingLastPathComponent()
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let availability = CodexPostprocessBackend.detectAvailability(
-            executableURL: executable,
-            timeoutS: 5
-        )
-
-        #expect(availability == .unauthenticated(version: "codex-cli fixture"))
-        for name in ["root.pid", "child.pid"] {
-            let text = try String(
-                contentsOf: directory.appendingPathComponent(name),
-                encoding: .utf8
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
-            let processID = try #require(Int32(text))
-            errno = 0
-            #expect(Darwin.kill(processID, 0) == -1)
-            #expect(errno == ESRCH)
-        }
-    }
-
-    @Test func unauthenticatedCodexFailsBeforeLaunchingExecutor() async throws {
-        let recorder = InvocationRecorder()
+    @Test func appServerOwnsAuthenticationAtRunTime() async throws {
+        let recorder = CodexInvocationRecorder()
         let backend = CodexPostprocessBackend(
             availability: .unauthenticated(version: "codex-cli fixture"),
-            executor: MockExecutor(recorder: recorder, output: validOutput)
+            appServerExecutor: MockCodexAppServerExecutor(
+                recorder: recorder,
+                output: validOutput,
+                runError: .authenticationRequired(
+                    "Codex requires a ChatGPT subscription sign-in. Run `codex login` in Terminal, then try again, or select Local."
+                )
+            )
         )
         await #expect(throws: PostprocessError.authenticationRequired(
-            "Codex is not authenticated. Run `codex login` in Terminal, then try again, or select Local."
+            "Codex requires a ChatGPT subscription sign-in. Run `codex login` in Terminal, then try again, or select Local."
         )) {
             _ = try await backend.propose(prompt: "synthetic text")
         }
-        #expect(recorder.invocations.isEmpty)
+        #expect(recorder.invocations.count == 1)
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment[
@@ -844,7 +808,9 @@ import Testing
             result = try await TranscriptTranslator(
                 backend: CodexPostprocessBackend(
                     batchPolicy: twoBatchPolicy,
-                    executor: ActualCodexRecordingExecutor(recorder: invocationRecorder)
+                    appServerExecutor: ActualCodexRecordingExecutor(
+                        recorder: invocationRecorder
+                    )
                 )
             ).translate(TranslationRequest(
                 document: input,
@@ -928,26 +894,21 @@ import Testing
         try evidence.writeCreateOnly(to: evidenceConfiguration.outputURL)
     }
 
-    @Test func actualCodexEvidenceProjectionRedactsPromptAndWorkspacePaths() async throws {
+    @Test func actualCodexAppServerEvidenceProjectionRedactsPromptAndWorkspacePaths() async throws {
         let recorder = ActualCodexInvocationRecorder()
-        await recorder.record(SubprocessInvocation(
+        await recorder.record(CodexAppServerInvocation(
             executableURL: URL(fileURLWithPath: "/Users/someone/.local/bin/codex"),
-            arguments: [
-                "exec", "--json", "--output-schema", "/private/tmp/private/schema.json",
-                "--output-last-message", "/private/tmp/private/output.json",
-                "--model", "gpt-5.6-sol", "--sandbox", "read-only", "--ephemeral",
-                "--ignore-rules", "--skip-git-repo-check", "--ignore-user-config",
-                "-C", "/private/tmp/private", "-",
-            ],
-            standardInput: Data("synthetic prompt must not be persisted".utf8)
-        ), exitStatus: 0)
+            model: "gpt-5.6-sol",
+            prompt: "synthetic prompt must not be persisted",
+            outputSchema: Data(#"{"type":"object"}"#.utf8),
+            workspaceURL: URL(fileURLWithPath: "/private/tmp/private")
+        ))
 
         let projection = try #require(await recorder.snapshot().first)
         let encoded = String(decoding: try sortedJSONData(projection), as: UTF8.self)
         #expect(projection.requiredIsolationArgumentsPresent)
-        #expect(encoded.contains("<isolated-schema>"))
-        #expect(encoded.contains("<isolated-output>"))
-        #expect(encoded.contains("<isolated-workspace>"))
+        #expect(projection.transport == "app-server-stdio")
+        #expect(projection.model == "gpt-5.6-sol")
         #expect(!encoded.contains("synthetic prompt must not be persisted"))
         #expect(!encoded.contains("/private/tmp/private"))
         #expect(!encoded.contains("/Users/someone"))
@@ -1050,6 +1011,31 @@ private final class InvocationRecorder: @unchecked Sendable {
     var invocations: [SubprocessInvocation] = []
 }
 
+private final class CodexInvocationRecorder: @unchecked Sendable {
+    var invocations: [CodexAppServerInvocation] = []
+}
+
+private struct MockCodexAppServerExecutor: CodexAppServerExecuting {
+    var recorder: CodexInvocationRecorder?
+    var output: Data = Data(#"{"proposals":[]}"#.utf8)
+    var reportedAccountState: CodexAppServerAccountState = .chatGPT
+    var runError: PostprocessError?
+
+    func accountState(
+        executableURL: URL,
+        workspaceURL: URL,
+        timeoutS: TimeInterval
+    ) async throws -> CodexAppServerAccountState {
+        reportedAccountState
+    }
+
+    func run(_ invocation: CodexAppServerInvocation) async throws -> Data {
+        recorder?.invocations.append(invocation)
+        if let runError { throw runError }
+        return output
+    }
+}
+
 private final class TranslationPromptRecorder: @unchecked Sendable {
     var prompts: [String] = []
 }
@@ -1109,30 +1095,22 @@ private struct MockExecutor: SubprocessExecuting {
     let recorder: InvocationRecorder?
     let output: Data
     let exitStatus: Int32
-    let writeCodexLastMessage: Bool
     let standardError: Data
 
     init(
         recorder: InvocationRecorder? = nil,
         output: Data,
         exitStatus: Int32 = 0,
-        writeCodexLastMessage: Bool = false,
         standardError: Data = Data()
     ) {
         self.recorder = recorder
         self.output = output
         self.exitStatus = exitStatus
-        self.writeCodexLastMessage = writeCodexLastMessage
         self.standardError = standardError
     }
 
     func run(_ invocation: SubprocessInvocation) async throws -> SubprocessOutput {
         recorder?.invocations.append(invocation)
-        if writeCodexLastMessage,
-           let index = invocation.arguments.firstIndex(of: "--output-last-message")
-        {
-            try output.write(to: URL(fileURLWithPath: invocation.arguments[index + 1]))
-        }
         return SubprocessOutput(exitStatus: exitStatus, standardOutput: output, standardError: standardError)
     }
 }
@@ -1288,11 +1266,8 @@ private struct ActualCodexTranslationEvidence: Codable {
 private actor ActualCodexInvocationRecorder {
     private var records: [ActualCodexInvocationRecord] = []
 
-    func record(_ invocation: SubprocessInvocation, exitStatus: Int32) {
-        records.append(ActualCodexInvocationRecord(
-            invocation: invocation,
-            exitStatus: exitStatus
-        ))
+    func record(_ invocation: CodexAppServerInvocation) {
+        records.append(ActualCodexInvocationRecord(invocation: invocation))
     }
 
     func snapshot() -> [ActualCodexInvocationRecord] {
@@ -1300,13 +1275,25 @@ private actor ActualCodexInvocationRecorder {
     }
 }
 
-private struct ActualCodexRecordingExecutor: SubprocessExecuting {
+private struct ActualCodexRecordingExecutor: CodexAppServerExecuting {
     let recorder: ActualCodexInvocationRecorder
-    private let delegate = FoundationSubprocessExecutor()
+    private let delegate = FoundationCodexAppServerExecutor()
 
-    func run(_ invocation: SubprocessInvocation) async throws -> SubprocessOutput {
+    func accountState(
+        executableURL: URL,
+        workspaceURL: URL,
+        timeoutS: TimeInterval
+    ) async throws -> CodexAppServerAccountState {
+        try await delegate.accountState(
+            executableURL: executableURL,
+            workspaceURL: workspaceURL,
+            timeoutS: timeoutS
+        )
+    }
+
+    func run(_ invocation: CodexAppServerInvocation) async throws -> Data {
         let output = try await delegate.run(invocation)
-        await recorder.record(invocation, exitStatus: output.exitStatus)
+        await recorder.record(invocation)
         return output
     }
 }
@@ -1314,26 +1301,26 @@ private struct ActualCodexRecordingExecutor: SubprocessExecuting {
 private struct ActualCodexInvocationRecord: Codable {
     var executableName: String
     var executableLocationClass: String
-    var normalizedArguments: [String]
+    var transport: String
+    var model: String
     var standardInputUTF8Bytes: Int
     var standardInputSHA256: String
-    var suppliedEnvironmentKeys: [String]
-    var parentEnvironmentInherited: Bool
     var exitStatus: Int32
     var requiredIsolationArgumentsPresent: Bool
 
-    init(invocation: SubprocessInvocation, exitStatus: Int32) {
+    init(invocation: CodexAppServerInvocation) {
         executableName = invocation.executableURL.lastPathComponent
         executableLocationClass = Self.locationClass(invocation.executableURL)
-        normalizedArguments = Self.normalized(invocation.arguments)
-        standardInputUTF8Bytes = invocation.standardInput.count
-        standardInputSHA256 = sha256Hex(invocation.standardInput)
-        suppliedEnvironmentKeys = invocation.environment.keys.sorted()
-        parentEnvironmentInherited = true
-        self.exitStatus = exitStatus
-        requiredIsolationArgumentsPresent = Self.hasRequiredIsolationArguments(
-            invocation.arguments
-        )
+        transport = "app-server-stdio"
+        model = invocation.model
+        let promptData = Data(invocation.prompt.utf8)
+        standardInputUTF8Bytes = promptData.count
+        standardInputSHA256 = sha256Hex(promptData)
+        exitStatus = 0
+        requiredIsolationArgumentsPresent = invocation.model
+            == CodexPostprocessBackend.modelName
+            && invocation.workspaceURL.isFileURL
+            && !invocation.outputSchema.isEmpty
     }
 
     private static func locationClass(_ url: URL) -> String {
@@ -1347,39 +1334,6 @@ private struct ActualCodexInvocationRecord: Codable {
         return "user-or-custom"
     }
 
-    private static func normalized(_ arguments: [String]) -> [String] {
-        var result = arguments
-        let replacements = [
-            "--output-schema": "<isolated-schema>",
-            "--output-last-message": "<isolated-output>",
-            "-C": "<isolated-workspace>",
-        ]
-        for (flag, replacement) in replacements {
-            guard let flagIndex = result.firstIndex(of: flag),
-                  result.indices.contains(flagIndex + 1)
-            else { continue }
-            result[flagIndex + 1] = replacement
-        }
-        return result
-    }
-
-    private static func hasRequiredIsolationArguments(_ arguments: [String]) -> Bool {
-        func hasPair(_ flag: String, _ value: String) -> Bool {
-            guard let index = arguments.firstIndex(of: flag),
-                  arguments.indices.contains(index + 1)
-            else { return false }
-            return arguments[index + 1] == value
-        }
-        let requiredFlags = [
-            "exec", "--json", "--output-schema", "--output-last-message",
-            "--ephemeral", "--ignore-rules", "--skip-git-repo-check",
-            "--ignore-user-config", "-C",
-        ]
-        return requiredFlags.allSatisfy(arguments.contains)
-            && hasPair("--model", CodexPostprocessBackend.modelName)
-            && hasPair("--sandbox", "read-only")
-            && arguments.last == "-"
-    }
 }
 
 private func sortedJSONData<Value: Encodable>(_ value: Value) throws -> Data {

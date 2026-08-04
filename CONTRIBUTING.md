@@ -21,7 +21,7 @@ For the optional local post-processing model, run
 
 ## Testing
 
-Swift — 147 fixture-based tests in 16 suites:
+Swift — 153 fixture-based tests in 17 suites:
 
 ```bash
 swift test                                        # everything
@@ -69,8 +69,8 @@ Evaluation IDs and SHA-256 seals for the preserved runs are recorded in
 [docs/](docs/).
 
 **Not verified:** real-world accents, overlapping speech, and noisy rooms
-beyond the public/synthetic fixtures; the OS-level read scope of the Codex CLI
-sandbox; the service-side identity of the Codex model (manifests record the
+beyond the public/synthetic fixtures; the OS-level read scope of the Codex app-server
+read-only sandbox; the service-side identity of the Codex model (manifests record the
 requested model).
 
 ## Commit conventions

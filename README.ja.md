@@ -75,7 +75,7 @@
 | VAD | `aufklarer/Silero-VAD-v6.2.1-CoreML` | `52387654` | coreml-float16 |
 | 話者分離 | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | 後処理（ローカル） | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
-| 後処理（リモート、テキストのみ） | `codex` CLI経由の`gpt-5.6-sol` | サービス側で管理 | 該当なし |
+| 後処理（リモート、テキストのみ） | Codex app server経由の`gpt-5.6-sol` | サービス側で管理 | 該当なし |
 
 ## 測定結果
 
@@ -110,7 +110,7 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 147 tests
+swift build && swift test          # 153 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -130,7 +130,7 @@ build、resource allowlist inventory、strict codesignの各チェックに合�
 </p>
 
 - 文字起こし、VAD、話者分離は完全にローカルで実行します。音声byteがnetwork pathへ到達することはありません。ポリシーではなくtestで強制しています。
-- 任意のCodex後処理経路はテキストのみを扱い、runごとに選択します。空の一時workspaceでread-only sandboxとユーザー設定の分離を適用し、`codex exec`を起動します。promptに含まれるのはsegment text、有効な用語集、指示です。代わりにローカルMLXモデルを選ぶと、テキストもデバイス内に残ります。
+- 任意のCodex後処理経路はテキストのみを扱い、runごとに選択します。保存済みのChatGPTサブスクリプション認証を使い、1ターンだけの`codex app-server`セッションを開きます。threadは一時的かつread-onlyで、toolは無効、承認要求は拒否されます。promptに含まれるのはsegment text、有効な用語集、指示です。この経路ではAPI key認証を受け付けません。代わりにローカルMLXモデルを選ぶと、テキストもデバイス内に残ります。
 - Failure messageはrun manifestへ入る前に長さを制限し、pathを秘匿します。
 
 ## 制約
@@ -150,7 +150,7 @@ Issueと対象を絞ったpull requestを歓迎します。Buildとtestのコマ
 | パス | 内容 |
 |---|---|
 | `Sources/` | Swiftパッケージ：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
-| `Tests/` | 16 suite、147件のfixtureベースtest |
+| `Tests/` | 17 suite、153件のfixtureベースtest |
 | `benchmarks/scripts/` | Derived verdictとnegative testを備えたrunnerとscorer |
 | `docs/` | 調査digest、source audit、constraint policy、契約（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |

@@ -116,9 +116,9 @@ The SHA-256 of `evidence.json` is
 confirmed that audio, the raw transcript, speakers, and timestamps remained unchanged.
 MOSS transcription retains 120-second leaves, 5,120 output tokens, EOS-only promotion,
 and typed recovery. Remaining risks are recalibrating when a new model or a real
-long-form input changes the output expansion factor, and the inability of the
-`codex exec` read-only sandbox to fully prevent macOS-level reads outside an empty
-working directory. A private real recording, validated through structural metadata
+long-form input changes the output expansion factor, and the inability of the Codex
+app-server read-only sandbox to fully prevent macOS-level reads outside an empty working
+directory. A private real recording, validated through structural metadata
 only; not part of this repository. It remains optional validation under D19 and does
 not block v1 completion.
 
@@ -140,7 +140,10 @@ not block v1 completion.
   Both passed strict no-regression, source hash, glossary, and chunk-boundary global
   speaker contracts. Failed runs, recordings, raw transcripts, and existing artifacts
   remain in preserved local run directories that are create-only and not part of this
-  repository.
+  repository. The active Codex transport now uses a fresh `codex app-server` process for
+  each readiness probe or text transformation. It accepts only a ChatGPT subscription
+  account, creates one ephemeral read-only thread, disables tools, declines approval
+  requests, and records new manifests as `codex-app-server`.
 - **next**: If the maintainer chooses, validate correction time and translation quality
   on a real meeting. If the model revision, backend output format, or long-form output
   expansion changes, recalibrate the budget coefficient with the fixture and an actual
@@ -322,6 +325,16 @@ not deleted.
   canonical README is English with nine localized siblings: de, es, fr, it, ja, ko, pt,
   ru, and zh-Hans. All other tracked documentation is English; detailed personal and
   session-bound records live outside the tracked tree.
+- D33 [maintainer] Replaces the active Codex transport described by D5 and D30 (decided
+  2026-08-04). Use the cached ChatGPT subscription authentication through an isolated
+  `codex app-server` stdio session. Do not invoke `codex exec` for product correction or
+  translation and do not accept an API key as fallback. Each readiness probe or text
+  transformation owns one app-server process. A transformation creates one ephemeral
+  read-only thread, disables tools, declines approval requests, supplies the existing
+  schema and fixed `gpt-5.6-sol` model, and reaps the exact process tree. Preserve D30's
+  model, prompt, batch, output-budget, and historical evidence records. New manifests
+  identify the backend as `codex-app-server`; historical `codex-cli` manifests remain
+  valid and decodable.
 
 ## Project-wide Done Criteria
 

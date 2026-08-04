@@ -187,7 +187,7 @@ final class MaccheroniAppModel {
 
     func refreshCodexAvailability() async {
         codexAvailability = await Task.detached(priority: .utility) {
-            CodexPostprocessBackend.detectAvailability()
+            await CodexPostprocessBackend.detectAvailability()
         }.value
     }
 

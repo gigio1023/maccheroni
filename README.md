@@ -76,7 +76,7 @@ Everything is pinned by Hugging Face ID + revision + quantization and recorded i
 | VAD | `aufklarer/Silero-VAD-v6.2.1-CoreML` | `52387654` | coreml-float16 |
 | Diarization | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | Post-processing (local) | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
-| Post-processing (remote, text-only) | `gpt-5.6-sol` via `codex` CLI | service-managed | n/a |
+| Post-processing (remote, text-only) | `gpt-5.6-sol` via Codex app server | service-managed | n/a |
 
 ## Measured results
 
@@ -111,7 +111,7 @@ Requirements: Apple Silicon Mac, macOS 26, Xcode 26, [uv](https://docs.astral.sh
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 147 tests
+swift build && swift test          # 153 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -131,7 +131,7 @@ Profiles ship for Korean meetings (`ko-meeting`, VibeVoice) and Italian dialogue
 </p>
 
 - Transcription, VAD, and diarization are fully local. Audio bytes never reach any network path — this is enforced by tests, not policy.
-- The optional Codex post-processing lane is text-only and opt-in per run. It launches `codex exec` in an empty ephemeral workspace with a read-only sandbox and user-config isolation; the prompt contains segment text, the active glossary, and instructions. Choosing the local MLX model instead keeps even text on-device.
+- The optional Codex post-processing lane is text-only and opt-in per run. It opens a one-turn `codex app-server` session using the cached ChatGPT subscription sign-in. The thread is ephemeral and read-only, tools are disabled, and approval requests are declined; the prompt contains segment text, the active glossary, and instructions. API-key authentication is not accepted for this lane. Choosing the local MLX model instead keeps even text on-device.
 - Failure messages are length-capped and path-redacted before they enter run manifests.
 
 ## Limitations
@@ -151,7 +151,7 @@ Issues and focused pull requests are welcome. Build and test commands, the verif
 | Path | What it is |
 |---|---|
 | `Sources/` | Swift package: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 147 fixture-based tests across 16 suites |
+| `Tests/` | 153 fixture-based tests across 17 suites |
 | `benchmarks/scripts/` | Runners and scorers with derived verdicts and negative tests |
 | `docs/` | Research digest, source audits, constraint policy, contracts (JSON schemas), UI design |
 | `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |

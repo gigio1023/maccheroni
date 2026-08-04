@@ -76,7 +76,7 @@ Alle Modelle sind durch Hugging-Face-ID + Revision + Quantisierung festgeschrieb
 | VAD | `aufklarer/Silero-VAD-v6.2.1-CoreML` | `52387654` | coreml-float16 |
 | Diarisierung | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | Nachbearbeitung (lokal) | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
-| Nachbearbeitung (remote, nur Text) | `gpt-5.6-sol` über die `codex` CLI | vom Dienst verwaltet | nicht zutreffend |
+| Nachbearbeitung (remote, nur Text) | `gpt-5.6-sol` über den Codex-App-Server | vom Dienst verwaltet | nicht zutreffend |
 
 ## Messergebnisse
 
@@ -111,7 +111,7 @@ Voraussetzungen: Apple-Silicon-Mac, macOS 26, Xcode 26, [uv](https://docs.astral
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 147 tests
+swift build && swift test          # 153 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -131,7 +131,7 @@ Mitgeliefert werden Profile für koreanische Meetings (`ko-meeting`, VibeVoice) 
 </p>
 
 - Transkription, VAD und Diarisierung laufen vollständig lokal. Audiobytes gelangen auf keinen Netzwerkpfad. Tests erzwingen dies, nicht bloß eine Richtlinie.
-- Der optionale Codex-Nachbearbeitungspfad arbeitet ausschließlich mit Text und muss für jeden Lauf aktiviert werden. Er startet `codex exec` in einem leeren temporären Arbeitsbereich mit einer schreibgeschützten Sandbox und isolierter Benutzerkonfiguration. Der Prompt enthält Segmenttext, das aktive Glossar und Anweisungen. Wer stattdessen das lokale MLX-Modell wählt, behält auch den Text auf dem Gerät.
+- Der optionale Codex-Nachbearbeitungspfad arbeitet ausschließlich mit Text und muss für jeden Lauf aktiviert werden. Er öffnet mit der gespeicherten ChatGPT-Abonnementanmeldung eine einmalige `codex app-server`-Sitzung. Der Thread ist temporär und schreibgeschützt, Werkzeuge sind deaktiviert und Genehmigungsanfragen werden abgelehnt. Der Prompt enthält Segmenttext, das aktive Glossar und Anweisungen. Eine API-Key-Anmeldung wird für diesen Pfad nicht akzeptiert. Wer stattdessen das lokale MLX-Modell wählt, behält auch den Text auf dem Gerät.
 - Fehlermeldungen werden in ihrer Länge begrenzt und Pfade daraus entfernt, bevor sie in Ausführungsmanifeste gelangen.
 
 ## Einschränkungen
@@ -151,7 +151,7 @@ Issues und gezielte Pull Requests sind willkommen. Build- und Testbefehle, der V
 | Pfad | Inhalt |
 |---|---|
 | `Sources/` | Swift-Paket: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 147 fixturebasierte Tests in 16 Suites |
+| `Tests/` | 153 fixturebasierte Tests in 17 Suites |
 | `benchmarks/scripts/` | Runner und Scorer mit abgeleiteten Urteilen und Negativtests |
 | `docs/` | Forschungsübersicht, Quellcodeprüfungen, Richtlinie für Beschränkungen, Verträge (JSON-Schemas), UI-Design |
 | `scripts/` | App-Bundle-Build, MOSS-Harness-Build, Einrichtung der Nachbearbeitungslaufzeit |

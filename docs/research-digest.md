@@ -76,9 +76,11 @@ library layer.
   from the default-backend candidates.
 - **argmax-oss-swift** (formerly WhisperKit, MIT, 6.3k stars): a monorepo with
   WhisperKit ASR and SpeakerKit (pyannote v4 family). Alternative pool.
-- **Codex integration**: `codex exec` supports non-interactive execution,
-  `--json`, `--output-schema` (JSON Schema enforcement), the final message on
-  stdout, and the subscription quota of the CLI login.
+- **Codex integration**: `codex app-server` exposes a JSONL protocol over stdio.
+  Maccheroni initializes one isolated process per request, confirms a ChatGPT
+  subscription account with `account/read`, and starts one ephemeral read-only turn
+  with a JSON Schema `outputSchema`. Tools are disabled and approval requests are
+  declined. The app server owns the Codex CLI login cache and token refresh.
 
 ## Preprocessing (verified)
 

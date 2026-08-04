@@ -141,7 +141,7 @@ struct AppShellTests {
             ),
         ]).write(to: postprocessConflicts)
         fixture.manifest.postprocess = ManifestPostprocess(
-            backend: BackendDescriptor(name: "codex-cli", version: "codex-cli test"),
+            backend: BackendDescriptor(name: "codex-app-server", version: "codex-cli test"),
             modelID: CodexPostprocessBackend.modelName
         )
         fixture.manifest.artifacts += [
@@ -274,7 +274,7 @@ struct AppShellTests {
         try JSONEncoder().encode(translation).write(to: translationURL)
         fixture.manifest.postprocess = ManifestPostprocess(
             backend: BackendDescriptor(
-                name: "codex-cli",
+                name: "codex-app-server",
                 version: "codex-cli fixture"
             ),
             modelID: CodexPostprocessBackend.modelName,

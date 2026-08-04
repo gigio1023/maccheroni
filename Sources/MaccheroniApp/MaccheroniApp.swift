@@ -40,7 +40,7 @@ private final class AppStartupState {
             let repository = LibraryRepository.local
             let runner = try ProcessTranscriptionRunner(requestsRoot: repository.requestsRoot)
             let codexAvailability = await Task.detached(priority: .utility) {
-                CodexPostprocessBackend.detectAvailability()
+                await CodexPostprocessBackend.detectAvailability()
             }.value
             model = try MaccheroniAppModel(
                 repository: repository,

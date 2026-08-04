@@ -2160,7 +2160,7 @@ public struct CLIApplication: Sendable {
         }
         switch backend {
         case .codex:
-            guard provenance.backend.name == "codex-cli",
+            guard provenance.backend.name == "codex-app-server",
                   provenance.backend.version != "unavailable",
                   provenance.modelID == CodexPostprocessBackend.modelName,
                   provenance.modelRevision == nil,
@@ -2282,7 +2282,7 @@ public struct CLIApplication: Sendable {
         }
         switch backend {
         case .codex:
-            guard provenance.backend.name == "codex-cli",
+            guard provenance.backend.name == "codex-app-server",
                   provenance.backend.version != "unavailable",
                   provenance.modelID == CodexPostprocessBackend.modelName,
                   provenance.modelRevision == nil,
@@ -3210,9 +3210,9 @@ private func productionPostprocessDoctorChecks(
 ) async -> [String] {
     switch backend {
     case .codex:
-        let availability = CodexPostprocessBackend.detectAvailability()
+        let availability = await CodexPostprocessBackend.detectAvailability()
         return [
-            "postprocess_backend=codex-cli@\(availability.version)",
+            "postprocess_backend=codex-app-server@\(availability.version)",
             "postprocess_model=\(CodexPostprocessBackend.modelName)",
             "postprocess_input_mode=text-only",
             "check.postprocess_installed=\(availability.isInstalled)",

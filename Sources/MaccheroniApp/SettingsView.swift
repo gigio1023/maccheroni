@@ -55,7 +55,7 @@ struct SettingsView: View {
         }
         .task {
             codexAvailability = await Task.detached(priority: .utility) {
-                CodexPostprocessBackend.detectAvailability()
+                await CodexPostprocessBackend.detectAvailability()
             }.value
         }
         .alert(appLocalized("Maccheroni Needs Attention"), isPresented: Binding(

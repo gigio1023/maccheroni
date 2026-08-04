@@ -76,7 +76,7 @@ Cada modelo é fixado por ID do Hugging Face + revisão + quantização e regist
 | VAD | `aufklarer/Silero-VAD-v6.2.1-CoreML` | `52387654` | coreml-float16 |
 | Diarização | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | Pós-processamento (local) | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
-| Pós-processamento (remoto, somente texto) | `gpt-5.6-sol` pela CLI `codex` | gerenciado pelo serviço | n/a |
+| Pós-processamento (remoto, somente texto) | `gpt-5.6-sol` pelo servidor de aplicações Codex | gerenciado pelo serviço | n/a |
 
 ## Resultados medidos
 
@@ -111,7 +111,7 @@ Requisitos: Mac com Apple Silicon, macOS 26, Xcode 26 e [uv](https://docs.astral
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 147 tests
+swift build && swift test          # 153 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -131,7 +131,7 @@ O projeto inclui perfis para reuniões em coreano (`ko-meeting`, VibeVoice) e di
 </p>
 
 - A transcrição, o VAD e a diarização são totalmente locais. Os bytes de áudio nunca chegam a nenhum caminho de rede: isso é garantido por testes, não por uma simples política.
-- A via opcional de pós-processamento com Codex envia somente texto e exige adesão a cada execução. Ela inicia `codex exec` em um espaço de trabalho temporário vazio, com sandbox somente de leitura e isolamento da configuração do usuário; o prompt contém o texto dos segmentos, o glossário ativo e as instruções. Se você escolher o modelo MLX local, até o texto permanecerá no dispositivo.
+- A via opcional de pós-processamento com Codex envia somente texto e exige adesão a cada execução. Ela abre uma sessão de um único turno com `codex app-server` usando o login salvo da assinatura do ChatGPT. A thread é temporária e somente de leitura, as ferramentas ficam desativadas e as solicitações de aprovação são recusadas. O prompt contém o texto dos segmentos, o glossário ativo e as instruções. Essa via não aceita autenticação por chave de API. Se você escolher o modelo MLX local, até o texto permanecerá no dispositivo.
 - As mensagens de falha têm o comprimento limitado e os caminhos ocultados antes de entrarem nos manifestos de execução.
 
 ## Limitações
@@ -151,7 +151,7 @@ Issues e pull requests focados são bem-vindos. Os comandos de compilação e te
 | Caminho | Conteúdo |
 |---|---|
 | `Sources/` | Pacote Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 147 testes baseados em fixtures, distribuídos em 16 suites |
+| `Tests/` | 153 testes baseados em fixtures, distribuídos em 17 suites |
 | `benchmarks/scripts/` | Executores e avaliadores com veredictos derivados e testes negativos |
 | `docs/` | Resumo da pesquisa, auditorias de código-fonte, política de restrições, contratos (esquemas JSON), design da interface |
 | `scripts/` | Compilação do bundle do aplicativo, compilação do harness MOSS, configuração do runtime de pós-processamento |

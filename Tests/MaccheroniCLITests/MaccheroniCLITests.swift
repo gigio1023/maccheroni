@@ -314,7 +314,7 @@ struct MaccheroniCLITests {
             in: run
         )
         #expect(manifest.status == .succeeded)
-        #expect(manifest.postprocess?.backend.name == "codex-cli")
+        #expect(manifest.postprocess?.backend.name == "codex-app-server")
         #expect(manifest.postprocess?.modelID == CodexPostprocessBackend.modelName)
         #expect(manifest.postprocess?.modelRevision == nil)
         #expect(manifest.postprocess?.quantization == nil)
@@ -454,7 +454,7 @@ struct MaccheroniCLITests {
         #expect(manifest.postprocess?.targetLanguage == "en")
         #expect(manifest.postprocess?.sourceSegmentsSHA256 == mergedHash)
         #expect(manifest.postprocess?.backend
-            == BackendDescriptor(name: "codex-cli", version: "codex-cli test"))
+            == BackendDescriptor(name: "codex-app-server", version: "codex-cli test"))
         #expect(manifest.postprocess?.modelID == CodexPostprocessBackend.modelName)
         let translationBatching = try #require(manifest.postprocess?.batching)
         #expect(translationBatching.maximumPromptUTF8Bytes
@@ -1360,7 +1360,7 @@ private func testDependencies(
                 let policy = CodexPostprocessBackend.defaultBatchPolicy
                 provenance = ManifestPostprocess(
                     backend: BackendDescriptor(
-                        name: "codex-cli",
+                        name: "codex-app-server",
                         version: "codex-cli test"
                     ),
                     modelID: CodexPostprocessBackend.modelName,
@@ -1473,7 +1473,7 @@ private func testDependencies(
             case .codex:
                 provenance = ManifestPostprocess(
                     backend: BackendDescriptor(
-                        name: "codex-cli",
+                        name: "codex-app-server",
                         version: "codex-cli test"
                     ),
                     modelID: CodexPostprocessBackend.modelName,

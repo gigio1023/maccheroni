@@ -75,7 +75,7 @@
 | VAD | `aufklarer/Silero-VAD-v6.2.1-CoreML` | `52387654` | coreml-float16 |
 | 说话人分离 | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | 后处理（本地） | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
-| 后处理（远程，仅文本） | 通过 `codex` CLI 使用 `gpt-5.6-sol` | 由服务管理 | 不适用 |
+| 后处理（远程，仅文本） | 通过 Codex 应用服务器使用 `gpt-5.6-sol` | 由服务管理 | 不适用 |
 
 ## 实测结果
 
@@ -110,7 +110,7 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 147 tests
+swift build && swift test          # 153 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -130,7 +130,7 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 </p>
 
 - 转写、VAD 和说话人分离完全在本地执行。音频 byte 绝不会进入任何 network path。这一限制由 test 强制执行，并非只写在政策中。
-- 可选的 Codex 后处理路径只发送文本，并且每次运行都需要主动选择。它在空的临时 workspace 中启动 `codex exec`，使用 read-only sandbox 并隔离用户设置。prompt 只包含 segment text、当前术语表和指令。选择本地 MLX 模型后，连文本也会留在设备上。
+- 可选的 Codex 后处理路径只发送文本，并且每次运行都需要主动选择。它使用已保存的 ChatGPT 订阅登录打开单轮 `codex app-server` 会话。thread 是临时且只读的，tool 会被禁用，审批请求会被拒绝。prompt 只包含 segment text、当前术语表和指令。此路径不接受 API key 身份验证。选择本地 MLX 模型后，连文本也会留在设备上。
 - Failure message 在进入 run manifest 前会限制长度并隐去 path。
 
 ## 限制
@@ -150,7 +150,7 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 | 路径 | 内容 |
 |---|---|
 | `Sources/` | Swift 包：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
-| `Tests/` | 分布于16个 suite 的147项 fixture test |
+| `Tests/` | 分布于17个 suite 的153项 fixture test |
 | `benchmarks/scripts/` | 带有 derived verdict 和 negative test 的 runner 与 scorer |
 | `docs/` | 调研 digest、source audit、constraint policy、契约（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |

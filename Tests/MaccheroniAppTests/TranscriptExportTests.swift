@@ -90,7 +90,7 @@ struct TranscriptExportTests {
     func translationKeepsUncertaintyMarkerDespiteStaleSourceResolution() throws {
         var fixture = exportFixture()
         fixture.run.manifest.postprocess = ManifestPostprocess(
-            backend: BackendDescriptor(name: "codex-cli", version: "fixture"),
+            backend: BackendDescriptor(name: "codex-app-server", version: "fixture"),
             modelID: "gpt-5.6-sol",
             mode: .translation,
             targetLanguage: "en"

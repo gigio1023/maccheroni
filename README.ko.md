@@ -75,7 +75,7 @@
 | VAD | `aufklarer/Silero-VAD-v6.2.1-CoreML` | `52387654` | coreml-float16 |
 | 화자 분리 | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | 후처리(로컬) | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
-| 후처리(원격, 텍스트만) | `codex` CLI를 통한 `gpt-5.6-sol` | 서비스에서 관리 | 해당 없음 |
+| 후처리(원격, 텍스트만) | Codex 앱 서버를 통한 `gpt-5.6-sol` | 서비스에서 관리 | 해당 없음 |
 
 ## 측정 결과
 
@@ -110,7 +110,7 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 147 tests
+swift build && swift test          # 153 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -130,7 +130,7 @@ build, resource allowlist inventory, strict codesign 검사를 모두 통과하�
 </p>
 
 - 전사, VAD, 화자 분리는 모두 로컬에서 실행합니다. 오디오 byte는 어떤 network path로도 전달하지 않습니다. 정책 선언에 그치지 않고 test로 강제합니다.
-- 선택 기능인 Codex 후처리 경로는 텍스트만 보내며 실행마다 사용자가 선택합니다. 빈 임시 workspace에서 read-only sandbox와 사용자 설정 격리를 적용해 `codex exec`를 실행합니다. prompt에는 segment text, 활성 용어집, 지침이 들어갑니다. 로컬 MLX 모델을 선택하면 텍스트도 기기를 떠나지 않습니다.
+- 선택 기능인 Codex 후처리 경로는 텍스트만 보내며 실행마다 사용자가 선택합니다. 저장된 ChatGPT 구독 로그인을 사용해 한 번의 turn만 처리하는 `codex app-server` 세션을 엽니다. thread는 임시 상태이며 읽기 전용입니다. tool은 끄고 승인 요청은 거절합니다. prompt에는 segment text, 활성 용어집, 지침이 들어갑니다. 이 경로는 API key 인증을 받지 않습니다. 로컬 MLX 모델을 선택하면 텍스트도 기기를 떠나지 않습니다.
 - Failure message는 run manifest에 들어가기 전에 길이를 제한하고 path를 가립니다.
 
 ## 제약
@@ -150,7 +150,7 @@ Issue와 범위를 명확히 한 pull request를 환영합니다. Build 및 test
 | 경로 | 내용 |
 |---|---|
 | `Sources/` | Swift 패키지: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 16개 suite에 걸친 fixture 기반 test 147개 |
+| `Tests/` | 17개 suite에 걸친 fixture 기반 test 153개 |
 | `benchmarks/scripts/` | Derived verdict와 negative test를 포함한 runner 및 scorer |
 | `docs/` | 조사 digest, source audit, constraint policy, 계약(JSON schema), UI design |
 | `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |
