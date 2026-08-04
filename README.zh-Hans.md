@@ -59,7 +59,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
-  <img src="docs/assets/pipeline-light.drawio.svg" alt="流水线图:在 Mac 上,采集送入整文件说话人分离和120秒 ASR leaf(每个 leaf 注入词汇表);时间戳合并由时间线决定说话人,再送入可选的设备端后处理;只有可选的 Codex 通道离开 Mac,且仅携带受限文本" width="100%">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="流水线图:在 Mac 上,采集送入整文件说话人分离和120秒 ASR leaf(每个 leaf 注入词汇表);时间戳合并由时间线决定说话人,再送入可选的设备端后处理;离开 Mac 的只有可选的远程后处理通道,通过 Codex 登录连接外部供应商,且仅传输文本" width="100%">
 </picture>
 
 失败的 leaf 会在 typed bound 内重新分割，最短30秒，最大深度为3。只有 end-of-sequence 输出才能升级为 canonical transcript。可选的 Codex 路径通过你自己的 ChatGPT/Codex 订阅发送有长度上限的转写文本、当前术语表和指令。它绝不发送音频或文件路径。
@@ -91,6 +91,8 @@
 | 韩语对话，20个术语 | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
 | 意大利语双人合成音频（10分钟），9个术语 | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
 | VoxConverse 样本（78分钟） | VibeVoice + Pyannote | — | — | — | — | 0.152 |
+
+韩语和意大利语是最早的两个语言配置;新的语言测试样本在完成测量后会加入此表。
 
 在78分钟样本中，两位参考说话人的 chunk 边界稳定性都是1.0。固定的600秒 matrix 显示，超过120秒的 MOSS leaf 会完全丢失 timestamp 结构，因此生产环境的 leaf 上限设为120秒。详情见 [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md)。
 

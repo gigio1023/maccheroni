@@ -1,6 +1,6 @@
 <mxfile host="app.diagrams.net">
   <diagram id="maccheroni-pipeline" name="pipeline">
-    <mxGraphModel dx="850" dy="480" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="680" math="0" shadow="0" adaptiveColors="auto">
+    <mxGraphModel dx="850" dy="480" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="720" math="0" shadow="0" adaptiveColors="auto">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -8,25 +8,25 @@
           <mxGeometry x="40" y="14" width="820" height="40" as="geometry" />
         </mxCell>
         <mxCell id="zone" value="Your Mac (audio never leaves)" style="rounded=1;absoluteArcSize=1;arcSize=32;whiteSpace=wrap;html=1;fillColor=#EAF1FE;strokeColor=#0D0D0D;strokeWidth=1.2;fontColor=#0D0D0D;fontFamily=Inter, Helvetica Neue, Helvetica, sans-serif;fontSize=15;fontStyle=1;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;container=1;pointerEvents=0;shadow=0;" vertex="1" parent="1">
-          <mxGeometry x="40" y="90" width="1290" height="440" as="geometry" />
+          <mxGeometry x="40" y="90" width="1090" height="440" as="geometry" />
         </mxCell>
         <mxCell id="capture" value="CAPTURE&lt;br&gt;&lt;font face=&quot;Inter, Helvetica Neue, Helvetica, sans-serif&quot; style=&quot;font-size:11px&quot; color=&quot;#929591&quot;&gt;mic + system audio&lt;/font&gt;" style="rounded=1;absoluteArcSize=1;arcSize=32;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0D0D0D;strokeWidth=1.2;fontColor=#0D0D0D;fontFamily=IBM Plex Mono, Menlo, monospace;fontSize=13;align=center;spacing=8;shadow=0;" vertex="1" parent="1">
-          <mxGeometry x="90" y="288" width="180" height="74" as="geometry" />
+          <mxGeometry x="80" y="288" width="160" height="74" as="geometry" />
         </mxCell>
         <mxCell id="diar" value="DIARIZATION&lt;br&gt;&lt;font face=&quot;Inter, Helvetica Neue, Helvetica, sans-serif&quot; style=&quot;font-size:11px&quot; color=&quot;#929591&quot;&gt;whole file, one global speaker timeline&lt;/font&gt;" style="rounded=1;absoluteArcSize=1;arcSize=32;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0D0D0D;strokeWidth=1.2;fontColor=#0D0D0D;fontFamily=IBM Plex Mono, Menlo, monospace;fontSize=13;align=center;spacing=8;shadow=0;" vertex="1" parent="1">
-          <mxGeometry x="400" y="170" width="240" height="74" as="geometry" />
+          <mxGeometry x="310" y="170" width="220" height="74" as="geometry" />
         </mxCell>
         <mxCell id="asr" value="ASR LEAVES&lt;br&gt;&lt;font face=&quot;Inter, Helvetica Neue, Helvetica, sans-serif&quot; style=&quot;font-size:11px&quot; color=&quot;#929591&quot;&gt;max 120 s each, glossary injected per leaf&lt;/font&gt;" style="rounded=1;absoluteArcSize=1;arcSize=32;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0D0D0D;strokeWidth=1.2;fontColor=#0D0D0D;fontFamily=IBM Plex Mono, Menlo, monospace;fontSize=13;align=center;spacing=8;shadow=0;" vertex="1" parent="1">
-          <mxGeometry x="400" y="400" width="240" height="74" as="geometry" />
+          <mxGeometry x="310" y="400" width="220" height="74" as="geometry" />
         </mxCell>
         <mxCell id="merge" value="TIMESTAMP MERGE&lt;br&gt;&lt;font face=&quot;Inter, Helvetica Neue, Helvetica, sans-serif&quot; style=&quot;font-size:11px&quot; color=&quot;#929591&quot;&gt;the timeline owns speakers&lt;/font&gt;" style="rounded=1;absoluteArcSize=1;arcSize=32;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0D0D0D;strokeWidth=1.2;fontColor=#0D0D0D;fontFamily=IBM Plex Mono, Menlo, monospace;fontSize=13;align=center;spacing=8;shadow=0;" vertex="1" parent="1">
-          <mxGeometry x="770" y="288" width="210" height="74" as="geometry" />
+          <mxGeometry x="590" y="288" width="200" height="74" as="geometry" />
         </mxCell>
         <mxCell id="localpost" value="LOCAL POST-PROCESSING&lt;br&gt;&lt;font face=&quot;Inter, Helvetica Neue, Helvetica, sans-serif&quot; style=&quot;font-size:11px&quot; color=&quot;#929591&quot;&gt;optional correction or translation, on-device MLX&lt;/font&gt;" style="rounded=1;absoluteArcSize=1;arcSize=32;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0D0D0D;strokeWidth=1.2;fontColor=#0D0D0D;fontFamily=IBM Plex Mono, Menlo, monospace;fontSize=13;align=center;spacing=8;shadow=0;" vertex="1" parent="1">
-          <mxGeometry x="1090" y="288" width="210" height="74" as="geometry" />
+          <mxGeometry x="850" y="288" width="220" height="74" as="geometry" />
         </mxCell>
-        <mxCell id="codex" value="CODEX LANE&lt;br&gt;&lt;font face=&quot;Inter, Helvetica Neue, Helvetica, sans-serif&quot; style=&quot;font-size:11px&quot; color=&quot;#929591&quot;&gt;opt-in, text only, your subscription&lt;/font&gt;" style="rounded=1;absoluteArcSize=1;arcSize=32;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0D0D0D;strokeWidth=1.2;fontColor=#0D0D0D;fontFamily=IBM Plex Mono, Menlo, monospace;fontSize=13;align=center;spacing=8;shadow=0;" vertex="1" parent="1">
-          <mxGeometry x="1420" y="445" width="220" height="74" as="geometry" />
+        <mxCell id="codex" value="REMOTE POST-PROCESSING&lt;br&gt;&lt;font face=&quot;Inter, Helvetica Neue, Helvetica, sans-serif&quot; style=&quot;font-size:11px&quot; color=&quot;#929591&quot;&gt;external vendor, opt-in, text only&lt;br&gt;via your Codex sign-in; API key possible&lt;/font&gt;" style="rounded=1;absoluteArcSize=1;arcSize=32;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0D0D0D;strokeWidth=1.2;fontColor=#0D0D0D;fontFamily=IBM Plex Mono, Menlo, monospace;fontSize=13;align=center;spacing=8;shadow=0;" vertex="1" parent="1">
+          <mxGeometry x="570" y="600" width="240" height="74" as="geometry" />
         </mxCell>
         <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#0D0D0D;strokeWidth=1.2;endArrow=open;endFill=0;endSize=5;startArrow=none;exitX=1;exitY=0.25;entryX=0;entryY=0.5;" edge="1" parent="1" source="capture" target="diar">
           <mxGeometry relative="1" as="geometry" />
@@ -43,13 +43,8 @@
         <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#0D0D0D;strokeWidth=1.2;endArrow=open;endFill=0;endSize=5;startArrow=none;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="merge" target="localpost">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e6" value="BOUNDED TEXT ONLY" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#0D0D0D;strokeWidth=1.2;endArrow=open;endFill=0;endSize=5;startArrow=none;dashed=1;dashPattern=2 2;exitX=0.5;exitY=1;entryX=0.5;entryY=1;fontFamily=IBM Plex Mono, Menlo, monospace;fontSize=12;fontColor=#0D0D0D;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="merge" target="codex">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="875" y="608" />
-              <mxPoint x="1530" y="608" />
-            </Array>
-          </mxGeometry>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#0D0D0D;strokeWidth=1.2;endArrow=open;endFill=0;endSize=5;startArrow=none;dashed=1;dashPattern=2 2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="merge" target="codex">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

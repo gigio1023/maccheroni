@@ -60,7 +60,7 @@ Tutti i componenti esistono già nelle librerie. Mancava la loro combinazione in
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
-  <img src="docs/assets/pipeline-light.drawio.svg" alt="Diagramma della pipeline: sul Mac, l'acquisizione alimenta la diarizzazione dell'intero file e i segmenti ASR da 120 secondi con iniezione del glossario per segmento; la fusione per timestamp, in cui la timeline decide i parlanti, alimenta la post-elaborazione opzionale sul dispositivo; solo la corsia Codex opzionale lascia il Mac, con solo testo limitato" width="100%">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="Diagramma della pipeline: sul Mac, l'acquisizione alimenta la diarizzazione dell'intero file e i segmenti ASR da 120 secondi con iniezione del glossario per segmento; la fusione per timestamp, in cui la timeline decide i parlanti, alimenta la post-elaborazione opzionale sul dispositivo; l'unica cosa che lascia il Mac è la corsia opzionale di post-elaborazione remota verso un fornitore esterno tramite l'accesso Codex, solo testo" width="100%">
 </picture>
 
 I segmenti non riusciti vengono suddivisi di nuovo entro limiti tipizzati (minimo 30 s, profondità 3). Solo gli output con token di fine sequenza vengono promossi nella trascrizione canonica. Il percorso Codex facoltativo invia, tramite il tuo abbonamento ChatGPT/Codex, testo della trascrizione in blocchi limitati, glossario attivo e istruzioni: mai l’audio e mai i percorsi dei file.
@@ -92,6 +92,8 @@ Tutti i risultati provengono da fixture pubbliche o sintetiche. Gli ID delle val
 | Dialogo coreano, glossario di 20 termini | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
 | Conversazione sintetica in italiano con 2 parlanti (10 min), glossario di 9 termini | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
 | Campione VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
+
+Coreano e italiano sono i primi due profili di lingua; nuove fixture linguistiche entrano in questa tabella man mano che vengono misurate.
 
 Nel campione di 78 minuti, la stabilità dei parlanti ai confini dei segmenti è 1.0 per entrambi i parlanti di riferimento. Una matrice fissa di 600 secondi ha mostrato che i segmenti MOSS oltre 120 s perdono completamente la struttura dei timestamp. Per questo il limite di produzione è 120 s; i dettagli sono in [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 

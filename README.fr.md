@@ -60,7 +60,7 @@ Toutes les briques existent dans les bibliothèques. Leur combinaison n’exista
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
-  <img src="docs/assets/pipeline-light.drawio.svg" alt="Diagramme du pipeline : sur le Mac, la capture alimente la diarisation du fichier entier et les feuilles ASR de 120 secondes avec injection du glossaire par feuille ; la fusion par horodatage, où la timeline décide des locuteurs, alimente le post-traitement optionnel sur l'appareil ; seule la voie Codex opt-in quitte le Mac, avec du texte limité uniquement" width="100%">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="Diagramme du pipeline : sur le Mac, la capture alimente la diarisation du fichier entier et les feuilles ASR de 120 secondes avec injection du glossaire par feuille ; la fusion par horodatage, où la timeline décide des locuteurs, alimente le post-traitement optionnel sur l'appareil ; la seule chose qui quitte le Mac est la voie opt-in de post-traitement distant vers un fournisseur externe via la connexion Codex, texte uniquement" width="100%">
 </picture>
 
 Les feuilles en échec sont redécoupées dans des limites typées (minimum de 30 s, profondeur 3), et seules les sorties terminées par un marqueur de fin de séquence sont intégrées à la transcription canonique. Le chemin Codex facultatif envoie, par votre propre abonnement ChatGPT/Codex, des blocs limités de texte transcrit, le glossaire actif et des instructions, jamais l’audio ni les chemins de fichiers.
@@ -92,6 +92,8 @@ Tous les résultats proviennent de jeux de test publics ou synthétiques ; les i
 | Dialogue coréen, glossaire de 20 termes | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
 | Synthèse italienne à 2 locuteurs (10 min), glossaire de 9 termes | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
 | Échantillon VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
+
+Le coréen et l'italien sont les deux premiers profils de langue ; de nouveaux jeux de test linguistiques rejoignent ce tableau au fur et à mesure des mesures.
 
 Stabilité des locuteurs aux frontières des fragments sur l’échantillon de 78 minutes : 1.0 pour les deux locuteurs de référence. Une matrice fixe de 600 secondes a montré que les feuilles MOSS de plus de 120 s perdent entièrement la structure des horodatages. C’est pourquoi la limite de production est fixée à 120 s ; les détails figurent dans [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 

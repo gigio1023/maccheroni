@@ -59,7 +59,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
-  <img src="docs/assets/pipeline-light.drawio.svg" alt="파이프라인 다이어그램: Mac 안에서 캡처가 전체 파일 화자분리와 120초 ASR leaf(leaf마다 glossary 주입)로 이어지고 타임라인이 화자를 결정하는 타임스탬프 병합을 거쳐 선택적 온디바이스 후처리로 연결됩니다. Mac을 떠나는 것은 opt-in Codex lane의 제한된 텍스트뿐입니다" width="100%">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="파이프라인 다이어그램: Mac 안에서 캡처가 전체 파일 화자분리와 120초 ASR leaf(leaf마다 glossary 주입)로 이어지고 타임라인이 화자를 결정하는 타임스탬프 병합을 거쳐 선택적 온디바이스 후처리로 연결됩니다. Mac을 떠나는 것은 opt-in 원격 후처리 레인뿐이고 외부 벤더에는 Codex 로그인으로 연결되며 텍스트만 전송됩니다" width="100%">
 </picture>
 
 실패한 leaf는 typed bound 안에서 다시 나눕니다. 최소 길이는 30초이고 최대 깊이는 3입니다. End-of-sequence 출력만 canonical transcript로 승격합니다. 선택 기능인 Codex 경로는 사용자 자신의 ChatGPT/Codex 구독을 사용해 상한이 정해진 전사 텍스트, 활성 용어집, 지침만 전송합니다. 오디오와 파일 경로는 보내지 않습니다.
@@ -91,6 +91,8 @@
 | 한국어 대화, 20개 용어집 | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
 | 이탈리아어 화자 2명 합성 녹음(10분), 9개 용어집 | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
 | VoxConverse 샘플(78분) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
+
+한국어와 이탈리아어가 첫 두 언어 프로필입니다. 새 언어 fixture를 측정하는 대로 이 표에 추가합니다.
 
 78분 샘플에서 chunk 경계의 화자 안정성은 두 기준 화자 모두 1.0이었습니다. 고정된 600초 matrix에서는 120초를 넘긴 MOSS leaf가 timestamp 구조를 완전히 잃었습니다. 이 결과를 근거로 production leaf 상한을 120초로 정했습니다. 자세한 내용은 [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md)에 있습니다.
 

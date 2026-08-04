@@ -60,7 +60,7 @@ Auf Bibliotheksebene sind alle Bausteine vorhanden. Auf App-Ebene fehlte ihre Ko
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
-  <img src="docs/assets/pipeline-light.drawio.svg" alt="Pipeline-Diagramm: Auf dem Mac speist die Aufnahme die Ganzdatei-Diarisierung und 120-Sekunden-ASR-Blätter mit Glossar-Injektion pro Blatt; der Zeitstempel-Merge, in dem die Timeline die Sprecher bestimmt, führt zur optionalen Nachbearbeitung auf dem Gerät; nur die Opt-in-Codex-Spur verlässt den Mac, ausschließlich mit begrenztem Text" width="100%">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="Pipeline-Diagramm: Auf dem Mac speist die Aufnahme die Ganzdatei-Diarisierung und 120-Sekunden-ASR-Blätter mit Glossar-Injektion pro Blatt; der Zeitstempel-Merge, in dem die Timeline die Sprecher bestimmt, führt zur optionalen Nachbearbeitung auf dem Gerät; den Mac verlässt nur die Opt-in-Spur für entfernte Nachbearbeitung zu einem externen Anbieter über die Codex-Anmeldung, ausschließlich Text" width="100%">
 </picture>
 
 Fehlgeschlagene Blätter werden innerhalb typisierter Grenzen erneut aufgeteilt (mindestens 30 s, Tiefe 3). Nur Ausgaben mit einem Ende-der-Sequenz-Marker werden in das kanonische Transkript übernommen. Der optionale Codex-Pfad sendet begrenzte Transkriptabschnitte, das aktive Glossar und Anweisungen über dein eigenes ChatGPT/Codex-Abonnement. Audio und Dateipfade werden niemals gesendet.
@@ -92,6 +92,8 @@ Alle Ergebnisse stammen aus öffentlichen oder synthetischen Fixtures. Auswertun
 | Koreanischer Dialog, Glossar mit 20 Begriffen | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
 | Italienischer synthetischer Dialog mit 2 Sprechern (10 min), Glossar mit 9 Begriffen | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
 | VoxConverse-Beispiel (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
+
+Koreanisch und Italienisch sind die ersten beiden Sprachprofile; neue Sprach-Fixtures kommen in diese Tabelle, sobald sie gemessen sind.
 
 Stabilität der Sprecher an Abschnittsgrenzen im 78-Minuten-Beispiel: 1.0 für beide Referenzsprecher. Eine feste Matrix von 600 Sekunden zeigte, dass MOSS-Blätter über 120 s ihre Zeitstempelstruktur vollständig verlieren. Deshalb liegt die Obergrenze für produktive Blätter bei 120 s. Einzelheiten stehen unter [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 

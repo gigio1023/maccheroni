@@ -122,10 +122,14 @@ def render_benchmarks(theme: str) -> None:
         ax.bar(i + bw / 2, wer, bw, color=pal["blue_chip"])
         value_label(ax, pal, i - bw / 2, cer + 0.004, f"{cer:.3f}")
         value_label(ax, pal, i + bw / 2, wer + 0.004, f"{wer:.3f}")
-    ax.set_xlim(-0.75, 1.75)
+    ax.set_xlim(-0.75, 2.75)
     ax.set_xticks([])
-    category_label(ax, pal, 0, "Korean dialogue", "VibeVoice 8-bit")
-    category_label(ax, pal, 1, "Italian 2-speaker", "MOSS 0.9B INT8")
+    category_label(ax, pal, 0, "Korean", "VibeVoice")
+    category_label(ax, pal, 1, "Italian", "MOSS INT8")
+    # unmeasured roadmap slot: no bar, no value — just a reserved place
+    ax.text(2.1, 0.055, "···", font=MONO, fontsize=18,
+            color=pal["muted"], ha="center", va="center")
+    category_label(ax, pal, 2.1, "Next languages", "in progress")
     ax.set_title("Error rate (lower is better)", font=SANS, fontsize=14,
                  color=pal["ink"], loc="left", pad=14)
 
@@ -135,12 +139,12 @@ def render_benchmarks(theme: str) -> None:
         ax.bar(i, v, 0.42, color=pal["blue"])
         value_label(ax, pal, i, v + 0.025, f"{v:g}")
     ax.axhline(0.75, color=pal["muted"], linewidth=1, linestyle=(0, (5, 4)))
-    ax.text(-0.62, 0.77, "GATE 0.75", font=MONO, fontsize=10.5, color=pal["muted"],
-            ha="left", va="bottom")
+    ax.text(0.5, 0.715, "GATE 0.75", font=MONO, fontsize=10, color=pal["muted"],
+            ha="center", va="top")
     ax.set_xlim(-0.75, 1.75)
     ax.set_xticks([])
-    category_label(ax, pal, 0, "Korean dialogue", "20-term glossary")
-    category_label(ax, pal, 1, "Italian 2-speaker", "9-term glossary")
+    category_label(ax, pal, 0, "Korean", "20-term glossary")
+    category_label(ax, pal, 1, "Italian", "9-term glossary")
     ax.set_title("Glossary term recall (higher is better)", font=SANS, fontsize=14,
                  color=pal["ink"], loc="left", pad=14)
 
@@ -151,13 +155,16 @@ def render_benchmarks(theme: str) -> None:
         value_label(ax, pal, i, v + 0.005, f"{v:.3f}")
     ax.set_xlim(-0.75, 1.75)
     ax.set_xticks([])
-    category_label(ax, pal, 0, "Italian 2-speaker", "10 min, synthetic")
-    category_label(ax, pal, 1, "VoxConverse sample", "78 min, public")
+    category_label(ax, pal, 0, "Italian synthetic", "10 min, 2 speakers")
+    category_label(ax, pal, 1, "VoxConverse", "78 min, public")
     ax.set_title("Diarization error rate (lower is better)", font=SANS, fontsize=14,
                  color=pal["ink"], loc="left", pad=14)
 
-    fig.text(0.045, 0.028,
+    fig.text(0.045, 0.052,
              "Chunk-boundary speaker stability on the 78-minute sample: 1.0 for both reference speakers across all root boundaries.",
+             font=SANS, fontsize=11, color=pal["muted"])
+    fig.text(0.045, 0.020,
+             "Korean and Italian are the first two language profiles; new language fixtures join this matrix as they are measured.",
              font=SANS, fontsize=11, color=pal["muted"])
 
     fig.savefig(OUT / f"benchmarks-{theme}.svg")

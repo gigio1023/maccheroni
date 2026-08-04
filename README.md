@@ -60,7 +60,7 @@ The parts all exist at the library layer. The combination didn't exist at the ap
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
-  <img src="docs/assets/pipeline-light.drawio.svg" alt="Pipeline diagram: on your Mac, capture feeds whole-file diarization and 120-second ASR leaves with per-leaf glossary injection; the timestamp merge, where the timeline owns speakers, feeds optional on-device post-processing; only the opt-in Codex lane leaves the Mac, carrying bounded text only" width="100%">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="Pipeline diagram: on your Mac, capture feeds whole-file diarization and 120-second ASR leaves with per-leaf glossary injection; the timestamp merge, where the timeline owns speakers, feeds optional on-device post-processing; the only thing that leaves the Mac is the opt-in remote post-processing lane, an external vendor reached through your Codex sign-in, text only" width="100%">
 </picture>
 
 Failed leaves are re-split within typed bounds (30 s minimum, depth 3) and only end-of-sequence outputs are ever promoted to the canonical transcript. The optional Codex lane sends bounded transcript text, the active glossary, and instructions — never audio, never file paths — through your own ChatGPT/Codex subscription.
@@ -92,6 +92,8 @@ All from public or synthetic fixtures; evaluation IDs and artifact hashes are re
 | Korean dialogue, 20-term glossary | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
 | Italian 2-speaker synthetic (10 min), 9-term glossary | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
 | VoxConverse sample (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
+
+Korean and Italian are the first two language profiles; new language fixtures join this table as they are measured.
 
 Chunk-boundary speaker stability on the 78-minute sample: 1.0 for both reference speakers. A fixed 600-second matrix showed that MOSS leaves above 120 s lose timestamp structure entirely, which is why the production leaf cap is 120 s — details in [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 

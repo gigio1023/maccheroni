@@ -59,7 +59,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pipeline-dark.drawio.svg">
-  <img src="docs/assets/pipeline-light.drawio.svg" alt="パイプライン図: Mac内でキャプチャがファイル全体の話者分離と120秒のASR leaf(leafごとにglossary注入)につながり、タイムラインが話者を決めるタイムスタンプmergeを経て任意のオンデバイス後処理へ続く。Macから出るのはopt-inのCodexレーンの制限されたテキストのみ" width="100%">
+  <img src="docs/assets/pipeline-light.drawio.svg" alt="パイプライン図: Mac内でキャプチャがファイル全体の話者分離と120秒のASR leaf(leafごとにglossary注入)につながり、タイムラインが話者を決めるタイムスタンプmergeを経て任意のオンデバイス後処理へ続く。Macから出るのはopt-inのリモート後処理レーンのみで、外部ベンダーへはCodexサインインで接続し、テキストだけを送る" width="100%">
 </picture>
 
 失敗したleafはtyped bound内で再分割します。最小30秒、深さは最大3です。End-of-sequence出力だけをcanonical transcriptへ昇格させます。任意のCodex経路は、自分のChatGPT/Codexサブスクリプションを使い、上限を設けた文字起こしテキスト、有効な用語集、指示だけを送信します。音声もファイルパスも送信しません。
@@ -91,6 +91,8 @@
 | 韓国語の対話、20語の用語集 | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
 | イタリア語の2話者合成音声（10分）、9語の用語集 | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
 | VoxConverseサンプル（78分） | VibeVoice + Pyannote | — | — | — | — | 0.152 |
+
+韓国語とイタリア語が最初の2つの言語プロファイルです。新しい言語フィクスチャは測定でき次第この表に追加します。
 
 78分のサンプルでは、chunk境界での話者安定性が両方の基準話者について1.0でした。固定した600秒のmatrixでは、120秒を超えるMOSS leafがtimestamp構造を完全に失いました。このためproduction leafの上限を120秒に設定しています。詳細は[docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md)にあります。
 
