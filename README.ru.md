@@ -111,7 +111,7 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 156 tests
+swift build && swift test          # 157 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -120,7 +120,7 @@ zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 Исполняемый файл предоставляет четыре команды продукта:
 
 ```bash
-.build/debug/maccheroni help [run|doctor|capabilities]
+.build/debug/maccheroni help [help|run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
 .build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
 .build/debug/maccheroni capabilities [--json]
@@ -157,7 +157,7 @@ zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 | Путь | Содержимое |
 |---|---|
 | `Sources/` | Пакет Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 156 тестов на основе fixtures в 17 наборах |
+| `Tests/` | 157 тестов на основе fixtures в 17 наборах |
 | `benchmarks/scripts/` | Средства запуска и оценки с производными вердиктами и негативными тестами |
 | `docs/` | Обзор исследований, проверки исходного кода, политика ограничений, контракты (схемы JSON), дизайн интерфейса |
 | `scripts/` | Сборка bundle приложения, сборка harness MOSS, настройка среды постобработки |

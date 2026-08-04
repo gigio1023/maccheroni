@@ -110,7 +110,7 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 156 tests
+swift build && swift test          # 157 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -119,7 +119,7 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 可执行文件提供四个产品命令：
 
 ```bash
-.build/debug/maccheroni help [run|doctor|capabilities]
+.build/debug/maccheroni help [help|run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
 .build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
 .build/debug/maccheroni capabilities [--json]
@@ -156,7 +156,7 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 | 路径 | 内容 |
 |---|---|
 | `Sources/` | Swift 包：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
-| `Tests/` | 分布于17个 suite 的156项 fixture test |
+| `Tests/` | 分布于17个 suite 的157项 fixture test |
 | `benchmarks/scripts/` | 带有 derived verdict 和 negative test 的 runner 与 scorer |
 | `docs/` | 调研 digest、source audit、constraint policy、契约（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |

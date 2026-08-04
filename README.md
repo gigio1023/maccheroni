@@ -111,7 +111,7 @@ Requirements: Apple Silicon Mac, macOS 26, Xcode 26, [uv](https://docs.astral.sh
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 156 tests
+swift build && swift test          # 157 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -120,7 +120,7 @@ The app prints its bundle path when the build, resource-allowlist inventory, and
 The executable provides four product commands:
 
 ```bash
-.build/debug/maccheroni help [run|doctor|capabilities]
+.build/debug/maccheroni help [help|run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
 .build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
 .build/debug/maccheroni capabilities [--json]
@@ -157,7 +157,7 @@ Issues and focused pull requests are welcome. Build and test commands, the verif
 | Path | What it is |
 |---|---|
 | `Sources/` | Swift package: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 156 fixture-based tests across 17 suites |
+| `Tests/` | 157 fixture-based tests across 17 suites |
 | `benchmarks/scripts/` | Runners and scorers with derived verdicts and negative tests |
 | `docs/` | Research digest, source audits, constraint policy, contracts (JSON schemas), UI design |
 | `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |

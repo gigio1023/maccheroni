@@ -110,7 +110,7 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 156 tests
+swift build && swift test          # 157 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -119,7 +119,7 @@ build, resource allowlist inventory, strict codesign 검사를 모두 통과하�
 실행 파일은 네 가지 제품 명령을 제공합니다.
 
 ```bash
-.build/debug/maccheroni help [run|doctor|capabilities]
+.build/debug/maccheroni help [help|run|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
 .build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
 .build/debug/maccheroni capabilities [--json]
@@ -156,7 +156,7 @@ Issue와 범위를 명확히 한 pull request를 환영합니다. Build 및 test
 | 경로 | 내용 |
 |---|---|
 | `Sources/` | Swift 패키지: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 17개 suite에 걸친 fixture 기반 test 156개 |
+| `Tests/` | 17개 suite에 걸친 fixture 기반 test 157개 |
 | `benchmarks/scripts/` | Derived verdict와 negative test를 포함한 runner 및 scorer |
 | `docs/` | 조사 digest, source audit, constraint policy, 계약(JSON schema), UI design |
 | `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |
