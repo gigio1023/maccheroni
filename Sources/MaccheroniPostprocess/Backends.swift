@@ -99,7 +99,7 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
         self.appServerExecutor = appServerExecutor
     }
 
-    /// Detects installation/version and ChatGPT subscription authentication through app-server.
+    /// Detects installation/version and validates read-only native ChatGPT credentials through app-server.
     public static func detectAvailability(
         executableURL: URL? = CodexPostprocessBackend.defaultExecutableURL,
         timeoutS: TimeInterval = 5,
@@ -130,6 +130,11 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
             return state == .chatGPT
                 ? .authenticated(version: version)
                 : .unauthenticated(version: version)
+        } catch let error as PostprocessError {
+            if case .authenticationRequired = error {
+                return .unauthenticated(version: version)
+            }
+            return .authenticationUnknown(version: version)
         } catch {
             return .authenticationUnknown(version: version)
         }

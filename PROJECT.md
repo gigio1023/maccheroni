@@ -335,19 +335,16 @@ not deleted.
   model, prompt, batch, output-budget, and historical evidence records. New manifests
   identify the backend as `codex-app-server`; historical `codex-cli` manifests remain
   valid and decodable.
-- D34 [inference] Tightens D33's process launch boundary (decided 2026-08-10). Give
-  every Codex app-server process a fresh mode-0700 `CODEX_HOME` under its private
-  scratch directory. Put only a validated, owner-only mode-0600 hard link to the
-  cached `auth.json` in that home and force the file credential store. Do not copy
-  user configuration, profiles, plugins, MCP state, sessions, or model state. Keep
-  D33's ChatGPT account gate, bounded thread configuration, managed-policy checks,
-  and MCP attestation. In-place credential refreshes reach the original credential
-  inode; an app-server that replaces the bridge inode fails with a typed isolation
-  error until that write strategy is explicitly supported. Preparation, bridge
-  verification, termination, and cleanup fail closed. This closes automatic user
-  `CODEX_HOME` configuration inheritance. It does not close inherited proxy, CA,
-  telemetry, or alternate-auth environment variables, system or managed Codex
-  configuration, or the previously recorded macOS-level read scope.
+- D34 [inference] Replaces D33's authentication-custody clause (decided 2026-08-10).
+  For each readiness probe or text transformation, Maccheroni reads the active native
+  Codex ChatGPT credential only long enough to extract a safely unexpired access token,
+  account ID, and plan type, then injects those fields through `account/login/start`
+  into an app-server whose fresh mode-0700 `CODEX_HOME` contains no user configuration
+  and whose credential store is forced to `ephemeral`. Maccheroni never logs, persists,
+  refreshes, or modifies the credential; when safe validity cannot be proved or the
+  child requests refresh, the operation fails before output promotion and directs the
+  user to refresh or sign in through Codex. Native Codex remains the sole writer of its
+  credential store.
 
 ## Project-wide Done Criteria
 

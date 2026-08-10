@@ -44,7 +44,8 @@ let package = Package(
                 .copy("Python/maccheroni_postprocess_runner.py"),
                 .copy("Python/pyproject.toml"),
                 .copy("Python/uv.lock"),
-            ]
+            ],
+            linkerSettings: [.linkedFramework("Security")]
         ),
         .executableTarget(
             name: "MaccheroniCLI",

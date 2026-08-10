@@ -466,8 +466,8 @@
 	<string>CLI Codex не найден. Установите его и выполните codex login в Терминале или пока выберите Local.</string>
 	<key>Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile.</key>
 	<string>Codex установлен, но вход не выполнен. Выполните codex login в Терминале или пока выберите Local.</string>
-	<key>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</key>
-	<string>В Codex не выполнен вход. Выполните codex login в Терминале, затем повторите попытку или выберите Local.</string>
+	<key>Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local.</key>
+	<string>Срок действия входа в Codex истёк или скоро истечёт. Обновите его или войдите через Codex, затем повторите попытку либо выберите Local.</string>
 	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
 	<string>Codex установлен, но не удалось проверить состояние входа. Повторите попытку или пока выберите Local.</string>
 	<key>Codex is signed in and ready.</key>

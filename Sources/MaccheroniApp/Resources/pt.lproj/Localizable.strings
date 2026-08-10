@@ -466,8 +466,8 @@
 	<string>A CLI do Codex não foi encontrada. Instale-a e execute codex login no Terminal, ou selecione Local enquanto isso.</string>
 	<key>Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile.</key>
 	<string>Codex está instalado, mas não está autenticado. Execute codex login no Terminal ou selecione Local enquanto isso.</string>
-	<key>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</key>
-	<string>O Codex não está autenticado. Execute codex login no Terminal e tente novamente, ou selecione Local.</string>
+	<key>Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local.</key>
+	<string>A sessão do Codex expirou ou está muito próxima de expirar. Atualize-a ou inicie sessão pelo Codex e tente novamente, ou selecione Local.</string>
 	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
 	<string>O Codex está instalado, mas não foi possível verificar o estado de início de sessão. Tente novamente ou selecione Local por enquanto.</string>
 	<key>Codex is signed in and ready.</key>

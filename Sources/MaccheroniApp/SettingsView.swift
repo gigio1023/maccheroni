@@ -361,7 +361,7 @@ private struct CodexStatusLabel: View {
                 } else if availability.authenticationCheckFailed {
                     Text(appLocalized("Installed, but sign-in status could not be checked."))
                 } else if availability.isInstalled {
-                    Text(appLocalized("Installed, not signed in. Run codex login in Terminal."))
+                    Text(appLocalized("Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local."))
                 } else {
                     Text(appLocalized("Not Installed"))
                 }

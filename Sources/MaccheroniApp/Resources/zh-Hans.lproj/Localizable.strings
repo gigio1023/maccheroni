@@ -466,8 +466,8 @@
 	<string>未找到 Codex CLI。请安装它并在终端中运行 codex login，或暂时选择 Local。</string>
 	<key>Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile.</key>
 	<string>Codex 已安装但尚未登录。请在终端中运行 codex login，或暂时选择 Local。</string>
-	<key>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</key>
-	<string>尚未登录 Codex。请在终端中运行 codex login，然后重试，或选择 Local。</string>
+	<key>Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local.</key>
+	<string>Codex 登录已过期或即将过期。请通过 Codex 刷新登录状态或重新登录，然后重试，或选择 Local。</string>
 	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
 	<string>Codex 已安装，但无法检查登录状态。请重试或暂时选择 Local。</string>
 	<key>Codex is signed in and ready.</key>

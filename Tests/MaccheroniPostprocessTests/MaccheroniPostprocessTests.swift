@@ -737,6 +737,14 @@ import Testing
                 accountStateError: .backendFailed("fixture probe failed")
             )
         ) == .authenticationUnknown(version: "codex-cli fixture"))
+        #expect(await CodexPostprocessBackend.detectAvailability(
+            executableURL: executable,
+            appServerExecutor: MockCodexAppServerExecutor(
+                accountStateError: .authenticationRequired(
+                    "Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local."
+                )
+            )
+        ) == .unauthenticated(version: "codex-cli fixture"))
     }
 
     @Test func codexVersionProbeHasABoundedTimeout() throws {
@@ -845,22 +853,19 @@ import Testing
         ) == .authenticated(version: "unavailable"))
     }
 
-    @Test func appServerOwnsAuthenticationAtRunTime() async throws {
+    @Test func backendRevalidatesReadOnlyNativeAuthenticationAtRunTime() async throws {
         let recorder = CodexInvocationRecorder()
+        let message = "Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local."
         let backend = CodexPostprocessBackend(
             codexExecutableURL: URL(fileURLWithPath: "/tests/codex"),
             availability: .unauthenticated(version: "codex-cli fixture"),
             appServerExecutor: MockCodexAppServerExecutor(
                 recorder: recorder,
                 output: validOutput,
-                runError: .authenticationRequired(
-                    "Codex requires a ChatGPT subscription sign-in. Run `codex login` in Terminal, then try again, or select Local."
-                )
+                runError: .authenticationRequired(message)
             )
         )
-        await #expect(throws: PostprocessError.authenticationRequired(
-            "Codex requires a ChatGPT subscription sign-in. Run `codex login` in Terminal, then try again, or select Local."
-        )) {
+        await #expect(throws: PostprocessError.authenticationRequired(message)) {
             _ = try await backend.propose(prompt: "synthetic text")
         }
         #expect(recorder.invocations.count == 1)

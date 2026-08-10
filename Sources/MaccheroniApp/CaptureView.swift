@@ -182,7 +182,7 @@ private struct CodexReadinessNotice: View {
                 } else if availability.authenticationCheckFailed {
                     Text(appLocalized("Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile."))
                 } else if availability.isInstalled {
-                    Text(appLocalized("Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile."))
+                    Text(appLocalized("Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local."))
                 } else {
                     Text(appLocalized("Codex CLI was not found. Install it and run codex login in Terminal, or select Local meanwhile."))
                 }

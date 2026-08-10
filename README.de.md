@@ -111,7 +111,7 @@ Voraussetzungen: Apple-Silicon-Mac, macOS 26, Xcode 26, [uv](https://docs.astral
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 178 tests
+swift build && swift test          # 198 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -157,7 +157,7 @@ Issues und gezielte Pull Requests sind willkommen. Build- und Testbefehle, der V
 | Pfad | Inhalt |
 |---|---|
 | `Sources/` | Swift-Paket: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 178 fixturebasierte Tests in 18 Suites |
+| `Tests/` | 198 fixturebasierte Tests in 19 Suites |
 | `benchmarks/scripts/` | Runner und Scorer mit abgeleiteten Urteilen und Negativtests |
 | `docs/` | Forschungsübersicht, Quellcodeprüfungen, Richtlinie für Beschränkungen, Verträge (JSON-Schemas), UI-Design |
 | `scripts/` | App-Bundle-Build, MOSS-Harness-Build, Einrichtung der Nachbearbeitungslaufzeit |

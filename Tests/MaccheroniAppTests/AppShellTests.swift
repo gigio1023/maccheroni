@@ -449,7 +449,7 @@ struct AppShellTests {
             "Codex CLI was not found. Install it and run codex login in Terminal, or select Local meanwhile.",
             "Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.",
             "Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile.",
-            "Codex is not signed in. Run codex login in Terminal, then try again, or select Local.",
+            "Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local.",
             "Codex is signed in and ready.",
             "Correct",
             "Directory choices apply the next time Maccheroni launches. Existing recordings and run artifacts stay where they are.",

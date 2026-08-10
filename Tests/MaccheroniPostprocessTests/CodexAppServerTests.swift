@@ -1,30 +1,27 @@
 import Darwin
 import Foundation
 import MaccheroniCore
+import Security
 import Testing
 @testable import MaccheroniPostprocess
 
 private let loadTolerantTestTimeoutS: TimeInterval = 10
-
-private let authenticationIsolationMessage =
-    "Codex needs a private cached ChatGPT file sign-in. Run `codex -c 'cli_auth_credentials_store=\"file\"' login` in Terminal, stop other Codex activity, then try again, or select Local."
-
-private let initialSyntheticAuthentication =
-    Data(#"{"access_token":"synthetic-access","refresh_token":"synthetic-refresh"}"#.utf8)
-
-private let refreshedSyntheticAuthentication =
-    Data(#"{"access_token":"synthetic-access-rotated","refresh_token":"synthetic-refresh-rotated"}"#.utf8)
+private let unavailableAuthenticationMessage =
+    "Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local."
+private let accountMismatchMessage =
+    "Codex did not accept the ChatGPT subscription credential. Refresh or sign in through Codex, then retry, or select Local."
+private let refreshAuthenticationMessage =
+    "Codex requested a token refresh. Refresh or sign in through Codex, then retry, or select Local."
 
 @Suite(.serialized)
 struct CodexAppServerTests {
-    @Test func runsAuthenticatedSchemaConstrainedTurnAndDeclinesApprovals() async throws {
+    @Test func runsInjectedSchemaConstrainedTurnInAnEmptyEphemeralHome() async throws {
         let fixture = try AppServerFixture(accountType: "chatgpt")
         defer { fixture.remove() }
-        let sourceAuthenticationStatusBefore = try fileStatus(at: fixture.sourceAuthentication)
-        #expect(sourceAuthenticationStatusBefore.fileType == mode_t(S_IFREG))
-        #expect(sourceAuthenticationStatusBefore.permissions == 0o600)
-        #expect(sourceAuthenticationStatusBefore.linkCount == 1)
+        let credentialBefore = try readCredentialMetadata(at: fixture.sourceAuthentication)
+        let sourceBytesBefore = try Data(contentsOf: fixture.sourceAuthentication)
         let schema = Data(#"{"type":"object","required":["answer"],"properties":{"answer":{"type":"string"}},"additionalProperties":false}"#.utf8)
+
         let output = try await fixture.executor().run(
             CodexAppServerInvocation(
                 executableURL: fixture.executable,
@@ -37,130 +34,273 @@ struct CodexAppServerTests {
         )
 
         #expect(String(decoding: output, as: UTF8.self) == #"{"answer":"ok"}"#)
-        let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
-        #expect(transcript.contains(#"ARGS:app-server -c openai_base_url="" -c chatgpt_base_url="https://chatgpt.com/backend-api/" -c cli_auth_credentials_store="file" --listen stdio://"#))
-        #expect(transcript.contains("ENV:unset|unset|unset"))
-        #expect(transcript.contains("HOME_MODE:700"))
-        #expect(transcript.contains("HOME_ENTRIES:auth.json,"))
-        #expect(transcript.contains("AUTH_READ:ok"))
-        for marker in [
-            "hostile-provider", "hostile-profile-provider", "hostile-proxy",
-            "hostile-otel", "hostile-plugin", "hostile-session", "hostile-model-state",
-        ] {
-            #expect(!transcript.contains(marker))
+        #expect(try fixture.argumentVector() == [
+            "app-server",
+            "-c", #"openai_base_url="""#,
+            "-c", #"chatgpt_base_url="https://chatgpt.com/backend-api/""#,
+            "-c", #"cli_auth_credentials_store="ephemeral""#,
+            "--listen", "stdio://",
+        ])
+        #expect(try fixture.metadataValue(prefix: "SECRETS:") == "unset|unset|unset")
+        #expect(try fixture.metadataValue(prefix: "HOME_MODE:") == "700")
+        #expect(try fixture.metadataValue(prefix: "HOME_ENTRIES:").isEmpty)
+
+        let records = try fixture.rpcRecords()
+        let clientMethods = records.compactMap { record -> String? in
+            guard record.direction == .client else { return nil }
+            return record.object["method"] as? String
         }
-        #expect(transcript.contains(#""method":"initialize""#))
-        #expect(transcript.contains(#""experimentalApi":true"#))
-        #expect(transcript.contains(#""method":"initialized""#))
-        #expect(transcript.contains(#""method":"account/read""#))
-        #expect(transcript.contains(#""method":"config/read""#))
-        #expect(transcript.contains(#""includeLayers":true"#))
-        #expect(transcript.contains(#""method":"configRequirements/read""#))
-        #expect(transcript.contains(#""method":"model/list""#))
-        #expect(transcript.contains(#""method":"thread/start""#))
-        #expect(transcript.contains(#""openai_base_url":"""#))
-        #expect(transcript.contains(#""chatgpt_base_url":"https://chatgpt.com/backend-api/""#))
-        #expect(transcript.contains(#""model_reasoning_effort":"high""#))
-        #expect(transcript.contains(#""ephemeral":true"#))
-        #expect(transcript.contains(#""environments":[]"#))
-        #expect(transcript.contains(#""dynamicTools":[]"#))
-        #expect(transcript.contains(#""selectedCapabilityRoots":[]"#))
-        #expect(transcript.contains(#""features.code_mode":false"#))
-        #expect(transcript.contains(#""features.deferred_executor":false"#))
-        #expect(transcript.contains(#""features.plugins":false"#))
-        #expect(transcript.contains(#""tools.update_plan.enabled":false"#))
-        #expect(transcript.contains(#""fixture-mcp":{"enabled":false}"#))
-        #expect(!transcript.contains("persistExtendedHistory"))
-        #expect(transcript.contains(#""approvalPolicy":"never""#))
-        #expect(transcript.contains(#""method":"mcpServerStatus/list""#))
-        #expect(transcript.contains(#""method":"turn/start""#))
-        #expect(transcript.contains(#""outputSchema""#))
-        #expect(transcript.contains(#""effort":"high""#))
-        #expect(transcript.contains("bounded private prompt"))
-        #expect(transcript.contains(#""decision":"decline""#))
-        #expect(!transcript.contains(#""method":"command/exec""#))
-        let messages = transcript.split(separator: "\n").compactMap { line -> [String: Any]? in
-            guard let data = String(line).data(using: .utf8) else { return nil }
-            return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        #expect(clientMethods == [
+            "initialize",
+            "initialized",
+            "account/login/start",
+            "account/read",
+            "config/read",
+            "configRequirements/read",
+            "model/list",
+            "thread/start",
+            "mcpServerStatus/list",
+            "turn/start",
+        ])
+
+        let initialize = try #require(records.clientRequest(method: "initialize"))
+        let initializeParams = try #require(initialize["params"] as? [String: Any])
+        let capabilities = try #require(initializeParams["capabilities"] as? [String: Any])
+        #expect(capabilities["experimentalApi"] as? Bool == true)
+
+        let login = try #require(records.clientRequest(method: "account/login/start"))
+        let loginParams = try #require(login["params"] as? [String: Any])
+        #expect(Set(loginParams.keys) == [
+            "type", "accessToken", "chatgptAccountId", "chatgptPlanType",
+        ])
+        #expect(loginParams["type"] as? String == "chatgptAuthTokens")
+        #expect(loginParams["accessToken"] as? String == "<redacted>")
+        #expect(loginParams["chatgptAccountId"] as? String == "account-fixture")
+        #expect(loginParams["chatgptPlanType"] is NSNull)
+        #expect(
+            records.index(ofClientMethod: "account/login/start")
+                < records.index(ofClientMethod: "account/read")
+        )
+        #expect(
+            records.index(ofClientMethod: "account/read")
+                < records.index(ofClientMethod: "thread/start")
+        )
+
+        let configResponse = try #require(records.serverResponse(id: 4))
+        let configResult = try #require(configResponse["result"] as? [String: Any])
+        let layers = try #require(configResult["layers"] as? [[String: Any]])
+        let layerTypes = layers.compactMap {
+            ($0["name"] as? [String: Any])?["type"] as? String
         }
-        let threadStart = try #require(messages.first {
-            $0["method"] as? String == "thread/start"
-        })
-        let threadParams = try #require(threadStart["params"] as? [String: Any])
+        #expect(layerTypes == ["sessionFlags"])
+        let config = try #require(configResult["config"] as? [String: Any])
+        #expect(config["model_provider"] == nil)
+        #expect(config["proxy"] == nil)
+        #expect(config["otel"] == nil)
+
+        let thread = try #require(records.clientRequest(method: "thread/start"))
+        let threadParams = try #require(thread["params"] as? [String: Any])
         #expect(threadParams["model"] as? String == "gpt-test")
         #expect(threadParams["modelProvider"] as? String == "openai")
         #expect(threadParams["cwd"] as? String == fixture.workspace.path)
         #expect(threadParams["approvalPolicy"] as? String == "never")
         #expect(threadParams["sandbox"] as? String == "read-only")
+        #expect(threadParams["ephemeral"] as? Bool == true)
         #expect((threadParams["environments"] as? [Any])?.isEmpty == true)
         #expect((threadParams["dynamicTools"] as? [Any])?.isEmpty == true)
         #expect((threadParams["selectedCapabilityRoots"] as? [Any])?.isEmpty == true)
-        #expect(threadParams["ephemeral"] as? Bool == true)
-        let turnStart = try #require(messages.first {
-            $0["method"] as? String == "turn/start"
-        })
-        let turnParams = try #require(turnStart["params"] as? [String: Any])
-        #expect(turnParams["cwd"] == nil)
+        let threadConfig = try #require(threadParams["config"] as? [String: Any])
+        #expect(threadConfig["openai_base_url"] as? String == "")
+        #expect(threadConfig["chatgpt_base_url"] as? String == "https://chatgpt.com/backend-api/")
+        #expect(threadConfig["model_reasoning_effort"] as? String == "high")
+        #expect(threadConfig["features.code_mode"] as? Bool == false)
+        #expect(threadConfig["features.plugins"] as? Bool == false)
+        #expect(threadConfig["features.deferred_executor"] as? Bool == false)
+        #expect(threadConfig["tools.update_plan.enabled"] as? Bool == false)
+        let mcpConfig = try #require(threadConfig["mcp_servers"] as? [String: Any])
+        let fixtureMCP = try #require(mcpConfig["fixture-mcp"] as? [String: Any])
+        #expect(fixtureMCP["enabled"] as? Bool == false)
+
+        let turn = try #require(records.clientRequest(method: "turn/start"))
+        let turnParams = try #require(turn["params"] as? [String: Any])
         #expect(turnParams["model"] as? String == "gpt-test")
         #expect(turnParams["effort"] as? String == "high")
+        #expect(turnParams["approvalPolicy"] as? String == "never")
+        #expect(turnParams["outputSchema"] is [String: Any])
+        #expect(turnParams["cwd"] == nil)
 
-        let childHomes = try fixture.childHomePaths()
-        #expect(childHomes.count == 1)
-        let childHome = try #require(childHomes.first)
+        let approval = try #require(records.firstClientResponse(id: 900))
+        let approvalResult = try #require(approval["result"] as? [String: Any])
+        #expect(approvalResult["decision"] as? String == "decline")
+        #expect(!records.containsClientMethod("command/exec"))
+
+        let childHome = try #require(fixture.childHomePaths().first)
         #expect(childHome.standardizedFileURL != fixture.sourceHome.standardizedFileURL)
         #expect(childHome.lastPathComponent == "codex-home")
-        #expect(
-            childHome.deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL
-                == fixture.temporaryDirectory.standardizedFileURL
-        )
         #expect(!FileManager.default.fileExists(atPath: childHome.path))
-        let recordedAuthenticationStatus = try parsedAuthenticationStatus(from: transcript)
-        let sourceAuthenticationStatus = try fileStatus(at: fixture.sourceAuthentication)
-        #expect(recordedAuthenticationStatus.device == sourceAuthenticationStatus.device)
-        #expect(recordedAuthenticationStatus.inode == sourceAuthenticationStatus.inode)
-        #expect(sourceAuthenticationStatusBefore.device == sourceAuthenticationStatus.device)
-        #expect(sourceAuthenticationStatusBefore.inode == sourceAuthenticationStatus.inode)
-        #expect(recordedAuthenticationStatus.linkCount == 2)
-        #expect(recordedAuthenticationStatus.permissions == 0o600)
-        #expect(sourceAuthenticationStatus.linkCount == 1)
-        #expect(sourceAuthenticationStatus.permissions == 0o600)
-        #expect(sourceAuthenticationStatus.fileType == mode_t(S_IFREG))
         try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
+        try fixture.assertHostileParentHomeUnchanged()
+        #expect(try Data(contentsOf: fixture.sourceAuthentication) == sourceBytesBefore)
+        #expect(try readCredentialMetadata(at: fixture.sourceAuthentication) == credentialBefore)
+        let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
+        #expect(!transcript.contains(fixture.accessToken))
     }
 
-    @Test func accountProbeRequiresChatGPTSubscriptionAuthentication() async throws {
-        let signedIn = try AppServerFixture(accountType: "chatgpt")
+    @Test func accountProbeInjectsThenRequiresAChatGPTSubscriptionAccount() async throws {
+        let signedIn = try AppServerFixture(
+            accountType: "chatgpt",
+            credentialPlanType: "plus"
+        )
         defer { signedIn.remove() }
         #expect(try await signedIn.executor().accountState(
             executableURL: signedIn.executable,
             workspaceURL: signedIn.workspace,
-            timeoutS: loadTolerantTestTimeoutS
+            timeoutS: 2
         ) == .chatGPT)
+        let signedInLogin = try #require(
+            signedIn.rpcRecords().clientRequest(method: "account/login/start")
+        )
+        #expect(
+            (signedInLogin["params"] as? [String: Any])?["chatgptPlanType"] as? String
+                == "plus"
+        )
 
         let apiKey = try AppServerFixture(accountType: "apiKey")
         defer { apiKey.remove() }
         #expect(try await apiKey.executor().accountState(
             executableURL: apiKey.executable,
             workspaceURL: apiKey.workspace,
-            timeoutS: loadTolerantTestTimeoutS
+            timeoutS: 2
         ) == .unsupported)
+        await #expect(throws: PostprocessError.authenticationRequired(accountMismatchMessage)) {
+            _ = try await apiKey.executor().run(apiKey.invocation())
+        }
+        #expect(try !apiKey.rpcRecords().containsClientMethod("thread/start"))
 
         let signedOut = try AppServerFixture(accountType: nil)
         defer { signedOut.remove() }
         #expect(try await signedOut.executor().accountState(
             executableURL: signedOut.executable,
             workspaceURL: signedOut.workspace,
-            timeoutS: loadTolerantTestTimeoutS
+            timeoutS: 2
         ) == .signedOut)
 
         for fixture in [signedIn, apiKey, signedOut] {
             try fixture.assertScratchIsEmpty()
-            try fixture.assertHostileSentinelsAreUnchanged()
+            try fixture.assertHostileParentHomeUnchanged()
         }
     }
 
-    @Test func createsAFreshIsolatedHomeForEveryProcess() async throws {
+    @Test func rejectedLoginFailsAuthenticationBeforeAccountRead() async throws {
+        let fixture = try AppServerFixture(
+            accountType: "chatgpt",
+            loginBehavior: .reject
+        )
+        defer { fixture.remove() }
+
+        await #expect(throws: PostprocessError.authenticationRequired(
+            unavailableAuthenticationMessage
+        )) {
+            _ = try await fixture.executor().run(fixture.invocation())
+        }
+
+        let records = try fixture.rpcRecords()
+        #expect(records.containsClientMethod("account/login/start"))
+        #expect(!records.containsClientMethod("account/read"))
+        #expect(!records.containsClientMethod("thread/start"))
+        let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
+        #expect(!transcript.contains(fixture.accessToken))
+        try fixture.assertScratchIsEmpty()
+    }
+
+    @Test func unavailableCredentialsFailBeforeLoginWithActionableGuidance() async throws {
+        let fixture = try AppServerFixture(accountType: "chatgpt")
+        defer { fixture.remove() }
+        let sources = [
+            CodexCredentialSource(
+                environment: fixture.environment,
+                homeDirectory: fixture.root,
+                keychainReader: { _ in .itemNotFound },
+                fileReader: { _ in throw CocoaError(.fileReadNoSuchFile) },
+                now: Date.init
+            ),
+            CodexCredentialSource(
+                environment: fixture.environment,
+                homeDirectory: fixture.root,
+                keychainReader: { _ in
+                    .found(syntheticAppServerCredential(expiration: 1).record)
+                },
+                now: Date.init
+            ),
+        ]
+
+        for source in sources {
+            await #expect(throws: PostprocessError.authenticationRequired(
+                unavailableAuthenticationMessage
+            )) {
+                _ = try await fixture.executor(credentialSource: source).run(
+                    fixture.invocation()
+                )
+            }
+        }
+        let records = try fixture.rpcRecords()
+        #expect(records.filter {
+            $0.direction == .client && $0.object["method"] as? String == "initialize"
+        }.count == 2)
+        #expect(!records.containsClientMethod("account/login/start"))
+        #expect(!records.containsClientMethod("thread/start"))
+        try fixture.assertScratchIsEmpty()
+    }
+
+    @Test func postAuthenticationServerTextCannotReachDiagnostics() async throws {
+        let fixture = try AppServerFixture(
+            accountType: "chatgpt",
+            accountReadErrorMessage: "reflected-secret-sentinel"
+        )
+        defer { fixture.remove() }
+
+        await #expect(throws: PostprocessError.backendFailed(
+            "codex app server protocol error: account/read failed with server error -32000: message unavailable after authentication"
+        )) {
+            _ = try await fixture.executor().accountState(
+                executableURL: fixture.executable,
+                workspaceURL: fixture.workspace,
+                timeoutS: 2
+            )
+        }
+        try fixture.assertScratchIsEmpty()
+    }
+
+    @Test func unexpectedTokenRefreshReturnsAnErrorAndDoesNotPromoteOutput() async throws {
+        let fixture = try AppServerFixture(
+            accountType: "chatgpt",
+            turnBehavior: .requestRefresh
+        )
+        defer { fixture.remove() }
+
+        await #expect(throws: PostprocessError.authenticationRequired(
+            refreshAuthenticationMessage
+        )) {
+            _ = try await fixture.executor().run(fixture.invocation())
+        }
+
+        let records = try fixture.rpcRecords()
+        let refresh = try #require(records.serverRequest(
+            method: "account/chatgptAuthTokens/refresh"
+        ))
+        #expect((refresh["params"] as? [String: Any])?["reason"] as? String == "unauthorized")
+        let rejection = try #require(records.firstClientResponse(id: 901))
+        #expect(rejection["result"] == nil)
+        let error = try #require(rejection["error"] as? [String: Any])
+        #expect((error["code"] as? NSNumber)?.intValue == -32000)
+        #expect(error["message"] as? String == refreshAuthenticationMessage)
+        #expect(records.containsClientMethod("turn/interrupt"))
+        let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
+        #expect(!transcript.contains(fixture.accessToken))
+        try fixture.assertScratchIsEmpty()
+    }
+
+    @Test func createsAFreshEmptyIsolatedHomeForEveryProcess() async throws {
         let fixture = try AppServerFixture(accountType: "chatgpt")
         defer { fixture.remove() }
 
@@ -172,15 +312,16 @@ struct CodexAppServerTests {
             ) == .chatGPT)
         }
 
-        let childHomes = try fixture.childHomePaths()
-        #expect(childHomes.count == 2)
-        #expect(Set(childHomes.map(\.path)).count == 2)
-        #expect(childHomes.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+        let homes = try fixture.childHomePaths()
+        #expect(homes.count == 2)
+        #expect(Set(homes.map(\.path)).count == 2)
+        #expect(try fixture.metadataValues(prefix: "HOME_MODE:") == ["700", "700"])
+        #expect(try fixture.metadataValues(prefix: "HOME_ENTRIES:") == ["", ""])
+        #expect(homes.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
         try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
     }
 
-    @Test func drainsAnAccountResponseWrittenImmediatelyBeforeProcessExit() async throws {
+    @Test func drainsAnAccountResponseWrittenImmediatelyBeforeExit() async throws {
         let fixture = try AppServerFixture(
             accountType: "chatgpt",
             exitsAfterAccountResponse: true
@@ -192,223 +333,57 @@ struct CodexAppServerTests {
             workspaceURL: fixture.workspace,
             timeoutS: loadTolerantTestTimeoutS
         ) == .chatGPT)
-        #expect(try fixture.childHomePaths().count == 1)
         try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
     }
 
-    @Test func rejectsManagedHooksThatTheThreadCannotOverride() async throws {
-        let fixture = try AppServerFixture(
+    @Test func managedHooksAndActiveMCPRemainFailClosed() async throws {
+        let managed = try AppServerFixture(
             accountType: "chatgpt",
             requirementsJSON: #"{"hooks":{"SessionStart":[{"command":"managed"}]}}"#
         )
-        defer { fixture.remove() }
-
+        defer { managed.remove() }
         await #expect(throws: PostprocessError.backendFailed(
             "codex app server protocol error: cannot override managed hooks"
         )) {
-            _ = try await fixture.executor().run(
-                CodexAppServerInvocation(
-                    executableURL: fixture.executable,
-                    model: "gpt-test",
-                    prompt: "x",
-                    outputSchema: Data(#"{"type":"object"}"#.utf8),
-                    workspaceURL: fixture.workspace,
-                    timeoutS: loadTolerantTestTimeoutS
-                )
-            )
+            _ = try await managed.executor().run(managed.invocation())
         }
-        let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
-        #expect(!transcript.contains(#""method":"thread/start""#))
-        try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
-    }
+        #expect(try !managed.rpcRecords().containsClientMethod("thread/start"))
 
-    @Test func rejectsAManagedHooksOnlyPolicyBeforeStartingAThread() async throws {
-        let fixture = try AppServerFixture(
-            accountType: "chatgpt",
-            requirementsJSON: #"{"allowManagedHooksOnly":true}"#
-        )
-        defer { fixture.remove() }
-
-        await #expect(throws: PostprocessError.backendFailed(
-            "codex app server protocol error: cannot override managed hooks"
-        )) {
-            _ = try await fixture.executor().run(
-                CodexAppServerInvocation(
-                    executableURL: fixture.executable,
-                    model: "gpt-test",
-                    prompt: "x",
-                    outputSchema: Data(#"{"type":"object"}"#.utf8),
-                    workspaceURL: fixture.workspace,
-                    timeoutS: loadTolerantTestTimeoutS
-                )
-            )
-        }
-        let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
-        #expect(!transcript.contains(#""method":"thread/start""#))
-        try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
-    }
-
-    @Test func rejectsAnMCPServerThatRemainsEnabledAfterThreadStart() async throws {
-        let fixture = try AppServerFixture(
+        let activeMCP = try AppServerFixture(
             accountType: "chatgpt",
             mcpDataJSON: #"[{"name":"managed-mcp"}]"#
         )
-        defer { fixture.remove() }
-
+        defer { activeMCP.remove() }
         await #expect(throws: PostprocessError.backendFailed(
             "codex app server protocol error: mcpServerStatus/list found an active or unexpected server"
         )) {
-            _ = try await fixture.executor().run(
-                CodexAppServerInvocation(
-                    executableURL: fixture.executable,
-                    model: "gpt-test",
-                    prompt: "x",
-                    outputSchema: Data(#"{"type":"object"}"#.utf8),
-                    workspaceURL: fixture.workspace,
-                    timeoutS: loadTolerantTestTimeoutS
-                )
-            )
+            _ = try await activeMCP.executor().run(activeMCP.invocation())
         }
-        let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
-        #expect(!transcript.contains(#""method":"turn/start""#))
-        try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
+        #expect(try !activeMCP.rpcRecords().containsClientMethod("turn/start"))
+        try managed.assertScratchIsEmpty()
+        try activeMCP.assertScratchIsEmpty()
     }
 
-    @Test func rejectsNonChatGPTAccountBeforeStartingAThread() async throws {
-        let fixture = try AppServerFixture(accountType: "apiKey")
-        defer { fixture.remove() }
-        await #expect(throws: PostprocessError.authenticationRequired(
-            "Codex requires a ChatGPT subscription sign-in. Run `codex login` in Terminal, then try again, or select Local."
-        )) {
-            _ = try await fixture.executor().run(
-                CodexAppServerInvocation(
-                    executableURL: fixture.executable,
-                    model: "gpt-test",
-                    prompt: "x",
-                    outputSchema: Data(#"{"type":"object"}"#.utf8),
-                    workspaceURL: fixture.workspace,
-                    timeoutS: loadTolerantTestTimeoutS
-                )
-            )
-        }
-        let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
-        #expect(!transcript.contains(#""method":"thread/start""#))
-        try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
-    }
-
-    @Test func rejectsUnavailableOrUnsafeCachedAuthenticationBeforeLaunch() async throws {
-        var fixtures: [AppServerFixture] = []
-        defer { fixtures.forEach { $0.remove() } }
-
-        for kind in InvalidAuthenticationKind.allCases {
-            let fixture = try AppServerFixture(accountType: "chatgpt")
-            fixtures.append(fixture)
-            try kind.apply(to: fixture)
-
-            await #expect(throws: PostprocessError.authenticationIsolationFailed(
-                authenticationIsolationMessage
-            )) {
-                _ = try await fixture.executor().accountState(
-                    executableURL: fixture.executable,
-                    workspaceURL: fixture.workspace,
-                    timeoutS: 2
-                )
-            }
-            #expect(try Data(contentsOf: fixture.log).isEmpty)
-            try fixture.assertScratchIsEmpty()
-            try fixture.assertHostileSentinelsAreUnchanged()
-        }
-    }
-
-    @Test func rejectsALinkOperationThatDoesNotCreateTheExactHardLink() async throws {
+    @Test func launchFailureCleansScratchWithoutReadingOrChangingNativeCredentials() async throws {
         let fixture = try AppServerFixture(accountType: "chatgpt")
         defer { fixture.remove() }
-        let executor = FoundationCodexAppServerExecutor(
+        let credentialBefore = try readCredentialMetadata(at: fixture.sourceAuthentication)
+        let bytesBefore = try Data(contentsOf: fixture.sourceAuthentication)
+        let credentialReads = LockedInt()
+        let source = CodexCredentialSource(
             environment: fixture.environment,
-            homeDirectory: fixture.root.appendingPathComponent("unused-home", isDirectory: true),
-            temporaryDirectory: fixture.temporaryDirectory,
-            linkAuthenticationFile: { source, destination in
-                try FileManager.default.copyItem(at: source, to: destination)
-            }
+            homeDirectory: fixture.root,
+            keychainReader: { _ in
+                credentialReads.increment()
+                return .failed
+            },
+            now: Date.init
         )
-
-        await #expect(throws: PostprocessError.authenticationIsolationFailed(
-            authenticationIsolationMessage
-        )) {
-            _ = try await executor.accountState(
-                executableURL: fixture.executable,
-                workspaceURL: fixture.workspace,
-                timeoutS: 2
-            )
-        }
-        #expect(try Data(contentsOf: fixture.log).isEmpty)
-        let sourceStatus = try fileStatus(at: fixture.sourceAuthentication)
-        #expect(sourceStatus.linkCount == 1)
-        #expect(sourceStatus.permissions == 0o600)
-        try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
-    }
-
-    @Test func inPlaceAuthenticationRefreshUpdatesTheSourceHardLink() async throws {
-        let fixture = try AppServerFixture(
-            accountType: "chatgpt",
-            authenticationMutation: .inPlaceRefresh
-        )
-        defer { fixture.remove() }
-
-        #expect(try await fixture.executor().accountState(
-            executableURL: fixture.executable,
-            workspaceURL: fixture.workspace,
-            timeoutS: 2
-        ) == .chatGPT)
-
-        #expect(try Data(contentsOf: fixture.sourceAuthentication) == refreshedSyntheticAuthentication)
-        let sourceStatus = try fileStatus(at: fixture.sourceAuthentication)
-        #expect(sourceStatus.fileType == mode_t(S_IFREG))
-        #expect(sourceStatus.permissions == 0o600)
-        #expect(sourceStatus.linkCount == 1)
-        try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
-    }
-
-    @Test func atomicAuthenticationReplacementFailsVisiblyAndCleansScratch() async throws {
-        let fixture = try AppServerFixture(
-            accountType: "chatgpt",
-            authenticationMutation: .atomicReplacement
-        )
-        defer { fixture.remove() }
-
-        await #expect(throws: PostprocessError.authenticationIsolationFailed(
-            authenticationIsolationMessage
-        )) {
-            _ = try await fixture.executor().accountState(
-                executableURL: fixture.executable,
-                workspaceURL: fixture.workspace,
-                timeoutS: 2
-            )
-        }
-
-        #expect(try Data(contentsOf: fixture.sourceAuthentication) == initialSyntheticAuthentication)
-        let sourceStatus = try fileStatus(at: fixture.sourceAuthentication)
-        #expect(sourceStatus.permissions == 0o600)
-        #expect(sourceStatus.linkCount == 1)
-        try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
-    }
-
-    @Test func launchFailureCleansThePreparedAuthenticationHome() async throws {
-        let fixture = try AppServerFixture(accountType: "chatgpt")
-        defer { fixture.remove() }
 
         await #expect(throws: PostprocessError.launchFailed(
             "could not launch codex app server"
         )) {
-            _ = try await fixture.executor().accountState(
+            _ = try await fixture.executor(credentialSource: source).accountState(
                 executableURL: fixture.root.appendingPathComponent("missing-codex"),
                 workspaceURL: fixture.workspace,
                 timeoutS: 2
@@ -416,121 +391,55 @@ struct CodexAppServerTests {
         }
 
         #expect(try Data(contentsOf: fixture.log).isEmpty)
-        let sourceStatus = try fileStatus(at: fixture.sourceAuthentication)
-        #expect(sourceStatus.linkCount == 1)
+        #expect(credentialReads.value == 0)
+        #expect(try Data(contentsOf: fixture.sourceAuthentication) == bytesBefore)
+        #expect(try readCredentialMetadata(at: fixture.sourceAuthentication) == credentialBefore)
         try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
     }
 
-    @Test func protocolAndStderrFailuresAreBoundedAndPathRedacted() async throws {
+    @Test func protocolErrorsAreBoundedAndPathRedactedWithoutPersistedStderr() async throws {
         let fixture = try AppServerFixture(accountType: "chatgpt")
         defer { fixture.remove() }
-        let root = fixture.root
-        let workspace = fixture.workspace
-
-        let protocolFailure = root.appendingPathComponent("codex-protocol")
+        let executable = fixture.root.appendingPathComponent("codex-protocol")
         try writeExecutable(
             """
             #!/bin/sh
             while IFS= read -r line; do
-              printf '%s\\n' '/Users/someone/\(String(repeating: "private,fragment-", count: 80)).log' >&2
-              printf '%s\\n' 'safe stderr tail' >&2
               printf '%s\\n' '{"id":1,"error":{"code":-32001,"message":"cannot read /Users/someone/private.txt \(String(repeating: "detail-", count: 80))"}}'
             done
             """,
-            to: protocolFailure
+            to: executable
         )
+
         do {
             _ = try await fixture.executor().accountState(
-                executableURL: protocolFailure,
-                workspaceURL: workspace,
+                executableURL: executable,
+                workspaceURL: fixture.workspace,
                 timeoutS: loadTolerantTestTimeoutS
             )
-            Issue.record("expected the JSON-RPC error response to fail")
+            Issue.record("expected protocol failure")
         } catch let error as PostprocessError {
             let description = try #require(error.errorDescription)
             #expect(description.contains("initialize failed with server error -32001"))
             #expect(description.contains("cannot read <redacted-path>"))
-            #expect(description.contains("stderr tail:"))
-            #expect(description.contains("safe stderr tail"))
-            #expect(!description.contains("private-"))
-            #expect(!description.contains("fragment-"))
+            #expect(description.hasSuffix(SubprocessFailureMessage.truncationMarker))
             #expect(!description.contains("/Users/"))
             #expect(description.utf8.count <= SubprocessFailureMessage.maximumUTF8Bytes)
         }
         try fixture.assertScratchIsEmpty()
-
-        let stderrFailure = root.appendingPathComponent("codex-stderr")
-        try writeExecutable(
-            """
-            #!/bin/sh
-            while IFS= read -r line; do
-              printf '%s\\n' 'cannot read /Users/someone/private.txt' >&2
-              exit 7
-            done
-            """,
-            to: stderrFailure
-        )
-        await #expect(throws: PostprocessError.backendFailed(
-            "codex app server exited with status 7; stderr tail: cannot read <redacted-path>"
-        )) {
-            _ = try await fixture.executor().accountState(
-                executableURL: stderrFailure,
-                workspaceURL: workspace,
-                timeoutS: loadTolerantTestTimeoutS
-            )
-        }
-        try fixture.assertScratchIsEmpty()
-
-        let malformedFailure = root.appendingPathComponent("codex-malformed")
-        try writeExecutable(
-            """
-            #!/bin/sh
-            while IFS= read -r line; do
-              printf '%s\\n' 'not-json-/Users/someone/private.txt'
-            done
-            """,
-            to: malformedFailure
-        )
-        await #expect(throws: PostprocessError.backendFailed(
-            "codex app server protocol error: app server emitted malformed JSON"
-        )) {
-            _ = try await fixture.executor().accountState(
-                executableURL: malformedFailure,
-                workspaceURL: workspace,
-                timeoutS: loadTolerantTestTimeoutS
-            )
-        }
-        try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
     }
 
     @Test func deadAppServerInputSurfacesTypedFailureWithoutSIGPIPE() async throws {
         let fixture = try AppServerFixture(
             accountType: "chatgpt",
-            completesTurn: false,
-            exitsAfterTurnStartResponse: true
+            turnBehavior: .exitAfterStart
         )
         defer { fixture.remove() }
 
-        do {
-            _ = try await FoundationCodexAppServerExecutor().run(
-                CodexAppServerInvocation(
-                    executableURL: fixture.executable,
-                    model: "gpt-test",
-                    prompt: "bounded private prompt",
-                    outputSchema: Data(#"{"type":"object"}"#.utf8),
-                    workspaceURL: fixture.workspace,
-                    timeoutS: loadTolerantTestTimeoutS
-                )
-            )
-            Issue.record("expected the dead app-server input to fail")
-        } catch let error as PostprocessError {
-            guard case .backendFailed = error else {
-                Issue.record("expected backendFailed, got \(error)")
-                return
-            }
+        await #expect(throws: PostprocessError.self) {
+            _ = try await fixture.executor().run(fixture.invocation())
         }
+        try fixture.assertScratchIsEmpty()
     }
 
     @Test func jsonlChannelRemovesReadabilityHandlerAtEOF() throws {
@@ -549,42 +458,29 @@ struct CodexAppServerTests {
         try? reader.close()
     }
 
-    @Test func cancellationRequestsTurnInterruptBeforeShutdown() async throws {
-        let fixture = try AppServerFixture(accountType: "chatgpt", completesTurn: false)
+    @Test func cancellationRequestsTurnInterruptBeforeConfirmedCleanup() async throws {
+        let fixture = try AppServerFixture(accountType: "chatgpt", turnBehavior: .wait)
         defer { fixture.remove() }
-        let task = Task {
-            try await fixture.executor().run(
-                CodexAppServerInvocation(
-                    executableURL: fixture.executable,
-                    model: "gpt-test",
-                    prompt: "bounded private prompt",
-                    outputSchema: Data(#"{"type":"object"}"#.utf8),
-                    workspaceURL: fixture.workspace,
-                    timeoutS: 30
-                )
-            )
-        }
-        try await waitForText(#""method":"turn/start""#, in: fixture.log)
+        let task = Task { try await fixture.executor().run(fixture.invocation(timeoutS: 30)) }
+        try await waitForClientMethod("turn/start", in: fixture)
+
         task.cancel()
-        await #expect(throws: CancellationError.self) {
-            _ = try await task.value
-        }
-        let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
-        #expect(transcript.contains(#""method":"turn/interrupt""#))
-        #expect(transcript.contains(#""threadId":"thread-1""#))
-        #expect(transcript.contains(#""turnId":"turn-1""#))
+        await #expect(throws: CancellationError.self) { _ = try await task.value }
+
+        let records = try fixture.rpcRecords()
+        let interrupt = try #require(records.clientRequest(method: "turn/interrupt"))
+        let params = try #require(interrupt["params"] as? [String: Any])
+        #expect(params["threadId"] as? String == "thread-1")
+        #expect(params["turnId"] as? String == "turn-1")
         try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
     }
 
-    @Test func timeoutTerminatesTheExactAppServerDescendantTree() async throws {
+    @Test func timeoutTerminatesTheExactAppServerDescendantTreeAndCleansScratch() async throws {
         let fixture = try AppServerFixture(accountType: "chatgpt")
         defer { fixture.remove() }
-        let root = fixture.root
-        let workspace = fixture.workspace
-        let rootPIDURL = root.appendingPathComponent("root.pid")
-        let childPIDURL = root.appendingPathComponent("child.pid")
-        let executable = root.appendingPathComponent("codex-timeout")
+        let rootPIDURL = fixture.root.appendingPathComponent("root.pid")
+        let childPIDURL = fixture.root.appendingPathComponent("child.pid")
+        let executable = fixture.root.appendingPathComponent("codex-timeout")
         try writeExecutable(
             """
             #!/bin/sh
@@ -606,28 +502,22 @@ struct CodexAppServerTests {
                 )
             ).accountState(
                 executableURL: executable,
-                workspaceURL: workspace,
+                workspaceURL: fixture.workspace,
                 timeoutS: 0.5
             )
         }
         let processIDs = try await [rootPIDURL, childPIDURL].asyncMap(waitForPID)
-        let deadline = Date().addingTimeInterval(loadTolerantTestTimeoutS)
-        while processIDs.contains(where: processExists), Date() < deadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        try await waitForProcessesToExit(processIDs)
         #expect(processIDs.allSatisfy { !processExists($0) })
         try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
     }
 
-    @Test func cancellationTerminatesTheExactAppServerDescendantTree() async throws {
+    @Test func cancellationTerminatesTheExactAppServerDescendantTreeAndCleansScratch() async throws {
         let fixture = try AppServerFixture(accountType: "chatgpt")
         defer { fixture.remove() }
-        let root = fixture.root
-        let workspace = fixture.workspace
-        let rootPIDURL = root.appendingPathComponent("root.pid")
-        let childPIDURL = root.appendingPathComponent("child.pid")
-        let executable = root.appendingPathComponent("codex-cancel")
+        let rootPIDURL = fixture.root.appendingPathComponent("cancel-root.pid")
+        let childPIDURL = fixture.root.appendingPathComponent("cancel-child.pid")
+        let executable = fixture.root.appendingPathComponent("codex-cancel")
         try writeExecutable(
             """
             #!/bin/sh
@@ -639,7 +529,6 @@ struct CodexAppServerTests {
             """,
             to: executable
         )
-
         let task = Task {
             try await fixture.executor(
                 terminationTiming: ProcessTerminationTiming(
@@ -649,32 +538,133 @@ struct CodexAppServerTests {
                 )
             ).accountState(
                 executableURL: executable,
-                workspaceURL: workspace,
+                workspaceURL: fixture.workspace,
                 timeoutS: 30
             )
         }
         let processIDs = try await [rootPIDURL, childPIDURL].asyncMap(waitForPID)
+
         task.cancel()
-        await #expect(throws: CancellationError.self) {
-            _ = try await task.value
-        }
-        let deadline = Date().addingTimeInterval(loadTolerantTestTimeoutS)
-        while processIDs.contains(where: processExists), Date() < deadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        await #expect(throws: CancellationError.self) { _ = try await task.value }
+
+        try await waitForProcessesToExit(processIDs)
         #expect(processIDs.allSatisfy { !processExists($0) })
         try fixture.assertScratchIsEmpty()
-        try fixture.assertHostileSentinelsAreUnchanged()
+    }
+
+    @Test func unconfirmedTerminationRetainsEmptyScratchAndSurfacesSpecificFailure() async throws {
+        let cases: [(ProcessTerminationResult, String)] = [
+            (
+                .signalFailed(errno: EPERM),
+                "codex app server termination was not confirmed after signalling failed; scratch was retained"
+            ),
+            (
+                .exitWaitTimedOut,
+                "codex app server termination was not confirmed before the exit deadline; scratch was retained"
+            ),
+        ]
+        for (reportedResult, expectedMessage) in cases {
+            let fixture = try AppServerFixture(
+                accountType: "chatgpt",
+                lingerAfterEOF: true
+            )
+            defer { fixture.remove() }
+            let executor = fixture.executor(terminateProcess: { _, _, _ in
+                return reportedResult
+            })
+
+            do {
+                _ = try await executor.accountState(
+                    executableURL: fixture.executable,
+                    workspaceURL: fixture.workspace,
+                    timeoutS: 2
+                )
+                Issue.record("expected unconfirmed termination failure")
+            } catch let error as PostprocessError {
+                let description = try #require(error.errorDescription)
+                #expect(description == expectedMessage)
+            }
+            let childPID = try #require(Int32(fixture.metadataValue(prefix: "CHILD_PID:")))
+            #expect(processExists(childPID))
+            let retained = try FileManager.default.contentsOfDirectory(
+                at: fixture.temporaryDirectory,
+                includingPropertiesForKeys: nil
+            )
+            #expect(retained.count == 1)
+            let childHome = try #require(fixture.childHomePaths().first)
+            #expect(FileManager.default.fileExists(atPath: childHome.path))
+            #expect(try FileManager.default.contentsOfDirectory(atPath: childHome.path).isEmpty)
+            let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
+            #expect(!transcript.contains(fixture.accessToken))
+            _ = Darwin.kill(childPID, SIGKILL)
+            try await waitForProcessesToExit([childPID])
+            #expect(!processExists(childPID))
+        }
+    }
+
+    @Test func completedOutputWinsOverPostCompletionScratchCleanupFailure() async throws {
+        let fixture = try AppServerFixture(accountType: "chatgpt")
+        defer { fixture.remove() }
+        let executor = fixture.executor(removeScratch: { _ in
+            throw CocoaError(.fileWriteNoPermission)
+        })
+
+        let output = try await executor.run(fixture.invocation())
+
+        #expect(String(decoding: output, as: UTF8.self) == #"{"answer":"ok"}"#)
+        #expect(try !FileManager.default.contentsOfDirectory(
+            atPath: fixture.temporaryDirectory.path
+        ).isEmpty)
+    }
+
+    @Test func authenticationFailureWinsOverPostFailureScratchCleanupFailure() async throws {
+        let fixture = try AppServerFixture(
+            accountType: "chatgpt",
+            loginBehavior: .reject
+        )
+        defer { fixture.remove() }
+        let executor = fixture.executor(removeScratch: { _ in
+            throw CocoaError(.fileWriteNoPermission)
+        })
+
+        await #expect(throws: PostprocessError.authenticationRequired(
+            unavailableAuthenticationMessage
+        )) {
+            _ = try await executor.run(fixture.invocation())
+        }
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment[
+        "MACCHERONI_RUN_CODEX_AUTH_INTEGRATION"
+    ] == "1"))
+    func actualCodexEphemeralAuthProbeLeavesNativeCredentialMetadataUnchanged() async throws {
+        let executable = try #require(CodexPostprocessBackend.defaultExecutableURL)
+        let source = CodexCredentialSource()
+        let home = try source.activeHomeURL()
+        let account = try source.keychainAccount()
+        let before = nativeCredentialMetadata(home: home, keychainAccount: account)
+        let workspace = try freshDirectory(prefix: "maccheroni-real-codex-auth-")
+        defer { try? FileManager.default.removeItem(at: workspace) }
+
+        let probe = try await FoundationCodexAppServerExecutor()
+            .authenticationIntegrationProbe(
+                executableURL: executable,
+                workspaceURL: workspace,
+                timeoutS: 5
+            )
+
+        let after = nativeCredentialMetadata(home: home, keychainAccount: account)
+        #expect(probe.accountState == .chatGPT)
+        #expect(!probe.configLayerTypes.contains("user"))
+        #expect(!probe.configLayerTypes.contains("project"))
+        #expect(before == after)
     }
 }
 
-private struct AppServerFixture {
-    enum AuthenticationMutation {
-        case none
-        case inPlaceRefresh
-        case atomicReplacement
-    }
+private enum FixtureLoginBehavior { case accept, reject }
+private enum FixtureTurnBehavior { case complete, wait, requestRefresh, exitAfterStart }
 
+private struct AppServerFixture {
     let root: URL
     let workspace: URL
     let executable: URL
@@ -682,17 +672,20 @@ private struct AppServerFixture {
     let sourceHome: URL
     let sourceAuthentication: URL
     let temporaryDirectory: URL
+    let accessToken: String
 
-    private let hostileSentinels: [URL: Data]
+    private let hostileParentFiles: [URL: Data]
 
     init(
         accountType: String?,
-        completesTurn: Bool = true,
+        loginBehavior: FixtureLoginBehavior = .accept,
+        turnBehavior: FixtureTurnBehavior = .complete,
         exitsAfterAccountResponse: Bool = false,
-        exitsAfterTurnStartResponse: Bool = false,
+        lingerAfterEOF: Bool = false,
+        credentialPlanType: String? = nil,
+        accountReadErrorMessage: String? = nil,
         requirementsJSON: String = "null",
-        mcpDataJSON: String = #"[{"name":"fixture-mcp","tools":{},"resources":[],"resourceTemplates":[],"serverInfo":null,"authStatus":"unsupported"}]"#,
-        authenticationMutation: AuthenticationMutation = .none
+        mcpDataJSON: String = #"[{"name":"fixture-mcp","tools":{},"resources":[],"resourceTemplates":[],"serverInfo":null,"authStatus":"unsupported"}]"#
     ) throws {
         root = try freshDirectory(prefix: "maccheroni-app-server-fixture-")
         workspace = root.appendingPathComponent("workspace", isDirectory: true)
@@ -703,15 +696,12 @@ private struct AppServerFixture {
         temporaryDirectory = root.appendingPathComponent("scratch", isDirectory: true)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: false)
         try FileManager.default.createDirectory(at: sourceHome, withIntermediateDirectories: false)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o700],
-            ofItemAtPath: sourceHome.path
-        )
-        try FileManager.default.createDirectory(
-            at: temporaryDirectory,
-            withIntermediateDirectories: false
-        )
-        try initialSyntheticAuthentication.write(to: sourceAuthentication, options: .withoutOverwriting)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: false)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: sourceHome.path)
+
+        let credential = syntheticAppServerCredential(planType: credentialPlanType)
+        accessToken = credential.accessToken
+        try credential.record.write(to: sourceAuthentication, options: .withoutOverwriting)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o600],
             ofItemAtPath: sourceAuthentication.path
@@ -723,15 +713,15 @@ private struct AppServerFixture {
         let mcp = sourceHome.appendingPathComponent("mcp/hostile-mcp/sentinel")
         let session = sourceHome.appendingPathComponent("sessions/hostile-session.json")
         let modelState = sourceHome.appendingPathComponent("models.json")
-        hostileSentinels = [
-            config: Data("model_provider = \"hostile-provider\"\nproxy = \"hostile-proxy\"\notel = \"hostile-otel\"\n[mcp_servers.hostile-mcp]\ncommand = \"hostile\"\n".utf8),
+        hostileParentFiles = [
+            config: Data("model_provider = \"hostile-provider\"\nproxy = \"hostile-proxy\"\notel = \"hostile-otel\"\n".utf8),
             profile: Data("model_provider = \"hostile-profile-provider\"\n".utf8),
             plugin: Data("hostile-plugin".utf8),
             mcp: Data("hostile-mcp".utf8),
             session: Data("hostile-session".utf8),
             modelState: Data("hostile-model-state".utf8),
         ]
-        for (url, data) in hostileSentinels {
+        for (url, data) in hostileParentFiles {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true
@@ -739,86 +729,135 @@ private struct AppServerFixture {
             try data.write(to: url, options: .withoutOverwriting)
         }
         try Data().write(to: log, options: .withoutOverwriting)
+
         let accountJSON = accountType.map { #"{"type":"\#($0)"}"# } ?? "null"
         let accountExit = exitsAfterAccountResponse ? "exit 0" : ""
-        let turnStartExit = exitsAfterTurnStartResponse ? "exit 23" : ""
-        let authenticationMutationScript = switch authenticationMutation {
-        case .none:
-            ""
-        case .inPlaceRefresh:
-            """
-            printf '%s' '{"access_token":"synthetic-access-rotated","refresh_token":"synthetic-refresh-rotated"}' > "$CODEX_HOME/auth.json"
-            chmod 600 "$CODEX_HOME/auth.json"
-            """
-        case .atomicReplacement:
-            """
-            printf '%s' '{"access_token":"synthetic-access-rotated","refresh_token":"synthetic-refresh-rotated"}' > "$CODEX_HOME/auth.json.next"
-            chmod 600 "$CODEX_HOME/auth.json.next"
-            mv "$CODEX_HOME/auth.json.next" "$CODEX_HOME/auth.json"
-            """
+        let eofAction = lingerAfterEOF ? "/bin/sleep 5" : ""
+        let accountReadAction = accountReadErrorMessage.map {
+            "send '{\"id\":3,\"error\":{\"code\":-32000,\"message\":\"\($0)\"}}'"
+        } ?? "send '{\"id\":3,\"result\":{\"account\":\(accountJSON),\"requiresOpenaiAuth\":true}}'"
+        let serializedPlan = credentialPlanType.map { "\"\($0)\"" } ?? "null"
+        let planValidation = credentialPlanType.map {
+            "[ \"$login_plan_type\" = 'string' ] && [ \"$login_plan\" = '\($0)' ] || valid_login=0"
+        } ?? "[ \"$login_plan_type\" = '(any)' ] || valid_login=0"
+        let loginResponse = switch loginBehavior {
+        case .accept:
+            "send '{\"id\":2,\"result\":{\"type\":\"chatgptAuthTokens\"}}'"
+        case .reject:
+            "send '{\"id\":2,\"error\":{\"code\":-32000,\"message\":\"synthetic login rejection\"}}'"
         }
-        let turnCompletion = completesTurn ? """
-                  printf '%s\\n' '{"id":90,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-1","turnId":"turn-1"}}'
-                  IFS= read -r approval
-                  printf '%s\\n' "$approval" >> '\(log.path)'
-                  printf '%s\\n' '{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"message-1","type":"agentMessage","phase":"final_answer","text":"{\\"answer\\":\\"ok\\"}"}}}'
-                  printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","threadId":"thread-1","status":"completed","items":[]}}}'
-        """ : ""
+        let turnAction = switch turnBehavior {
+        case .complete:
+            """
+            send '{"id":900,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-1","turnId":"turn-1"}}'
+            IFS= read -r approval
+            printf 'C:%s\\n' "$approval" >> '\(log.path)'
+            send '{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"message-1","type":"agentMessage","phase":"final_answer","text":"{\\"answer\\":\\"ok\\"}"}}}'
+            send '{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","threadId":"thread-1","status":"completed","items":[]}}}'
+            """
+        case .wait:
+            ""
+        case .requestRefresh:
+            """
+            send '{"id":901,"method":"account/chatgptAuthTokens/refresh","params":{"reason":"unauthorized","previousAccountId":"account-fixture"}}'
+            IFS= read -r refresh_response
+            printf 'C:%s\\n' "$refresh_response" >> '\(log.path)'
+            send '{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"message-partial","type":"agentMessage","phase":"final_answer","text":"{\\"answer\\":\\"partial\\"}"}}}'
+            send '{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","threadId":"thread-1","status":"completed","items":[]}}}'
+            """
+        case .exitAfterStart:
+            "exit 23"
+        }
+
         try writeExecutable(
             """
             #!/bin/sh
-            printf 'ARGS:%s\\n' "$*" >> '\(log.path)'
-            printf 'ENV:%s|%s|%s\\n' "${OPENAI_API_KEY-unset}" "${CODEX_API_KEY-unset}" "${CODEX_ACCESS_TOKEN-unset}" >> '\(log.path)'
+            send() {
+              printf 'S:%s\\n' "$1" >> '\(log.path)'
+              printf '%s\\n' "$1"
+            }
+            for argument in "$@"; do
+              printf 'ARG:%s\\n' "$argument" >> '\(log.path)'
+            done
+            printf 'SECRETS:%s|%s|%s\\n' "${OPENAI_API_KEY-unset}" "${CODEX_API_KEY-unset}" "${CODEX_ACCESS_TOKEN-unset}" >> '\(log.path)'
+            printf 'CHILD_PID:%s\\n' "$$" >> '\(log.path)'
             printf 'CHILD_HOME:%s\\n' "$CODEX_HOME" >> '\(log.path)'
             printf 'HOME_MODE:%s\\n' "$(/usr/bin/stat -f '%Lp' "$CODEX_HOME")" >> '\(log.path)'
             printf 'HOME_ENTRIES:' >> '\(log.path)'
             /usr/bin/find "$CODEX_HOME" -mindepth 1 -maxdepth 1 -exec /usr/bin/basename '{}' ';' | /usr/bin/sort | /usr/bin/tr '\\n' ',' >> '\(log.path)'
             printf '\\n' >> '\(log.path)'
-            if /usr/bin/grep -q '"access_token":"synthetic-access"' "$CODEX_HOME/auth.json"; then
-              printf '%s\\n' 'AUTH_READ:ok' >> '\(log.path)'
-            else
-              printf '%s\\n' 'AUTH_READ:failed' >> '\(log.path)'
-            fi
-            printf 'AUTH_STAT:%s\\n' "$(/usr/bin/stat -f '%d:%i:%l:%Lp' "$CODEX_HOME/auth.json")" >> '\(log.path)'
-            \(authenticationMutationScript)
             while IFS= read -r line; do
-              printf '%s\\n' "$line" >> '\(log.path)'
-              case "$line" in
-                *'"method":"initialize"'*)
-                  printf '%s\\n' '{"id":1,"result":{"userAgent":"maccheroni-test/0.146.0"}}'
+              method=$(printf '%s' "$line" | /usr/bin/plutil -extract method raw -o - -- - 2>/dev/null || true)
+              case "$method" in
+                'account/login/start')
+                  valid_login=1
+                  parameter_keys=$(printf '%s' "$line" | /usr/bin/plutil -extract params raw -o - -- - 2>/dev/null || true)
+                  expected_keys='accessToken
+            chatgptAccountId
+            chatgptPlanType
+            type'
+                  [ "$parameter_keys" = "$expected_keys" ] || valid_login=0
+                  login_type=$(printf '%s' "$line" | /usr/bin/plutil -extract params.type raw -o - -- - 2>/dev/null || true)
+                  login_access=$(printf '%s' "$line" | /usr/bin/plutil -extract params.accessToken raw -o - -- - 2>/dev/null || true)
+                  login_account=$(printf '%s' "$line" | /usr/bin/plutil -extract params.chatgptAccountId raw -o - -- - 2>/dev/null || true)
+                  login_plan_type=$(printf '%s' "$line" | /usr/bin/plutil -type params.chatgptPlanType -o - -- - 2>/dev/null || true)
+                  login_plan=$(printf '%s' "$line" | /usr/bin/plutil -extract params.chatgptPlanType raw -o - -- - 2>/dev/null || true)
+                  [ "$login_type" = 'chatgptAuthTokens' ] || valid_login=0
+                  [ -n "$login_access" ] || valid_login=0
+                  unset login_access
+                  [ "$login_account" = 'account-fixture' ] || valid_login=0
+                  \(planValidation)
+                  printf 'C:%s\\n' '{"id":2,"method":"account/login/start","params":{"type":"chatgptAuthTokens","accessToken":"<redacted>","chatgptAccountId":"account-fixture","chatgptPlanType":\(serializedPlan)}}' >> '\(log.path)'
+                  if [ "$valid_login" -ne 1 ]; then
+                    send '{"id":2,"error":{"code":-32602,"message":"invalid external auth fields"}}'
+                    continue
+                  fi
+                  \(loginResponse)
                   ;;
-                *'"method":"account/read"'*)
-                  printf '%s\\n' '{"id":2,"result":{"account":\(accountJSON),"requiresOpenaiAuth":true}}'
-                  \(accountExit)
-                  ;;
-                *'"method":"config/read"'*)
-                  printf '%s\\n' '{"id":3,"result":{"config":{"mcp_servers":{"fixture-mcp":{"command":"fixture"}}},"layers":[{"name":{"type":"user"}},{"name":{"type":"sessionFlags"}}]}}'
-                  ;;
-                *'"method":"configRequirements/read"'*)
-                  printf '%s\\n' '{"id":4,"result":{"requirements":\(requirementsJSON)}}'
-                  ;;
-                *'"method":"model/list"'*)
-                  printf '%s\\n' '{"id":5,"result":{"data":[{"id":"gpt-test","model":"gpt-test","defaultReasoningEffort":"high"}],"nextCursor":null}}'
-                  ;;
-                *'"method":"thread/start"'*)
-                  printf '%s\\n' '{"id":6,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-1"}}'
-                  IFS= read -r collision_response
-                  printf '%s\\n' "$collision_response" >> '\(log.path)'
-                  printf '%s\\n' '{"id":6,"result":{"thread":{"id":"thread-1"}}}'
-                  ;;
-                *'"method":"mcpServerStatus/list"'*)
-                  printf '%s\\n' '{"id":7,"result":{"data":\(mcpDataJSON),"nextCursor":null}}'
-                  ;;
-                *'"method":"turn/start"'*)
-                  printf '%s\\n' '{"id":8,"result":{"turn":{"id":"turn-1","status":"inProgress","items":[]}}}'
-                  \(turnStartExit)
-            \(turnCompletion)
-                  ;;
-                *'"method":"turn/interrupt"'*)
-                  printf '%s\\n' '{"id":9,"result":{}}'
+                *)
+                  printf 'C:%s\\n' "$line" >> '\(log.path)'
+                  case "$method" in
+                    'initialize')
+                      send '{"id":1,"result":{"userAgent":"maccheroni-test/0.147.0"}}'
+                      ;;
+                    'account/read')
+                      \(accountReadAction)
+                      \(accountExit)
+                      ;;
+                    'config/read')
+                      if [ -e "$CODEX_HOME/config.toml" ]; then
+                        send '{"id":4,"result":{"config":{"model_provider":"inherited"},"layers":[{"name":{"type":"user"}}]}}'
+                      else
+                        send '{"id":4,"result":{"config":{"mcp_servers":{"fixture-mcp":{"command":"fixture"}}},"layers":[{"name":{"type":"sessionFlags"}}]}}'
+                      fi
+                      ;;
+                    'configRequirements/read')
+                      send '{"id":5,"result":{"requirements":\(requirementsJSON)}}'
+                      ;;
+                    'model/list')
+                      send '{"id":6,"result":{"data":[{"id":"gpt-test","model":"gpt-test","defaultReasoningEffort":"high"}],"nextCursor":null}}'
+                      ;;
+                    'thread/start')
+                      send '{"id":700,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-1"}}'
+                      IFS= read -r collision_response
+                      printf 'C:%s\\n' "$collision_response" >> '\(log.path)'
+                      send '{"id":7,"result":{"thread":{"id":"thread-1"}}}'
+                      ;;
+                    'mcpServerStatus/list')
+                      send '{"id":8,"result":{"data":\(mcpDataJSON),"nextCursor":null}}'
+                      ;;
+                    'turn/start')
+                      send '{"id":9,"result":{"turn":{"id":"turn-1","status":"inProgress","items":[]}}}'
+                      \(turnAction)
+                      ;;
+                    'turn/interrupt')
+                      send '{"id":10,"result":{}}'
+                      ;;
+                  esac
                   ;;
               esac
             done
+            \(eofAction)
             """,
             to: executable
         )
@@ -835,23 +874,83 @@ private struct AppServerFixture {
     }
 
     func executor(
-        terminationTiming: ProcessTerminationTiming = .default
+        terminationTiming: ProcessTerminationTiming = .default,
+        credentialSource: CodexCredentialSource? = nil,
+        terminateProcess: @escaping @Sendable (
+            Int32,
+            @escaping @Sendable () -> Bool,
+            ProcessTerminationTiming
+        ) async -> ProcessTerminationResult = ProcessTerminator.terminate,
+        removeScratch: @escaping @Sendable (URL) throws -> Void = {
+            try FileManager.default.removeItem(at: $0)
+        }
     ) -> FoundationCodexAppServerExecutor {
         FoundationCodexAppServerExecutor(
             terminationTiming: terminationTiming,
             environment: environment,
-            homeDirectory: root.appendingPathComponent("unused-home", isDirectory: true),
-            temporaryDirectory: temporaryDirectory
+            temporaryDirectory: temporaryDirectory,
+            credentialSource: credentialSource ?? CodexCredentialSource(
+                environment: environment,
+                homeDirectory: root.appendingPathComponent("unused-home", isDirectory: true),
+                keychainReader: { _ in .itemNotFound },
+                now: Date.init
+            ),
+            terminateProcess: terminateProcess,
+            removeScratch: removeScratch
         )
     }
 
-    func childHomePaths() throws -> [URL] {
+    func invocation(timeoutS: TimeInterval = 10) -> CodexAppServerInvocation {
+        CodexAppServerInvocation(
+            executableURL: executable,
+            model: "gpt-test",
+            prompt: "bounded private prompt",
+            outputSchema: Data(#"{"type":"object"}"#.utf8),
+            workspaceURL: workspace,
+            timeoutS: timeoutS
+        )
+    }
+
+    func rpcRecords() throws -> [RPCRecord] {
         try String(contentsOf: log, encoding: .utf8)
             .split(whereSeparator: \.isNewline)
             .compactMap { line in
-                let prefix = "CHILD_HOME:"
+                let direction: RPCDirection
+                if line.hasPrefix("C:") {
+                    direction = .client
+                } else if line.hasPrefix("S:") {
+                    direction = .server
+                } else {
+                    return nil
+                }
+                let data = Data(line.dropFirst(2).utf8)
+                guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+                return RPCRecord(direction: direction, object: object)
+            }
+    }
+
+    func argumentVector() throws -> [String] {
+        try metadataValues(prefix: "ARG:")
+    }
+
+    func childHomePaths() throws -> [URL] {
+        try metadataValues(prefix: "CHILD_HOME:").map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        }
+    }
+
+    func metadataValue(prefix: String) throws -> String {
+        try #require(metadataValues(prefix: prefix).first)
+    }
+
+    func metadataValues(prefix: String) throws -> [String] {
+        try String(contentsOf: log, encoding: .utf8)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .compactMap { line in
                 guard line.hasPrefix(prefix) else { return nil }
-                return URL(fileURLWithPath: String(line.dropFirst(prefix.count)), isDirectory: true)
+                return String(line.dropFirst(prefix.count))
             }
     }
 
@@ -862,9 +961,10 @@ private struct AppServerFixture {
         )
     }
 
-    func assertHostileSentinelsAreUnchanged(sourceLocation: SourceLocation = #_sourceLocation) throws {
-        #expect(FileManager.default.fileExists(atPath: sourceHome.path), sourceLocation: sourceLocation)
-        for (url, expected) in hostileSentinels {
+    func assertHostileParentHomeUnchanged(
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) throws {
+        for (url, expected) in hostileParentFiles {
             #expect(try Data(contentsOf: url) == expected, sourceLocation: sourceLocation)
         }
     }
@@ -874,82 +974,168 @@ private struct AppServerFixture {
     }
 }
 
-private enum InvalidAuthenticationKind: CaseIterable {
-    case missing
-    case directory
-    case symlink
-    case worldReadable
+private enum RPCDirection: Equatable { case client, server }
 
-    func apply(to fixture: AppServerFixture) throws {
-        try FileManager.default.removeItem(at: fixture.sourceAuthentication)
-        switch self {
-        case .missing:
-            break
-        case .directory:
-            try FileManager.default.createDirectory(
-                at: fixture.sourceAuthentication,
-                withIntermediateDirectories: false
-            )
-        case .symlink:
-            let target = fixture.root.appendingPathComponent("synthetic-auth-target.json")
-            try initialSyntheticAuthentication.write(to: target, options: .withoutOverwriting)
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: target.path
-            )
-            try FileManager.default.createSymbolicLink(
-                at: fixture.sourceAuthentication,
-                withDestinationURL: target
-            )
-        case .worldReadable:
-            try initialSyntheticAuthentication.write(
-                to: fixture.sourceAuthentication,
-                options: .withoutOverwriting
-            )
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o644],
-                ofItemAtPath: fixture.sourceAuthentication.path
-            )
-        }
+private final class LockedInt: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+
+    var value: Int { lock.withLock { storage } }
+
+    func increment() {
+        lock.withLock { storage += 1 }
     }
 }
 
-private struct FileStatus {
+private struct RPCRecord {
+    let direction: RPCDirection
+    let object: [String: Any]
+}
+
+private extension Array where Element == RPCRecord {
+    func clientRequest(method: String) -> [String: Any]? {
+        first { $0.direction == .client && $0.object["method"] as? String == method }?.object
+    }
+
+    func serverRequest(method: String) -> [String: Any]? {
+        first { $0.direction == .server && $0.object["method"] as? String == method }?.object
+    }
+
+    func containsClientMethod(_ method: String) -> Bool {
+        clientRequest(method: method) != nil
+    }
+
+    func index(ofClientMethod method: String) -> Int {
+        firstIndex {
+            $0.direction == .client && $0.object["method"] as? String == method
+        } ?? Int.max
+    }
+
+    func serverResponse(id: Int) -> [String: Any]? {
+        first {
+            $0.direction == .server
+                && $0.object["method"] == nil
+                && ($0.object["id"] as? NSNumber)?.intValue == id
+        }?.object
+    }
+
+    func firstClientResponse(id: Int) -> [String: Any]? {
+        first {
+            $0.direction == .client
+                && $0.object["method"] == nil
+                && ($0.object["id"] as? NSNumber)?.intValue == id
+        }?.object
+    }
+}
+
+private struct CredentialMetadata: Equatable {
+    let fileType: mode_t
+    let permissions: mode_t
+    let owner: uid_t
+    let group: gid_t
     let device: dev_t
     let inode: ino_t
     let linkCount: nlink_t
-    let permissions: mode_t
-    let fileType: mode_t
+    let size: off_t
+    let modifiedSeconds: Int
+    let modifiedNanoseconds: Int
+    let changedSeconds: Int
+    let changedNanoseconds: Int
 }
 
-private func fileStatus(at url: URL) throws -> FileStatus {
+private func readCredentialMetadata(at url: URL) throws -> CredentialMetadata {
     var status = stat()
     guard url.path.withCString({ Darwin.lstat($0, &status) }) == 0 else {
         throw CocoaError(.fileReadNoSuchFile)
     }
-    return FileStatus(
+    return CredentialMetadata(
+        fileType: status.st_mode & mode_t(S_IFMT),
+        permissions: status.st_mode & 0o777,
+        owner: status.st_uid,
+        group: status.st_gid,
         device: status.st_dev,
         inode: status.st_ino,
         linkCount: status.st_nlink,
-        permissions: status.st_mode & 0o777,
-        fileType: status.st_mode & mode_t(S_IFMT)
+        size: status.st_size,
+        modifiedSeconds: status.st_mtimespec.tv_sec,
+        modifiedNanoseconds: status.st_mtimespec.tv_nsec,
+        changedSeconds: status.st_ctimespec.tv_sec,
+        changedNanoseconds: status.st_ctimespec.tv_nsec
     )
 }
 
-private func parsedAuthenticationStatus(from transcript: String) throws -> FileStatus {
-    let prefix = "AUTH_STAT:"
-    let line = try #require(transcript.split(whereSeparator: \.isNewline).first {
-        $0.hasPrefix(prefix)
-    })
-    let fields = line.dropFirst(prefix.count).split(separator: ":")
-    #expect(fields.count == 4)
-    return FileStatus(
-        device: try #require(dev_t(fields[0])),
-        inode: try #require(ino_t(fields[1])),
-        linkCount: try #require(nlink_t(fields[2])),
-        permissions: try #require(mode_t(fields[3], radix: 8)),
-        fileType: mode_t(S_IFREG)
+private struct NativeCredentialMetadata: Equatable {
+    let file: CredentialMetadata?
+    let keychainStatus: OSStatus
+    let keychainCreationDate: Date?
+    let keychainModificationDate: Date?
+    let keychainService: String?
+    let keychainAccount: String?
+}
+
+private func nativeCredentialMetadata(
+    home: URL,
+    keychainAccount: String
+) -> NativeCredentialMetadata {
+    let authURL = home.appendingPathComponent("auth.json")
+    let file = try? readCredentialMetadata(at: authURL)
+    let query: [CFString: Any] = [
+        kSecClass: kSecClassGenericPassword,
+        kSecAttrService: "Codex Auth",
+        kSecAttrAccount: keychainAccount,
+        kSecReturnAttributes: true,
+        kSecMatchLimit: kSecMatchLimitOne,
+    ]
+    var item: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    let attributes = item as? NSDictionary
+    return NativeCredentialMetadata(
+        file: file,
+        keychainStatus: status,
+        keychainCreationDate: attributes?[kSecAttrCreationDate] as? Date,
+        keychainModificationDate: attributes?[kSecAttrModificationDate] as? Date,
+        keychainService: attributes?[kSecAttrService] as? String,
+        keychainAccount: attributes?[kSecAttrAccount] as? String
     )
+}
+
+private func syntheticAppServerCredential(
+    expiration: Int = Int(Date().timeIntervalSince1970) + 7_200,
+    planType: String? = nil
+) -> (record: Data, accessToken: String) {
+    let accountID = "account-fixture"
+    var authClaims: [String: Any] = ["chatgpt_account_id": accountID]
+    if let planType { authClaims["chatgpt_plan_type"] = planType }
+    let accessToken = syntheticAppServerJWT([
+        "exp": expiration,
+        "https://api.openai.com/auth": authClaims,
+    ])
+    let idToken = syntheticAppServerJWT([
+        "https://api.openai.com/auth": authClaims,
+    ])
+    let record = try! JSONSerialization.data(withJSONObject: [
+        "auth_mode": "chatgpt",
+        "tokens": [
+            "id_token": idToken,
+            "access_token": accessToken,
+            "refresh_token": "synthetic-refresh-token",
+            "account_id": accountID,
+        ],
+    ], options: [.sortedKeys])
+    return (record, accessToken)
+}
+
+private func syntheticAppServerJWT(_ claims: [String: Any]) -> String {
+    let header = try! JSONSerialization.data(withJSONObject: ["alg": "none"])
+    let payload = try! JSONSerialization.data(withJSONObject: claims, options: [.sortedKeys])
+    return "\(appServerBase64URL(header)).\(appServerBase64URL(payload)).synthetic-signature"
+}
+
+private func appServerBase64URL(_ data: Data) -> String {
+    data.base64EncodedString()
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+        .replacingOccurrences(of: "=", with: "")
 }
 
 private func freshDirectory(prefix: String) throws -> URL {
@@ -963,10 +1149,7 @@ private func freshDirectory(prefix: String) throws -> URL {
 
 private func writeExecutable(_ contents: String, to url: URL) throws {
     try Data(contents.utf8).write(to: url, options: .withoutOverwriting)
-    try FileManager.default.setAttributes(
-        [.posixPermissions: 0o755],
-        ofItemAtPath: url.path
-    )
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
 }
 
 private func waitForPID(at url: URL) async throws -> Int32 {
@@ -981,16 +1164,20 @@ private func waitForPID(at url: URL) async throws -> Int32 {
     throw CocoaError(.fileReadNoSuchFile)
 }
 
-private func waitForText(_ text: String, in url: URL) async throws {
+private func waitForClientMethod(_ method: String, in fixture: AppServerFixture) async throws {
     let deadline = Date().addingTimeInterval(loadTolerantTestTimeoutS)
     while Date() < deadline {
-        if let value = try? String(contentsOf: url, encoding: .utf8),
-           value.contains(text) {
-            return
-        }
+        if let records = try? fixture.rpcRecords(), records.containsClientMethod(method) { return }
         try await Task.sleep(for: .milliseconds(10))
     }
     throw CocoaError(.fileReadUnknown)
+}
+
+private func waitForProcessesToExit(_ processIDs: [Int32]) async throws {
+    let deadline = Date().addingTimeInterval(loadTolerantTestTimeoutS)
+    while processIDs.contains(where: processExists), Date() < deadline {
+        try await Task.sleep(for: .milliseconds(20))
+    }
 }
 
 private func processExists(_ pid: Int32) -> Bool {
@@ -1005,9 +1192,7 @@ private extension Array {
     ) async rethrows -> [Output] {
         var result: [Output] = []
         result.reserveCapacity(count)
-        for element in self {
-            result.append(try await transform(element))
-        }
+        for element in self { result.append(try await transform(element)) }
         return result
     }
 }
