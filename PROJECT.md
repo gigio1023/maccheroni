@@ -345,6 +345,19 @@ not deleted.
   child requests refresh, the operation fails before output promotion and directs the
   user to refresh or sign in through Codex. Native Codex remains the sole writer of its
   credential store.
+- D35 [inference] Published README benchmark results and both generated benchmark figures
+  derive from `benchmarks/published-results.json` (decided 2026-08-10). Rates use
+  decimal round-half-up: CER, WER, and DER display to 3 places; README term recall
+  displays to 2 places; figure term recall displays to at most 3 places; counts and
+  whole-second durations remain integers. The canonical VoxConverse DER is
+  `0.15230835199390363` from end-to-end run
+  `20260803T044246Z-cebdff`, displayed as `0.152`, because the README row describes the
+  shipped VibeVoice plus Pyannote pipeline. The same fixture and scoring policy produced
+  `0.15320167706894244` in standalone diarization run
+  `t5-20260803-voxconverse-ppgjx-78m-community1-r1`; it remains the reversible
+  alternative. Reversing this choice means changing that metric's source in the
+  declaration, after which its exact value and provenance resolve together and the
+  renderer and ten-README consistency check identify every publication update.
 
 ## Project-wide Done Criteria
 

@@ -1,0 +1,512 @@
+{
+  "schema_version": 1,
+  "rounding": {
+    "mode": "ROUND_HALF_UP",
+    "description": "Round exact decimal source values to the nearest displayed decimal, with ties away from zero.",
+    "surfaces": {
+      "figure": {
+        "count": {
+          "decimal_places": 0,
+          "strip_trailing_zeroes": false
+        },
+        "error_rate": {
+          "decimal_places": 3,
+          "strip_trailing_zeroes": false
+        },
+        "seconds": {
+          "decimal_places": 0,
+          "strip_trailing_zeroes": false
+        },
+        "stability": {
+          "decimal_places": 1,
+          "strip_trailing_zeroes": false
+        },
+        "term_recall": {
+          "decimal_places": 3,
+          "strip_trailing_zeroes": true
+        }
+      },
+      "readme": {
+        "count": {
+          "decimal_places": 0,
+          "strip_trailing_zeroes": false
+        },
+        "error_rate": {
+          "decimal_places": 3,
+          "strip_trailing_zeroes": false
+        },
+        "term_recall": {
+          "decimal_places": 2,
+          "strip_trailing_zeroes": false
+        }
+      }
+    }
+  },
+  "readme": {
+    "metric_columns": [
+      "cer",
+      "wer",
+      "term_recall",
+      "omissions",
+      "der"
+    ],
+    "placeholder": "—",
+    "row_order": [
+      "hike-tech",
+      "italian-dialogue",
+      "voxconverse-ppgjx-78m"
+    ]
+  },
+  "figure": {
+    "alt_sequence": [
+      {
+        "fixture": "hike-tech",
+        "metric": "cer"
+      },
+      {
+        "fixture": "hike-tech",
+        "metric": "wer"
+      },
+      {
+        "fixture": "italian-dialogue",
+        "metric": "cer"
+      },
+      {
+        "fixture": "italian-dialogue",
+        "metric": "wer"
+      },
+      {
+        "fixture": "hike-tech",
+        "metric": "term_recall"
+      },
+      {
+        "fixture": "italian-dialogue",
+        "metric": "term_recall"
+      },
+      {
+        "setting": "term_recall_gate"
+      },
+      {
+        "fixture": "italian-dialogue",
+        "metric": "der"
+      },
+      {
+        "fixture": "voxconverse-ppgjx-78m",
+        "metric": "der"
+      }
+    ]
+  },
+  "leaf_cap": {
+    "alt_sequence": [
+      {
+        "metric": "input_duration_seconds"
+      },
+      {
+        "case": "candidate-120",
+        "metric": "leaf_seconds"
+      },
+      {
+        "case": "candidate-120",
+        "metric": "valid_eos_leaves"
+      },
+      {
+        "case": "candidate-240",
+        "metric": "leaf_seconds"
+      },
+      {
+        "case": "candidate-300",
+        "metric": "leaf_seconds"
+      },
+      {
+        "case": "candidate-240",
+        "metric": "valid_eos_leaves"
+      },
+      {
+        "case": "forced-recovery-240-1024",
+        "metric": "leaf_seconds"
+      },
+      {
+        "case": "forced-recovery-240-1024",
+        "metric": "valid_eos_leaves"
+      },
+      {
+        "case": "forced-recovery-240-1024",
+        "metric": "recovery_leaf_seconds"
+      }
+    ],
+    "case_order": [
+      "candidate-120",
+      "candidate-240",
+      "candidate-300",
+      "forced-recovery-240-1024"
+    ],
+    "cases": [
+      {
+        "case": "candidate-120",
+        "metrics": {
+          "cer": {
+            "kind": "error_rate",
+            "metric": "text_scores.cer.error_rate",
+            "source": "moss-leaf-candidate-120"
+          },
+          "leaf_seconds": {
+            "kind": "seconds",
+            "metric": "leaf_seconds",
+            "source": "moss-leaf-candidate-120"
+          },
+          "term_recall": {
+            "kind": "term_recall",
+            "metric": "text_scores.terms.term_recall",
+            "source": "moss-leaf-candidate-120"
+          },
+          "valid_eos_leaves": {
+            "kind": "count",
+            "metric": "attempts.canonical_eos_leaf_count",
+            "source": "moss-leaf-candidate-120"
+          }
+        }
+      },
+      {
+        "case": "candidate-240",
+        "metrics": {
+          "leaf_seconds": {
+            "kind": "seconds",
+            "metric": "leaf_seconds",
+            "source": "moss-leaf-candidate-240"
+          },
+          "valid_eos_leaves": {
+            "kind": "count",
+            "metric": "derived.valid_eos_leaf_count",
+            "source": "moss-leaf-candidate-240"
+          }
+        }
+      },
+      {
+        "case": "candidate-300",
+        "metrics": {
+          "leaf_seconds": {
+            "kind": "seconds",
+            "metric": "leaf_seconds",
+            "source": "moss-leaf-candidate-300"
+          },
+          "valid_eos_leaves": {
+            "kind": "count",
+            "metric": "derived.valid_eos_leaf_count",
+            "source": "moss-leaf-candidate-300"
+          }
+        }
+      },
+      {
+        "case": "forced-recovery-240-1024",
+        "metrics": {
+          "cer": {
+            "kind": "error_rate",
+            "metric": "text_scores.cer.error_rate",
+            "source": "moss-leaf-forced-recovery"
+          },
+          "leaf_seconds": {
+            "kind": "seconds",
+            "metric": "leaf_seconds",
+            "source": "moss-leaf-forced-recovery"
+          },
+          "recovery_leaf_seconds": {
+            "kind": "seconds",
+            "metric": "derived.recovery_leaf_seconds",
+            "source": "moss-leaf-forced-recovery"
+          },
+          "term_recall": {
+            "kind": "term_recall",
+            "metric": "text_scores.terms.term_recall",
+            "source": "moss-leaf-forced-recovery"
+          },
+          "valid_eos_leaves": {
+            "kind": "count",
+            "metric": "attempts.canonical_eos_leaf_count",
+            "source": "moss-leaf-forced-recovery"
+          }
+        }
+      }
+    ],
+    "fixture": "italian-dialogue-600s-synthetic",
+    "metrics": {
+      "input_duration_seconds": {
+        "kind": "seconds",
+        "metric": "duration_s",
+        "source": "moss-leaf-fixture"
+      }
+    }
+  },
+  "publication_settings": {
+    "term_recall_gate": {
+      "kind": "term_recall",
+      "source": "docs/moss-long-audio-verdict.md",
+      "value": "0.75"
+    }
+  },
+  "sources": {
+    "italian-moss-asr": {
+      "artifact": "benchmarks/runs/it-asr/t6-20260803-italian-dialogue-moss-on-r2/scores.json",
+      "artifact_sha256": "ebb9245ead111088888cec1890ce83cdbfdeadb8db3f6c105fafedfc3e22522b",
+      "measured_at": "2026-08-02T19:27:28Z",
+      "run_id": "t6-20260803-italian-dialogue-moss-on-r2",
+      "run_kind": "standalone-asr",
+      "values": {
+        "cer.error_rate": "0.033112582781456956",
+        "omissions.omitted_utterances": "0",
+        "terms.term_recall": "0.7777777777777778",
+        "wer.error_rate": "0.08064516129032258"
+      }
+    },
+    "italian-pyannote-diarization": {
+      "artifact": "benchmarks/runs/diarization/t5-20260803-it-dialogue-community1-r1/scores.json",
+      "artifact_sha256": "5269d2ab4c3fce8e6bbb33acbb0a59f25ce91bd32e85dcc1933e5d5dacc2c484",
+      "measured_at": "2026-08-02T18:35:12Z",
+      "run_id": "t5-20260803-it-dialogue-community1-r1",
+      "run_kind": "standalone-diarization",
+      "values": {
+        "diarization.der": "0.04756244904215315"
+      }
+    },
+    "korean-vibevoice-asr": {
+      "artifact": "benchmarks/runs/ko-asr/t4-20260803-hike-tech-vibe8-on-r1/scores.json",
+      "artifact_sha256": "3d77925705f5ec0a621e60e5abc938c53affd8f7f32fcc7c990226d19cb21fc6",
+      "measured_at": "2026-08-02T17:59:23Z",
+      "run_id": "t4-20260803-hike-tech-vibe8-on-r1",
+      "run_kind": "standalone-asr",
+      "values": {
+        "cer.error_rate": "0.08123249299719888",
+        "omissions.omitted_utterances": "0",
+        "terms.term_recall": "0.95",
+        "wer.error_rate": "0.1282051282051282"
+      }
+    },
+    "moss-leaf-candidate-120": {
+      "artifact": "benchmarks/runs/moss-long-audio-final/evaluation.json",
+      "artifact_selector": "cases[id=candidate-120]",
+      "artifact_sha256": "73ec3810a72c5e184abb1f57a506f182bc5c67b16bae3aa4f43c7ddbb031b2af",
+      "evaluation_id": "moss-long-audio-20260803T182646Z-fd5ca427",
+      "measured_at": "2026-08-03T18:28:07Z",
+      "run_id": "20260803T182706Z-a0c6c4",
+      "run_kind": "end-to-end-long-audio",
+      "values": {
+        "attempts.canonical_eos_leaf_count": "5",
+        "leaf_seconds": "120",
+        "text_scores.cer.error_rate": "0.03642384105960265",
+        "text_scores.terms.term_recall": "0.7777777777777778"
+      }
+    },
+    "moss-leaf-candidate-240": {
+      "artifact": "benchmarks/runs/moss-long-audio-final/evaluation.json",
+      "artifact_selector": "cases[id=candidate-240]",
+      "artifact_sha256": "73ec3810a72c5e184abb1f57a506f182bc5c67b16bae3aa4f43c7ddbb031b2af",
+      "derivations": {
+        "derived.valid_eos_leaf_count": {
+          "evidence": [
+            "attempts.statuses.invalid_eos_output=1",
+            "explicit_failure.promoted=false"
+          ],
+          "rule": "The only attempt was an unpromoted invalid-EOS output, so it contributed zero valid EOS leaves."
+        }
+      },
+      "evaluation_id": "moss-long-audio-20260803T182646Z-fd5ca427",
+      "measured_at": "2026-08-03T18:28:49Z",
+      "run_id": "20260803T182807Z-e8d2a2",
+      "run_kind": "end-to-end-long-audio",
+      "values": {
+        "derived.valid_eos_leaf_count": "0",
+        "leaf_seconds": "240"
+      }
+    },
+    "moss-leaf-candidate-300": {
+      "artifact": "benchmarks/runs/moss-long-audio-final/evaluation.json",
+      "artifact_selector": "cases[id=candidate-300]",
+      "artifact_sha256": "73ec3810a72c5e184abb1f57a506f182bc5c67b16bae3aa4f43c7ddbb031b2af",
+      "derivations": {
+        "derived.valid_eos_leaf_count": {
+          "evidence": [
+            "attempts.statuses.invalid_eos_output=1",
+            "explicit_failure.promoted=false"
+          ],
+          "rule": "The only attempt was an unpromoted invalid-EOS output, so it contributed zero valid EOS leaves."
+        }
+      },
+      "evaluation_id": "moss-long-audio-20260803T182646Z-fd5ca427",
+      "measured_at": "2026-08-03T18:29:37Z",
+      "run_id": "20260803T182849Z-9c78f5",
+      "run_kind": "end-to-end-long-audio",
+      "values": {
+        "derived.valid_eos_leaf_count": "0",
+        "leaf_seconds": "300"
+      }
+    },
+    "moss-leaf-fixture": {
+      "artifact": "benchmarks/runs/moss-long-audio-final/evaluation.json",
+      "artifact_selector": "fixture",
+      "artifact_sha256": "73ec3810a72c5e184abb1f57a506f182bc5c67b16bae3aa4f43c7ddbb031b2af",
+      "evaluation_id": "moss-long-audio-20260803T182646Z-fd5ca427",
+      "measured_at": "2026-08-03T18:30:55Z",
+      "run_id": "moss-long-audio-20260803T182646Z-fd5ca427",
+      "run_kind": "long-audio-evaluation",
+      "values": {
+        "duration_s": "600"
+      }
+    },
+    "moss-leaf-forced-recovery": {
+      "artifact": "benchmarks/runs/moss-long-audio-final/evaluation.json",
+      "artifact_selector": "cases[id=forced-recovery-240-1024]",
+      "artifact_sha256": "73ec3810a72c5e184abb1f57a506f182bc5c67b16bae3aa4f43c7ddbb031b2af",
+      "derivations": {
+        "derived.recovery_leaf_seconds": {
+          "evidence": [
+            "docs/moss-long-audio-verdict.md final typed matrix",
+            "cases/forced-recovery-240-1024/runs/20260803T182937Z-115a85/primary/attempts/*-root-{l,r}/runner-record.json:coverage.input_duration_s",
+            "cases/forced-recovery-240-1024/runs/20260803T182937Z-115a85/primary/attempts/chunk-0002-root/runner-record.json:coverage.input_duration_s"
+          ],
+          "rule": "The two 240-second limit parents produced four recovery children; those children and the unsplit tail were the five promoted leaves, all covering 120 seconds."
+        }
+      },
+      "evaluation_id": "moss-long-audio-20260803T182646Z-fd5ca427",
+      "measured_at": "2026-08-03T18:30:55Z",
+      "run_id": "20260803T182937Z-115a85",
+      "run_kind": "end-to-end-long-audio",
+      "values": {
+        "attempts.canonical_eos_leaf_count": "5",
+        "derived.recovery_leaf_seconds": "120",
+        "leaf_seconds": "240",
+        "text_scores.cer.error_rate": "0.03642384105960265",
+        "text_scores.terms.term_recall": "0.7777777777777778"
+      }
+    },
+    "voxconverse-e2e-der": {
+      "artifact": "benchmarks/runs/e2e/voxconverse-ppgjx-78m/evaluation/final-moss-2bc2f72/scores.json",
+      "artifact_sha256": "8311225271a214502b16a703a8d77b5d83b633128a401939a97df94b95979dc9",
+      "evaluation_id": "final-moss-2bc2f72",
+      "input_sha256": "36500813141f5f0e8df986c6b9010b06d2824aa8559e01e379f67f9b776b49e1",
+      "measured_at": "2026-08-03T05:16:00Z",
+      "reference_rttm_sha256": "9cc1034614cd26e98beafd8e84b996f9ee9b66628e7131af4e06d8aeb8f7567e",
+      "run_id": "20260803T044246Z-cebdff",
+      "run_kind": "end-to-end",
+      "scoring": {
+        "collar_seconds": "0.25",
+        "skip_overlap": true
+      },
+      "values": {
+        "diarization.der": "0.15230835199390363"
+      }
+    },
+    "voxconverse-e2e-stability": {
+      "artifact": "benchmarks/runs/e2e/voxconverse-ppgjx-78m/evaluation/final-moss-2bc2f72/repeat-consistency.json",
+      "artifact_sha256": "d198ad5772946eec49f07faa1a3f83cef0d5fbcb9bd85959545dbc959fe69959",
+      "evaluation_id": "final-moss-2bc2f72",
+      "measured_at": "2026-08-03T05:16:00Z",
+      "run_id": "20260803T044246Z-cebdff",
+      "run_kind": "end-to-end",
+      "values": {
+        "speakers.*.stability": "1.0"
+      }
+    },
+    "voxconverse-standalone-der": {
+      "artifact": "benchmarks/runs/diarization/t5-20260803-voxconverse-ppgjx-78m-community1-r1/scores.json",
+      "artifact_sha256": "322623af947fcf8cf041ab13e7fc5a20ec499292e63601a548cbedccb41c41c1",
+      "input_sha256": "36500813141f5f0e8df986c6b9010b06d2824aa8559e01e379f67f9b776b49e1",
+      "measured_at": "2026-08-02T18:39:57Z",
+      "reference_rttm_sha256": "9cc1034614cd26e98beafd8e84b996f9ee9b66628e7131af4e06d8aeb8f7567e",
+      "run_id": "t5-20260803-voxconverse-ppgjx-78m-community1-r1",
+      "run_kind": "standalone-diarization",
+      "scoring": {
+        "collar_seconds": "0.25",
+        "skip_overlap": true
+      },
+      "values": {
+        "diarization.der": "0.15320167706894244"
+      }
+    }
+  },
+  "fixtures": [
+    {
+      "fixture": "hike-tech",
+      "metrics": {
+        "cer": {
+          "kind": "error_rate",
+          "metric": "cer.error_rate",
+          "source": "korean-vibevoice-asr"
+        },
+        "omissions": {
+          "kind": "count",
+          "metric": "omissions.omitted_utterances",
+          "source": "korean-vibevoice-asr"
+        },
+        "term_recall": {
+          "kind": "term_recall",
+          "metric": "terms.term_recall",
+          "source": "korean-vibevoice-asr"
+        },
+        "wer": {
+          "kind": "error_rate",
+          "metric": "wer.error_rate",
+          "source": "korean-vibevoice-asr"
+        }
+      },
+      "readme_model": "VibeVoice"
+    },
+    {
+      "fixture": "italian-dialogue",
+      "metrics": {
+        "cer": {
+          "kind": "error_rate",
+          "metric": "cer.error_rate",
+          "source": "italian-moss-asr"
+        },
+        "der": {
+          "kind": "error_rate",
+          "metric": "diarization.der",
+          "source": "italian-pyannote-diarization"
+        },
+        "omissions": {
+          "kind": "count",
+          "metric": "omissions.omitted_utterances",
+          "source": "italian-moss-asr"
+        },
+        "term_recall": {
+          "kind": "term_recall",
+          "metric": "terms.term_recall",
+          "source": "italian-moss-asr"
+        },
+        "wer": {
+          "kind": "error_rate",
+          "metric": "wer.error_rate",
+          "source": "italian-moss-asr"
+        }
+      },
+      "readme_model": "MOSS"
+    },
+    {
+      "fixture": "voxconverse-ppgjx-78m",
+      "metrics": {
+        "der": {
+          "kind": "error_rate",
+          "metric": "diarization.der",
+          "source": "voxconverse-e2e-der"
+        },
+        "speaker_stability": {
+          "kind": "stability",
+          "metric": "speakers.*.stability",
+          "source": "voxconverse-e2e-stability"
+        }
+      },
+      "readme_model": "VibeVoice + Pyannote"
+    }
+  ],
+  "canonical_run_decisions": [
+    {
+      "alternative_source": "voxconverse-standalone-der",
+      "fixture": "voxconverse-ppgjx-78m",
+      "id": "voxconverse-published-der",
+      "metric": "diarization.der",
+      "rationale": "The README row names the shipped VibeVoice plus Pyannote pipeline, so its DER comes from the end-to-end run. The standalone run uses the same source fixture, reference, model, collar, and overlap policy but diarizes the original Int16 fixture instead of the pipeline's normalized Float32 artifact.",
+      "reversal": "Replace the source at fixtures[voxconverse-ppgjx-78m].metrics.der with the alternative source. The exact value and provenance resolve from that source, and the renderer and README check will derive every affected publication change.",
+      "selection_path": "fixtures[voxconverse-ppgjx-78m].metrics.der.source",
+      "status": "reversible"
+    }
+  ]
+}
