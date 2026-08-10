@@ -351,6 +351,45 @@ struct MaccheroniCLITests {
     }
 
     @Test
+    func completedCodexTurnsValidateWhenCLIVersionIsUnavailable() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "input.wav")
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+
+        for (mode, targetLanguage) in [
+            (PostprocessMode.correction, nil),
+            (PostprocessMode.translation, "en"),
+        ] {
+            let profiles = try profileFile(
+                in: root,
+                fileName: "codex-\(mode.rawValue).json",
+                postprocess: "codex",
+                postprocessMode: mode,
+                targetLanguage: targetLanguage
+            )
+            let app = testApplication(
+                runID: "codex-\(mode.rawValue)",
+                dependencies: testDependencies(codexVersion: "unavailable")
+            )
+
+            let runPath = try await app.execute(arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--output-root", outputRoot.path,
+            ])
+            let manifest: Manifest = try decode(
+                "manifest.json",
+                in: URL(fileURLWithPath: runPath, isDirectory: true)
+            )
+            #expect(manifest.status == .succeeded)
+            #expect(manifest.postprocess?.backend
+                == BackendDescriptor(name: "codex-app-server", version: "unavailable"))
+        }
+    }
+
+    @Test
     func localPostprocessRecordsPinnedModelAndPreservesMergedArtifacts() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -1226,6 +1265,7 @@ struct MaccheroniCLITests {
 private func testDependencies(
     failASRAtOrAfterS: Double? = nil,
     postprocessFailure: Bool = false,
+    codexVersion: String = "codex-cli test",
     inputSHA256: @escaping @Sendable (URL) throws -> String = {
         try AudioPreprocessor.sha256(of: $0)
     }
@@ -1361,7 +1401,7 @@ private func testDependencies(
                 provenance = ManifestPostprocess(
                     backend: BackendDescriptor(
                         name: "codex-app-server",
-                        version: "codex-cli test"
+                        version: codexVersion
                     ),
                     modelID: CodexPostprocessBackend.modelName,
                     glossarySHA256: request.glossary?.sha256,
@@ -1474,7 +1514,7 @@ private func testDependencies(
                 provenance = ManifestPostprocess(
                     backend: BackendDescriptor(
                         name: "codex-app-server",
-                        version: "codex-cli test"
+                        version: codexVersion
                     ),
                     modelID: CodexPostprocessBackend.modelName,
                     glossarySHA256: request.glossary?.sha256,

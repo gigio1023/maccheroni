@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import MaccheroniCore
 
@@ -189,6 +190,16 @@ private final class CodexAppServerSession: @unchecked Sendable {
         process.standardInput = standardInput
         process.standardOutput = standardOutput
         process.standardError = errorOutput
+        guard Darwin.fcntl(input.fileDescriptor, F_SETNOSIGPIPE, 1) != -1 else {
+            channel.finish()
+            try? input.close()
+            try? output.close()
+            try? errorOutput.close()
+            try? FileManager.default.removeItem(at: scratchURL)
+            throw PostprocessError.launchFailed(
+                "could not configure Codex app server input"
+            )
+        }
         do {
             try process.run()
         } catch {
@@ -542,8 +553,9 @@ private final class CodexAppServerSession: @unchecked Sendable {
             let message = try nextMessage()
             if isResponse(message, matching: requestID) {
                 if let error = message["error"] as? [String: Any] {
-                    _ = error
-                    throw protocolFailure("\(method) failed")
+                    throw protocolFailure(
+                        "\(method) failed with \(serverErrorDescription(error))"
+                    )
                 }
                 guard let result = message["result"] else {
                     throw protocolFailure("\(method) returned neither result nor error")
@@ -642,11 +654,105 @@ private final class CodexAppServerSession: @unchecked Sendable {
 
     private func exitedFailure() -> PostprocessError {
         let status = process.isRunning ? "before completing the request" : "with status \(process.terminationStatus)"
-        return .backendFailed("codex app server exited \(status)")
+        return .backendFailed(diagnosticMessage("codex app server exited \(status)"))
     }
 
     private func protocolFailure(_ message: String) -> PostprocessError {
-        .backendFailed("codex app server protocol error: \(message)")
+        .backendFailed(diagnosticMessage("codex app server protocol error: \(message)"))
+    }
+
+    private func serverErrorDescription(_ error: [String: Any]) -> String {
+        let code: String
+        if let value = error["code"] as? String, !value.isEmpty {
+            code = value
+        } else if let value = error["code"] as? NSNumber {
+            code = value.stringValue
+        } else {
+            code = "unknown"
+        }
+        let message = (error["message"] as? String)?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let displayedMessage: String
+        if let message, !message.isEmpty {
+            displayedMessage = message
+        } else {
+            displayedMessage = "message unavailable"
+        }
+        return "server error \(code): \(displayedMessage)"
+    }
+
+    private func diagnosticMessage(_ message: String) -> String {
+        let sanitizedMessage = SubprocessFailureMessage.sanitized(
+            standardError: Data(message.utf8)
+        )
+        let sanitizedStderrTail = SubprocessFailureMessage.sanitized(
+            standardError: stderrTail(maximumBytes: 384)
+        )
+        guard !sanitizedStderrTail.isEmpty else { return sanitizedMessage }
+        let primary = Self.boundedUTF8Prefix(sanitizedMessage, maximumBytes: 320)
+        let stderr = Self.boundedUTF8Suffix(sanitizedStderrTail, maximumBytes: 160)
+        return "\(primary); stderr tail: \(stderr)"
+    }
+
+    private func stderrTail(maximumBytes: UInt64) -> Data {
+        try? errorOutput.synchronize()
+        guard let reader = try? FileHandle(forReadingFrom: errorURL) else {
+            return Data()
+        }
+        defer { try? reader.close() }
+        guard let end = try? reader.seekToEnd() else { return Data() }
+        let start = end > maximumBytes ? end - maximumBytes : 0
+        let readStart = start > 0 ? start - 1 : 0
+        do {
+            try reader.seek(toOffset: readStart)
+            var data = try reader.readToEnd() ?? Data()
+            guard start > 0, let precedingByte = data.first else { return data }
+            data.removeFirst()
+            guard precedingByte != 10, precedingByte != 13 else { return data }
+            while let byte = data.first {
+                data.removeFirst()
+                if byte == 10 || byte == 13 { break }
+            }
+            return data
+        } catch {
+            return Data()
+        }
+    }
+
+    private static func boundedUTF8Prefix(
+        _ text: String,
+        maximumBytes: Int
+    ) -> String {
+        guard text.utf8.count > maximumBytes else { return text }
+        let marker = SubprocessFailureMessage.truncationMarker
+        let budget = maximumBytes - marker.utf8.count
+        var result = ""
+        var usedBytes = 0
+        for character in text {
+            let size = String(character).utf8.count
+            guard usedBytes + size <= budget else { break }
+            result.append(character)
+            usedBytes += size
+        }
+        return result + marker
+    }
+
+    private static func boundedUTF8Suffix(
+        _ text: String,
+        maximumBytes: Int
+    ) -> String {
+        guard text.utf8.count > maximumBytes else { return text }
+        var result = ""
+        var usedBytes = 0
+        for character in text.reversed() {
+            let value = String(character)
+            let size = value.utf8.count
+            guard usedBytes + size <= maximumBytes else { break }
+            result = value + result
+            usedBytes += size
+        }
+        return result
     }
 
     private func rpcID(_ value: Any?) -> Int? {

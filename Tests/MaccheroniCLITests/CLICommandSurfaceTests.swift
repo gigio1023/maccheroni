@@ -170,6 +170,36 @@ struct CLICommandSurfaceTests {
     }
 
     @Test
+    func doctorJSONRedactsEmbeddedAbsoluteAndHomeRelativePaths() throws {
+        let output = try CLIOutput.doctorJSON(
+            diagnostics: "asr_error=UserInfo={NSFilePath=/Users/private/model.bin} "
+                + "home=~/Library/Caches/Maccheroni/model "
+                + "url=file:///Users/private/recording.m4a "
+                + "remote=https://example.com/redirect?next=/account "
+                + "double=//Users/private/model.bin "
+                + "punctuation=/Users/private/name,secret/model "
+                + "mixed=remote=https://example.com,cache=/Users/private/cache "
+                + "json={\"remote\":\"https://example.com/reference\","
+                + "\"path\":\"/Users/private/model.bin\"}"
+        )
+        let object = try jsonObject(output)
+        let values = try #require(object["values"] as? [String: String])
+        #expect(values["asr_error"]
+            == "UserInfo={NSFilePath=<redacted-path>} "
+                + "home=<redacted-path> "
+                + "url=<redacted-path> "
+                + "remote=https://example.com/redirect?next=/account "
+                + "double=<redacted-path> "
+                + "punctuation=<redacted-path> "
+                + "mixed=remote=https://example.com,cache=<redacted-path> "
+                + "json={\"remote\":\"https://example.com/reference\","
+                + "\"path\":\"<redacted-path>\"}")
+        #expect(!output.contains("/Users/private"))
+        #expect(!output.contains("~/Library"))
+        #expect(!output.contains("secret/model"))
+    }
+
+    @Test
     func doctorDiagnosticsPreserveFirstEqualsAndRejectMalformedOrDuplicateKeys() throws {
         #expect(try CLIOutput.doctorValues(
             from: "profile=ko-meeting\nmodel.revision=a=b=c\n"

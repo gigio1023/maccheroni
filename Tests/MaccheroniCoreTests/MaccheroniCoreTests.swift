@@ -29,6 +29,34 @@ import Testing
         }
     }
 
+    @Test func privacyBoundTextRedactsEmbeddedPathsWithoutRedactingWebURLs() {
+        let input = "UserInfo={NSFilePath=/Users/private/model.bin} "
+            + "home=~/Library/Caches/Maccheroni/model "
+            + "url=file:///Users/private/recording.m4a "
+            + "relative=fixtures/model.bin "
+            + "remote=https://example.com/redirect?next=/account "
+            + "double=//Users/private/model.bin "
+            + "punctuation=/Users/private/name,secret/model "
+            + "quoted=\"/Users/private/My File/model.bin\" "
+            + "mixed=remote=https://example.com,cache=/Users/private/cache "
+            + "piped=remote=https://example.com|cache=/Users/private/cache "
+            + "json={\"remote\":\"https://example.com/reference\","
+            + "\"path\":\"/Users/private/model.bin\"}"
+        #expect(PrivacyBoundText.redactingFilePaths(in: input)
+            == "UserInfo={NSFilePath=<redacted-path>} "
+                + "home=<redacted-path> "
+                + "url=<redacted-path> "
+                + "relative=fixtures/model.bin "
+                + "remote=https://example.com/redirect?next=/account "
+                + "double=<redacted-path> "
+                + "punctuation=<redacted-path> "
+                + "quoted=\"<redacted-path>\" "
+                + "mixed=remote=https://example.com,cache=<redacted-path> "
+                + "piped=remote=https://example.com|cache=<redacted-path> "
+                + "json={\"remote\":\"https://example.com/reference\","
+                + "\"path\":\"<redacted-path>\"}")
+    }
+
     @Test func segmentsDocumentRoundTripsWithSchemaKeys() throws {
         let document = SegmentsDocument(
             segments: [Segment(

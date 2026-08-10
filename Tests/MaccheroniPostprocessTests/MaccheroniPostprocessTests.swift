@@ -249,6 +249,18 @@ import Testing
         #expect(SubprocessFailureMessage.sanitized(standardError: Data()) == "")
     }
 
+    @Test func sanitizedStandardErrorUsesSharedPathRedactionForFileAndHomePaths() {
+        let input = "UserInfo={NSFilePath=/Users/private/model.bin} "
+            + "home=~/Library/Caches/Maccheroni/model "
+            + "url=file:///Users/private/recording.m4a "
+            + "remote=https://example.com/reference\n"
+        #expect(SubprocessFailureMessage.sanitized(standardError: Data(input.utf8))
+            == "UserInfo={NSFilePath=<redacted-path>} "
+                + "home=<redacted-path> "
+                + "url=<redacted-path> "
+                + "remote=https://example.com/reference")
+    }
+
     @Test func sanitizedStandardErrorTruncatesOnlyAboveTheByteLimit() {
         let limit = SubprocessFailureMessage.maximumUTF8Bytes
         let marker = SubprocessFailureMessage.truncationMarker
@@ -744,6 +756,67 @@ import Testing
             timeoutS: 0.05
         ) == "unavailable")
         #expect(Date().timeIntervalSince(started) < 1.5)
+    }
+
+    @Test func codexVersionProbeDrainsLargeStandardErrorWithoutDeadlock() throws {
+        let noisy = try executableScript(#"""
+        #!/bin/sh
+        i=0
+        while [ "$i" -lt 8192 ]; do
+          printf '0123456789abcdef\n' >&2
+          i=$((i + 1))
+        done
+        printf 'codex-cli fixture\n'
+        """#)
+        defer {
+            try? FileManager.default.removeItem(
+                at: noisy.deletingLastPathComponent()
+            )
+        }
+
+        #expect(CodexPostprocessBackend.detectVersion(
+            executableURL: noisy,
+            timeoutS: 2
+        ) == "codex-cli fixture")
+    }
+
+    @Test func codexVersionProbeDrainsLargeStandardOutputWithoutDeadlock() throws {
+        let noisy = try executableScript(#"""
+        #!/bin/sh
+        i=0
+        while [ "$i" -lt 8192 ]; do
+          printf '                '
+          i=$((i + 1))
+        done
+        printf '\ncodex-cli fixture\n'
+        """#)
+        defer {
+            try? FileManager.default.removeItem(
+                at: noisy.deletingLastPathComponent()
+            )
+        }
+
+        #expect(CodexPostprocessBackend.detectVersion(
+            executableURL: noisy,
+            timeoutS: 2
+        ) == "codex-cli fixture")
+    }
+
+    @Test func codexAvailabilityDoesNotDependOnVersionSideChannel() async throws {
+        let executable = try executableScript(#"""
+        #!/bin/sh
+        exit 7
+        """#)
+        defer {
+            try? FileManager.default.removeItem(
+                at: executable.deletingLastPathComponent()
+            )
+        }
+
+        #expect(await CodexPostprocessBackend.detectAvailability(
+            executableURL: executable,
+            appServerExecutor: MockCodexAppServerExecutor(reportedAccountState: .chatGPT)
+        ) == .authenticated(version: "unavailable"))
     }
 
     @Test func appServerOwnsAuthenticationAtRunTime() async throws {

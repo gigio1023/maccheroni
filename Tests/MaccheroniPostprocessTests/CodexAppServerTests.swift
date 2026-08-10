@@ -1,8 +1,8 @@
 import Darwin
 import Foundation
 import MaccheroniCore
-import MaccheroniPostprocess
 import Testing
+@testable import MaccheroniPostprocess
 
 @Suite(.serialized)
 struct CodexAppServerTests {
@@ -213,19 +213,30 @@ struct CodexAppServerTests {
             """
             #!/bin/sh
             while IFS= read -r line; do
-              printf '%s\\n' '{"id":1,"error":{"message":"cannot read /Users/someone/private.txt"}}'
+              printf '%s\\n' '/Users/someone/\(String(repeating: "private,fragment-", count: 80)).log' >&2
+              printf '%s\\n' 'safe stderr tail' >&2
+              printf '%s\\n' '{"id":1,"error":{"code":-32001,"message":"cannot read /Users/someone/private.txt \(String(repeating: "detail-", count: 80))"}}'
             done
             """,
             to: protocolFailure
         )
-        await #expect(throws: PostprocessError.backendFailed(
-            "codex app server protocol error: initialize failed"
-        )) {
+        do {
             _ = try await FoundationCodexAppServerExecutor().accountState(
                 executableURL: protocolFailure,
                 workspaceURL: workspace,
                 timeoutS: 2
             )
+            Issue.record("expected the JSON-RPC error response to fail")
+        } catch let error as PostprocessError {
+            let description = try #require(error.errorDescription)
+            #expect(description.contains("initialize failed with server error -32001"))
+            #expect(description.contains("cannot read <redacted-path>"))
+            #expect(description.contains("stderr tail:"))
+            #expect(description.contains("safe stderr tail"))
+            #expect(!description.contains("private-"))
+            #expect(!description.contains("fragment-"))
+            #expect(!description.contains("/Users/"))
+            #expect(description.utf8.count <= SubprocessFailureMessage.maximumUTF8Bytes)
         }
 
         let stderrFailure = root.appendingPathComponent("codex-stderr")
@@ -240,7 +251,7 @@ struct CodexAppServerTests {
             to: stderrFailure
         )
         await #expect(throws: PostprocessError.backendFailed(
-            "codex app server exited with status 7"
+            "codex app server exited with status 7; stderr tail: cannot read <redacted-path>"
         )) {
             _ = try await FoundationCodexAppServerExecutor().accountState(
                 executableURL: stderrFailure,
@@ -267,6 +278,34 @@ struct CodexAppServerTests {
                 workspaceURL: workspace,
                 timeoutS: 2
             )
+        }
+    }
+
+    @Test func deadAppServerInputSurfacesTypedFailureWithoutSIGPIPE() async throws {
+        let fixture = try AppServerFixture(
+            accountType: "chatgpt",
+            completesTurn: false,
+            exitsAfterTurnStartResponse: true
+        )
+        defer { fixture.remove() }
+
+        do {
+            _ = try await FoundationCodexAppServerExecutor().run(
+                CodexAppServerInvocation(
+                    executableURL: fixture.executable,
+                    model: "gpt-test",
+                    prompt: "bounded private prompt",
+                    outputSchema: Data(#"{"type":"object"}"#.utf8),
+                    workspaceURL: fixture.workspace,
+                    timeoutS: 2
+                )
+            )
+            Issue.record("expected the dead app-server input to fail")
+        } catch let error as PostprocessError {
+            guard case .backendFailed = error else {
+                Issue.record("expected backendFailed, got \(error)")
+                return
+            }
         }
     }
 
@@ -393,6 +432,7 @@ private struct AppServerFixture {
         accountType: String?,
         completesTurn: Bool = true,
         exitsAfterAccountResponse: Bool = false,
+        exitsAfterTurnStartResponse: Bool = false,
         requirementsJSON: String = "null",
         mcpDataJSON: String = #"[{"name":"fixture-mcp","tools":{},"resources":[],"resourceTemplates":[],"serverInfo":null,"authStatus":"unsupported"}]"#
     ) throws {
@@ -404,6 +444,7 @@ private struct AppServerFixture {
         try Data().write(to: log, options: .withoutOverwriting)
         let accountJSON = accountType.map { #"{"type":"\#($0)"}"# } ?? "null"
         let accountExit = exitsAfterAccountResponse ? "exit 0" : ""
+        let turnStartExit = exitsAfterTurnStartResponse ? "exit 23" : ""
         let turnCompletion = completesTurn ? """
                   printf '%s\\n' '{"id":90,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-1","turnId":"turn-1"}}'
                   IFS= read -r approval
@@ -446,6 +487,7 @@ private struct AppServerFixture {
                   ;;
                 *'"method":"turn/start"'*)
                   printf '%s\\n' '{"id":8,"result":{"turn":{"id":"turn-1","status":"inProgress","items":[]}}}'
+                  \(turnStartExit)
             \(turnCompletion)
                   ;;
                 *'"method":"turn/interrupt"'*)

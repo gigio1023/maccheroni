@@ -1,4 +1,5 @@
 import Foundation
+import MaccheroniCore
 
 enum CLIOutputError: Error, LocalizedError {
     case malformedDoctorLine(String)
@@ -148,25 +149,7 @@ enum CLIOutput {
     }
 
     private static func privacyBoundDoctorValue(_ value: String) -> String {
-        var output = ""
-        var token = ""
-        for character in value {
-            if character.isWhitespace {
-                output += redactedPathToken(token)
-                output.append(character)
-                token = ""
-            } else {
-                token.append(character)
-            }
-        }
-        return output + redactedPathToken(token)
-    }
-
-    private static func redactedPathToken(_ token: String) -> String {
-        if token.hasPrefix("/") || token.hasPrefix("file:///") {
-            return "<redacted-path>"
-        }
-        return token
+        PrivacyBoundText.redactingFilePaths(in: value)
     }
 }
 
