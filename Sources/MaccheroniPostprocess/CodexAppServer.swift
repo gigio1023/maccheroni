@@ -45,9 +45,31 @@ public protocol CodexAppServerExecuting: Sendable {
 
 public struct FoundationCodexAppServerExecutor: CodexAppServerExecuting {
     private let terminationTiming: ProcessTerminationTiming
+    private let environment: [String: String]
+    private let homeDirectory: URL
+    private let temporaryDirectory: URL
+    private let linkAuthenticationFile: @Sendable (URL, URL) throws -> Void
 
     public init(terminationTiming: ProcessTerminationTiming = .default) {
         self.terminationTiming = terminationTiming
+        self.environment = ProcessInfo.processInfo.environment
+        self.homeDirectory = FileManager.default.homeDirectoryForCurrentUser
+        self.temporaryDirectory = FileManager.default.temporaryDirectory
+        self.linkAuthenticationFile = CodexAuthenticationBridge.createHardLink
+    }
+
+    init(
+        terminationTiming: ProcessTerminationTiming = .default,
+        environment: [String: String],
+        homeDirectory: URL,
+        temporaryDirectory: URL,
+        linkAuthenticationFile: @escaping @Sendable (URL, URL) throws -> Void = CodexAuthenticationBridge.createHardLink
+    ) {
+        self.terminationTiming = terminationTiming
+        self.environment = environment
+        self.homeDirectory = homeDirectory
+        self.temporaryDirectory = temporaryDirectory
+        self.linkAuthenticationFile = linkAuthenticationFile
     }
 
     public func accountState(
@@ -56,21 +78,24 @@ public struct FoundationCodexAppServerExecutor: CodexAppServerExecuting {
         timeoutS: TimeInterval
     ) async throws -> CodexAppServerAccountState {
         let timing = terminationTiming
+        let environment = environment
+        let homeDirectory = homeDirectory
+        let temporaryDirectory = temporaryDirectory
+        let linkAuthenticationFile = linkAuthenticationFile
         let task = Task.detached {
             let session = try CodexAppServerSession(
                 executableURL: executableURL,
                 workspaceURL: workspaceURL,
                 timeoutS: timeoutS,
-                terminationTiming: timing
+                terminationTiming: timing,
+                parentEnvironment: environment,
+                parentHomeDirectory: homeDirectory,
+                temporaryDirectory: temporaryDirectory,
+                linkAuthenticationFile: linkAuthenticationFile
             )
-            do {
+            return try await session.perform {
                 try session.initialize()
-                let state = try session.readAccountState()
-                await session.shutdown()
-                return state
-            } catch {
-                await session.shutdown()
-                throw error
+                return try session.readAccountState()
             }
         }
         return try await withTaskCancellationHandler {
@@ -82,26 +107,29 @@ public struct FoundationCodexAppServerExecutor: CodexAppServerExecuting {
 
     public func run(_ invocation: CodexAppServerInvocation) async throws -> Data {
         let timing = terminationTiming
+        let environment = environment
+        let homeDirectory = homeDirectory
+        let temporaryDirectory = temporaryDirectory
+        let linkAuthenticationFile = linkAuthenticationFile
         let task = Task.detached {
             let session = try CodexAppServerSession(
                 executableURL: invocation.executableURL,
                 workspaceURL: invocation.workspaceURL,
                 timeoutS: invocation.timeoutS,
-                terminationTiming: timing
+                terminationTiming: timing,
+                parentEnvironment: environment,
+                parentHomeDirectory: homeDirectory,
+                temporaryDirectory: temporaryDirectory,
+                linkAuthenticationFile: linkAuthenticationFile
             )
-            do {
+            return try await session.perform {
                 try session.initialize()
                 guard try session.readAccountState() == .chatGPT else {
                     throw PostprocessError.authenticationRequired(
                         "Codex requires a ChatGPT subscription sign-in. Run `codex login` in Terminal, then try again, or select Local."
                     )
                 }
-                let output = try session.runTurn(invocation)
-                await session.shutdown()
-                return output
-            } catch {
-                await session.shutdown()
-                throw error
+                return try session.runTurn(invocation)
             }
         }
         return try await withTaskCancellationHandler {
@@ -125,6 +153,7 @@ private final class CodexAppServerSession: @unchecked Sendable {
     private let errorOutput: FileHandle
     private let errorURL: URL
     private let scratchURL: URL
+    private let authenticationBridge: CodexAuthenticationBridge
     private let channel: CodexJSONLChannel
     private let deadline: Date
     private let timeoutS: TimeInterval
@@ -135,7 +164,11 @@ private final class CodexAppServerSession: @unchecked Sendable {
         executableURL: URL,
         workspaceURL: URL,
         timeoutS: TimeInterval,
-        terminationTiming: ProcessTerminationTiming
+        terminationTiming: ProcessTerminationTiming,
+        parentEnvironment: [String: String],
+        parentHomeDirectory: URL,
+        temporaryDirectory: URL,
+        linkAuthenticationFile: @Sendable (URL, URL) throws -> Void
     ) throws {
         guard timeoutS > 0 else {
             throw PostprocessError.backendFailed("codex app server timeout must be positive")
@@ -143,7 +176,7 @@ private final class CodexAppServerSession: @unchecked Sendable {
         self.timeoutS = timeoutS
         self.deadline = Date().addingTimeInterval(timeoutS)
         self.terminationTiming = terminationTiming
-        self.scratchURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+        self.scratchURL = temporaryDirectory.appendingPathComponent(
             "maccheroni-codex-app-server-\(UUID().uuidString.lowercased())",
             isDirectory: true
         )
@@ -152,10 +185,27 @@ private final class CodexAppServerSession: @unchecked Sendable {
                 at: scratchURL,
                 withIntermediateDirectories: false
             )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: scratchURL.path
+            )
         } catch {
+            try? FileManager.default.removeItem(at: scratchURL)
             throw PostprocessError.launchFailed(
                 "cannot create Codex app server scratch directory"
             )
+        }
+
+        do {
+            self.authenticationBridge = try CodexAuthenticationBridge.prepare(
+                parentEnvironment: parentEnvironment,
+                parentHomeDirectory: parentHomeDirectory,
+                scratchURL: scratchURL,
+                linkAuthenticationFile: linkAuthenticationFile
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: scratchURL)
+            throw Self.authenticationIsolationFailure()
         }
 
         let standardInput = Pipe()
@@ -167,7 +217,11 @@ private final class CodexAppServerSession: @unchecked Sendable {
             try Data().write(to: errorURL, options: .withoutOverwriting)
             self.errorOutput = try FileHandle(forWritingTo: errorURL)
         } catch {
-            try? FileManager.default.removeItem(at: scratchURL)
+            do {
+                try FileManager.default.removeItem(at: scratchURL)
+            } catch {
+                throw Self.authenticationIsolationFailure()
+            }
             throw PostprocessError.launchFailed(
                 "cannot prepare Codex app server diagnostics"
             )
@@ -179,12 +233,14 @@ private final class CodexAppServerSession: @unchecked Sendable {
             "app-server",
             "-c", #"openai_base_url="""#,
             "-c", #"chatgpt_base_url="https://chatgpt.com/backend-api/""#,
+            "-c", #"cli_auth_credentials_store="file""#,
             "--listen", "stdio://",
         ]
-        var environment = ProcessInfo.processInfo.environment
+        var environment = parentEnvironment
         for key in Self.strippedCredentialEnvironmentKeys {
             environment.removeValue(forKey: key)
         }
+        environment["CODEX_HOME"] = authenticationBridge.isolatedHomeURL.path
         process.environment = environment
         process.currentDirectoryURL = workspaceURL
         process.standardInput = standardInput
@@ -207,7 +263,11 @@ private final class CodexAppServerSession: @unchecked Sendable {
             try? input.close()
             try? output.close()
             try? errorOutput.close()
-            try? FileManager.default.removeItem(at: scratchURL)
+            do {
+                try FileManager.default.removeItem(at: scratchURL)
+            } catch {
+                throw Self.authenticationIsolationFailure()
+            }
             throw PostprocessError.launchFailed(
                 "could not launch codex app server"
             )
@@ -523,20 +583,61 @@ private final class CodexAppServerSession: @unchecked Sendable {
         }
     }
 
-    func shutdown() async {
+    func perform<T>(_ operation: () throws -> T) async throws -> T {
+        let result: Result<T, Error>
+        do {
+            result = .success(try operation())
+        } catch {
+            result = .failure(error)
+        }
+        try await shutdown()
+        return try result.get()
+    }
+
+    private func shutdown() async throws {
         channel.stop()
         try? input.close()
+        var terminationWasConfirmed = true
         if process.isRunning {
             let liveness = CodexProcessLiveness(process)
-            _ = await ProcessTerminator.terminate(
+            let result = await ProcessTerminator.terminate(
                 processID: process.processIdentifier,
                 isRunning: { liveness.process.isRunning },
                 timing: terminationTiming
             )
+            switch result {
+            case .alreadyExited, .terminatedAfterSIGTERM, .terminatedAfterSIGKILL:
+                break
+            case .signalFailed, .exitWaitTimedOut:
+                terminationWasConfirmed = false
+            }
         }
         try? output.close()
         try? errorOutput.close()
-        try? FileManager.default.removeItem(at: scratchURL)
+
+        var isolationFailure: PostprocessError?
+        if terminationWasConfirmed {
+            do {
+                try authenticationBridge.verifyAfterChildExit()
+            } catch {
+                isolationFailure = Self.authenticationIsolationFailure()
+            }
+        } else {
+            isolationFailure = Self.authenticationIsolationFailure()
+        }
+        do {
+            try FileManager.default.removeItem(at: scratchURL)
+        } catch {
+            isolationFailure = Self.authenticationIsolationFailure()
+        }
+        if isolationFailure == nil {
+            do {
+                try authenticationBridge.verifySourceAfterCleanup()
+            } catch {
+                isolationFailure = Self.authenticationIsolationFailure()
+            }
+        }
+        if let isolationFailure { throw isolationFailure }
     }
 
     private func request(
@@ -755,6 +856,12 @@ private final class CodexAppServerSession: @unchecked Sendable {
         return result
     }
 
+    private static func authenticationIsolationFailure() -> PostprocessError {
+        .authenticationIsolationFailed(
+            "Codex needs a private cached ChatGPT file sign-in. Run `codex -c 'cli_auth_credentials_store=\"file\"' login` in Terminal, stop other Codex activity, then try again, or select Local."
+        )
+    }
+
     private func rpcID(_ value: Any?) -> Int? {
         if let id = value as? Int { return id }
         return (value as? NSNumber)?.intValue
@@ -890,6 +997,189 @@ private final class CodexAppServerSession: @unchecked Sendable {
         if let array = value as? [Any] { return array.isEmpty }
         if let object = value as? [String: Any] { return object.isEmpty }
         return false
+    }
+}
+
+private struct CodexAuthenticationBridge {
+    struct Identity: Equatable {
+        let device: dev_t
+        let inode: ino_t
+    }
+
+    struct Metadata {
+        let identity: Identity
+        let owner: uid_t
+        let permissions: mode_t
+        let linkCount: nlink_t
+    }
+
+    private enum BridgeError: Error {
+        case invalid
+        case system(Int32)
+    }
+
+    let sourceAuthenticationURL: URL
+    let isolatedHomeURL: URL
+    let isolatedAuthenticationURL: URL
+    let identity: Identity
+
+    static func prepare(
+        parentEnvironment: [String: String],
+        parentHomeDirectory: URL,
+        scratchURL: URL,
+        linkAuthenticationFile: @Sendable (URL, URL) throws -> Void
+    ) throws -> CodexAuthenticationBridge {
+        let sourceHomeURL = try sourceHomeURL(
+            parentEnvironment: parentEnvironment,
+            parentHomeDirectory: parentHomeDirectory
+        )
+        let sourceAuthenticationURL = sourceHomeURL.appendingPathComponent(
+            "auth.json",
+            isDirectory: false
+        )
+        let sourceMetadata = try validatedAuthenticationMetadata(
+            at: sourceAuthenticationURL,
+            expectedIdentity: nil,
+            expectedLinkCount: 1
+        )
+        let isolatedHomeURL = scratchURL.appendingPathComponent(
+            "codex-home",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: isolatedHomeURL,
+            withIntermediateDirectories: false
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: isolatedHomeURL.path
+        )
+        try validatePrivateDirectory(at: isolatedHomeURL)
+
+        let isolatedAuthenticationURL = isolatedHomeURL.appendingPathComponent(
+            "auth.json",
+            isDirectory: false
+        )
+        try linkAuthenticationFile(sourceAuthenticationURL, isolatedAuthenticationURL)
+        _ = try validatedAuthenticationMetadata(
+            at: sourceAuthenticationURL,
+            expectedIdentity: sourceMetadata.identity,
+            expectedLinkCount: 2
+        )
+        _ = try validatedAuthenticationMetadata(
+            at: isolatedAuthenticationURL,
+            expectedIdentity: sourceMetadata.identity,
+            expectedLinkCount: 2
+        )
+        return CodexAuthenticationBridge(
+            sourceAuthenticationURL: sourceAuthenticationURL,
+            isolatedHomeURL: isolatedHomeURL,
+            isolatedAuthenticationURL: isolatedAuthenticationURL,
+            identity: sourceMetadata.identity
+        )
+    }
+
+    static func createHardLink(sourceURL: URL, destinationURL: URL) throws {
+        let result = sourceURL.path.withCString { sourcePath in
+            destinationURL.path.withCString { destinationPath in
+                Darwin.link(sourcePath, destinationPath)
+            }
+        }
+        guard result == 0 else { throw BridgeError.system(errno) }
+    }
+
+    func verifyAfterChildExit() throws {
+        _ = try Self.validatedAuthenticationMetadata(
+            at: sourceAuthenticationURL,
+            expectedIdentity: identity,
+            expectedLinkCount: 2
+        )
+        _ = try Self.validatedAuthenticationMetadata(
+            at: isolatedAuthenticationURL,
+            expectedIdentity: identity,
+            expectedLinkCount: 2
+        )
+    }
+
+    func verifySourceAfterCleanup() throws {
+        _ = try Self.validatedAuthenticationMetadata(
+            at: sourceAuthenticationURL,
+            expectedIdentity: identity,
+            expectedLinkCount: 1
+        )
+    }
+
+    private static func sourceHomeURL(
+        parentEnvironment: [String: String],
+        parentHomeDirectory: URL
+    ) throws -> URL {
+        if let configuredHome = parentEnvironment["CODEX_HOME"],
+           !configuredHome.isEmpty
+        {
+            guard NSString(string: configuredHome).isAbsolutePath else {
+                throw BridgeError.invalid
+            }
+            return URL(fileURLWithPath: configuredHome, isDirectory: true)
+                .standardizedFileURL
+        }
+        return parentHomeDirectory.appendingPathComponent(".codex", isDirectory: true)
+    }
+
+    private static func validatePrivateDirectory(at url: URL) throws {
+        var status = stat()
+        let result = url.path.withCString { Darwin.lstat($0, &status) }
+        guard result == 0,
+              status.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR),
+              status.st_uid == geteuid(),
+              status.st_mode & 0o777 == 0o700 else {
+            throw BridgeError.invalid
+        }
+    }
+
+    private static func validatedAuthenticationMetadata(
+        at url: URL,
+        expectedIdentity: Identity?,
+        expectedLinkCount: nlink_t
+    ) throws -> Metadata {
+        var pathStatus = stat()
+        let pathResult = url.path.withCString { Darwin.lstat($0, &pathStatus) }
+        guard pathResult == 0 else { throw BridgeError.system(errno) }
+        let descriptor = url.path.withCString {
+            Darwin.open($0, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard descriptor >= 0 else { throw BridgeError.system(errno) }
+        defer { _ = Darwin.close(descriptor) }
+        var descriptorStatus = stat()
+        guard Darwin.fstat(descriptor, &descriptorStatus) == 0 else {
+            throw BridgeError.system(errno)
+        }
+
+        let pathIdentity = Identity(
+            device: pathStatus.st_dev,
+            inode: pathStatus.st_ino
+        )
+        let descriptorIdentity = Identity(
+            device: descriptorStatus.st_dev,
+            inode: descriptorStatus.st_ino
+        )
+        guard pathIdentity == descriptorIdentity,
+              expectedIdentity == nil || pathIdentity == expectedIdentity,
+              pathStatus.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+              descriptorStatus.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+              pathStatus.st_uid == geteuid(),
+              descriptorStatus.st_uid == geteuid(),
+              pathStatus.st_mode & 0o777 == 0o600,
+              descriptorStatus.st_mode & 0o777 == 0o600,
+              pathStatus.st_nlink == expectedLinkCount,
+              descriptorStatus.st_nlink == expectedLinkCount else {
+            throw BridgeError.invalid
+        }
+        return Metadata(
+            identity: pathIdentity,
+            owner: pathStatus.st_uid,
+            permissions: pathStatus.st_mode & 0o777,
+            linkCount: pathStatus.st_nlink
+        )
     }
 }
 

@@ -363,6 +363,7 @@ public enum PostprocessError: Error, Equatable, Sendable, LocalizedError {
     case malformedOutput(String)
     case launchFailed(String)
     case authenticationRequired(String)
+    case authenticationIsolationFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -383,7 +384,8 @@ public enum PostprocessError: Error, Equatable, Sendable, LocalizedError {
         case let .backendOutputBudgetExceeded(upperBound, maximum):
             "backend output needs a conservative \(upperBound)-token upper bound, above the \(maximum)-token planning budget"
         case let .backendFailed(message), let .missingOutput(message), let .malformedOutput(message),
-             let .launchFailed(message), let .authenticationRequired(message): message
+             let .launchFailed(message), let .authenticationRequired(message),
+             let .authenticationIsolationFailed(message): message
         }
     }
 }
