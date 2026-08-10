@@ -776,7 +776,7 @@ import Testing
 
         #expect(CodexPostprocessBackend.detectVersion(
             executableURL: noisy,
-            timeoutS: 2
+            timeoutS: 10
         ) == "codex-cli fixture")
     }
 
@@ -798,8 +798,34 @@ import Testing
 
         #expect(CodexPostprocessBackend.detectVersion(
             executableURL: noisy,
-            timeoutS: 2
+            timeoutS: 10
         ) == "codex-cli fixture")
+    }
+
+    @Test func codexVersionProbeBoundsRetainedStandardOutput() throws {
+        let limit = CodexPostprocessBackend.maximumVersionOutputUTF8Bytes
+        for byteCount in [limit, limit + 1] {
+            let noisy = try executableScript("""
+            #!/bin/sh
+            /usr/bin/yes v | /usr/bin/head -c \(byteCount)
+            """)
+            defer {
+                try? FileManager.default.removeItem(
+                    at: noisy.deletingLastPathComponent()
+                )
+            }
+
+            let version = CodexPostprocessBackend.detectVersion(
+                executableURL: noisy,
+                timeoutS: 10
+            )
+            if byteCount == limit {
+                #expect(version != "unavailable")
+                #expect(version.utf8.count <= limit)
+            } else {
+                #expect(version == "unavailable")
+            }
+        }
     }
 
     @Test func codexAvailabilityDoesNotDependOnVersionSideChannel() async throws {

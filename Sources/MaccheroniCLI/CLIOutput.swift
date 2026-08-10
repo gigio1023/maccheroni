@@ -105,7 +105,9 @@ enum CLIOutput {
             guard !line.isEmpty,
                   let separator = line.firstIndex(of: "=")
             else {
-                throw CLIOutputError.malformedDoctorLine(line)
+                throw CLIOutputError.malformedDoctorLine(
+                    PrivacyBoundText.redactingFilePaths(in: line)
+                )
             }
             let key = String(line[..<separator])
             let value = String(line[line.index(after: separator)...])
@@ -113,7 +115,9 @@ enum CLIOutput {
                 of: "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
                 options: .regularExpression
             ) != nil else {
-                throw CLIOutputError.malformedDoctorLine(line)
+                throw CLIOutputError.malformedDoctorLine(
+                    PrivacyBoundText.redactingFilePaths(in: line)
+                )
             }
             guard values[key] == nil else {
                 throw CLIOutputError.duplicateDoctorKey(key)

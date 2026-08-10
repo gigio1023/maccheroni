@@ -55,6 +55,45 @@ import Testing
                 + "piped=remote=https://example.com|cache=<redacted-path> "
                 + "json={\"remote\":\"https://example.com/reference\","
                 + "\"path\":\"<redacted-path>\"}")
+
+        #expect(PrivacyBoundText.redactingFilePaths(
+            in: #"error="could not read /Users/alice/Client Notes/secret.txt""#
+        ) == #"error="could not read <redacted-path>""#)
+        #expect(PrivacyBoundText.redactingFilePaths(
+            in: #"path="/Users/alice/Client \"Acme Team\"/secret.txt""#
+        ) == #"path="<redacted-path>""#)
+
+        #expect(PrivacyBoundText.redactingFilePaths(
+            in: "upper=FILE:///Users/秘密/My%20File.txt "
+                + "host=file://localhost/Users/alice/private.txt"
+        ) == "upper=<redacted-path> host=<redacted-path>")
+        #expect(PrivacyBoundText.redactingFilePaths(
+            in: "remote=https://example.test/?next=file:///Users/alice/private.txt&ok=1"
+        ) == "remote=https://example.test/?next=<redacted-path>&ok=1")
+
+        #expect(PrivacyBoundText.redactingFilePaths(
+            in: "cdn=//cdn.example.com/assets/app.js loopback=https://[::1]/account"
+        ) == "cdn=//cdn.example.com/assets/app.js loopback=https://[::1]/account")
+        #expect(PrivacyBoundText.redactingFilePaths(
+            in: "double=//Users/private/model.bin"
+        ) == "double=<redacted-path>")
+
+        #expect(PrivacyBoundText.redactingFilePaths(
+            in: "named=~alice/Documents/private.txt prefix=prefix~/not-home"
+        ) == "named=<redacted-path> prefix=prefix~/not-home")
+        #expect(PrivacyBoundText.redactingFilePaths(
+            in: #"windows=C:/Users/Alice/private.txt backslash=C:\Users\Alice\private.txt label=cache:/Users/alice/private"#
+        ) == #"windows=<redacted-path> backslash=<redacted-path> label=cache:<redacted-path>"#)
+        #expect(PrivacyBoundText.redactingFilePaths(
+            in: "unicode=/Users/민지/회의%20메모.txt repeated=////Users/alice/private relative=../fixtures/model.bin"
+        ) == "unicode=<redacted-path> repeated=<redacted-path> relative=../fixtures/model.bin")
+    }
+
+    @Test func privacyBoundTextHandlesLongDelimiterRunsWithoutQuadraticScanning() {
+        let input = String(repeating: ":", count: 16_000)
+        let started = Date()
+        #expect(PrivacyBoundText.redactingFilePaths(in: input) == input)
+        #expect(Date().timeIntervalSince(started) < 5)
     }
 
     @Test func segmentsDocumentRoundTripsWithSchemaKeys() throws {

@@ -906,7 +906,7 @@ private enum CodexJSONLChannelError: Error {
     case closed
 }
 
-private final class CodexJSONLChannel: @unchecked Sendable {
+final class CodexJSONLChannel: @unchecked Sendable {
     private let condition = NSCondition()
     private let handle: FileHandle
     private var buffer = Data()
@@ -916,7 +916,11 @@ private final class CodexJSONLChannel: @unchecked Sendable {
     init(handle: FileHandle) {
         self.handle = handle
         handle.readabilityHandler = { [weak self] readable in
-            self?.append(readable.availableData)
+            let data = readable.availableData
+            if data.isEmpty {
+                readable.readabilityHandler = nil
+            }
+            self?.append(data)
         }
     }
 

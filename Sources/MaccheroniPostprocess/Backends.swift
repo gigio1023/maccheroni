@@ -38,6 +38,7 @@ public enum CodexAvailability: Equatable, Sendable {
 
 public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, Sendable {
     public static let modelName = "gpt-5.6-sol"
+    static let maximumVersionOutputUTF8Bytes = 256 * 1_024
     public static let defaultBatchPolicy = PostprocessBatchPolicy(
         maximumPromptUTF8Bytes: 16_384,
         maximumSegmentsPerBatch: 32,
@@ -143,7 +144,8 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
             executableURL: executableURL,
             arguments: ["--version"],
             timeoutS: timeoutS
-        ), result.status == 0 else {
+        ), result.status == 0,
+           !result.standardOutputWasTruncated else {
             return "unavailable"
         }
         let value = String(decoding: result.standardOutput, as: UTF8.self)
@@ -242,6 +244,7 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
     private struct CommandResult {
         var status: Int32
         var standardOutput: Data
+        var standardOutputWasTruncated: Bool
     }
 
     private final class CommandLiveness: @unchecked Sendable {
@@ -254,31 +257,40 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
 
     private final class CommandPipeDrain: @unchecked Sendable {
         private let handle: FileHandle
-        private let retainsData: Bool
+        private let maximumRetainedBytes: Int?
         private let completion = DispatchSemaphore(value: 0)
         private let lock = NSLock()
         private var data = Data()
+        private var wasTruncated = false
         private var succeeded = false
 
-        init(handle: FileHandle, retainsData: Bool) {
+        init(handle: FileHandle, maximumRetainedBytes: Int?) {
             self.handle = handle
-            self.retainsData = retainsData
+            self.maximumRetainedBytes = maximumRetainedBytes
         }
 
         func start() {
             DispatchQueue.global(qos: .userInitiated).async { [self] in
                 var captured = Data()
                 var readSucceeded = true
+                var truncated = false
                 do {
                     while let chunk = try handle.read(upToCount: 64 * 1_024),
                           !chunk.isEmpty {
-                        if retainsData { captured.append(chunk) }
+                        if let maximumRetainedBytes {
+                            let remaining = max(0, maximumRetainedBytes - captured.count)
+                            if remaining > 0 {
+                                captured.append(contentsOf: chunk.prefix(remaining))
+                            }
+                            if chunk.count > remaining { truncated = true }
+                        }
                     }
                 } catch {
                     readSucceeded = false
                 }
                 lock.lock()
                 data = captured
+                wasTruncated = truncated
                 succeeded = readSucceeded
                 lock.unlock()
                 completion.signal()
@@ -289,10 +301,10 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
             completion.wait(timeout: deadline) == .success
         }
 
-        func snapshot() -> Data? {
+        func snapshot() -> (data: Data, wasTruncated: Bool)? {
             lock.lock()
             defer { lock.unlock() }
-            return succeeded ? data : nil
+            return succeeded ? (data, wasTruncated) : nil
         }
 
         func stop() {
@@ -319,11 +331,11 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
             try process.run()
             let outputDrain = CommandPipeDrain(
                 handle: output.fileHandleForReading,
-                retainsData: true
+                maximumRetainedBytes: maximumVersionOutputUTF8Bytes
             )
             let errorDrain = CommandPipeDrain(
                 handle: errorOutput.fileHandleForReading,
-                retainsData: false
+                maximumRetainedBytes: nil
             )
             outputDrain.start()
             errorDrain.start()
@@ -362,7 +374,8 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
             }
             return CommandResult(
                 status: process.terminationStatus,
-                standardOutput: standardOutput
+                standardOutput: standardOutput.data,
+                standardOutputWasTruncated: standardOutput.wasTruncated
             )
         } catch {
             return nil

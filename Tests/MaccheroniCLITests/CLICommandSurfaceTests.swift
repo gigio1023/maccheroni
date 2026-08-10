@@ -230,6 +230,13 @@ struct CLICommandSurfaceTests {
             guard case .malformedDoctorLine("") = error else { return false }
             return true
         }
+        assertDoctorFailure("bad key=/Users/alice/private") { error in
+            guard case .malformedDoctorLine("bad key=<redacted-path>") = error else {
+                return false
+            }
+            return error.errorDescription
+                == "doctor returned a malformed diagnostic line: bad key=<redacted-path>"
+        }
     }
 
     @Test
@@ -258,6 +265,15 @@ struct CLICommandSurfaceTests {
             failedObject["values"] as? [String: String]
         )
         #expect(failedValues.values.contains("false"))
+
+        let failedTextDoctor = try invoke(
+            ["doctor"],
+            environment: ["MACCHERONI_BENCHMARK_CACHE": fixtureRoot.path]
+        )
+        #expect(failedTextDoctor.status == 1)
+        #expect(failedTextDoctor.stdout.isEmpty)
+        #expect(!failedTextDoctor.stderr.contains(fixtureRoot.path))
+        #expect(failedTextDoctor.stderr.contains("<redacted-path>"))
 
         let missingRegistry = fixtureRoot.appendingPathComponent("missing.json")
         let productFailure = try invoke([

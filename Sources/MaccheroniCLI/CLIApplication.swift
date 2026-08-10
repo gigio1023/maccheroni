@@ -1855,7 +1855,9 @@ public struct CLIApplication: Sendable {
             $0.hasPrefix("check.") && $0.hasSuffix("=false")
         }
         return CLIDoctorReport(
-            diagnostics: lines.joined(separator: "\n"),
+            diagnostics: PrivacyBoundText.redactingFilePaths(
+                in: lines.joined(separator: "\n")
+            ),
             isReady: !failed
         )
     }

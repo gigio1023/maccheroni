@@ -267,6 +267,48 @@ struct MaccheroniCLITests {
         ])
         #expect(bundled.contains("profile=it-dialogue"))
         #expect(bundled.contains(SelectedASRBackend.moss.model.hfModelID))
+
+        var privacyDependencies = testDependencies()
+        privacyDependencies.doctor = { _, _ in
+            [
+                "asr_error=missing \(root.path)/private model/file.bin",
+                "check.asr_doctor=true",
+            ]
+        }
+        let privacyApp = testApplication(
+            runID: "doctor-privacy",
+            dependencies: privacyDependencies
+        )
+        let privacyBoundDoctor = try await privacyApp.execute(arguments: [
+            "doctor",
+            "--profile", "ko-meeting",
+            "--profiles", profiles.path,
+        ])
+        #expect(!privacyBoundDoctor.contains(root.path))
+        #expect(privacyBoundDoctor.contains("asr_error=missing <redacted-path>"))
+
+        privacyDependencies.doctor = { _, _ in
+            [
+                "asr_error=missing \(root.path)/private model/file.bin",
+                "check.asr_doctor=false",
+            ]
+        }
+        let failingPrivacyApp = testApplication(
+            runID: "doctor-privacy-failure",
+            dependencies: privacyDependencies
+        )
+        do {
+            _ = try await failingPrivacyApp.execute(arguments: [
+                "doctor",
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+            ])
+            Issue.record("expected failed doctor diagnostics")
+        } catch let error as CLIError {
+            let description = try #require(error.errorDescription)
+            #expect(!description.contains(root.path))
+            #expect(description.contains("asr_error=missing <redacted-path>"))
+        }
     }
 
     @Test

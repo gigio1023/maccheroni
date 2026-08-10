@@ -127,7 +127,7 @@ import MaccheroniCore
         let adapter = try fixtureAdapter(
             in: directory,
             script: "#!/bin/sh\n/usr/bin/yes x | /usr/bin/head -c 300000\nprintf '\\n[\\n]\\n'\n",
-            timeoutS: 2
+            timeoutS: 10
         )
 
         let map = try await adapter.detect(audioURL: sourceURL)

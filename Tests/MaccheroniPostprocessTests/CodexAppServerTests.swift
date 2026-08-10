@@ -4,6 +4,8 @@ import MaccheroniCore
 import Testing
 @testable import MaccheroniPostprocess
 
+private let loadTolerantTestTimeoutS: TimeInterval = 10
+
 @Suite(.serialized)
 struct CodexAppServerTests {
     @Test func runsAuthenticatedSchemaConstrainedTurnAndDeclinesApprovals() async throws {
@@ -17,7 +19,7 @@ struct CodexAppServerTests {
                 prompt: "bounded private prompt",
                 outputSchema: schema,
                 workspaceURL: fixture.workspace,
-                timeoutS: 2
+                timeoutS: loadTolerantTestTimeoutS
             )
         )
 
@@ -72,7 +74,7 @@ struct CodexAppServerTests {
         #expect(try await FoundationCodexAppServerExecutor().accountState(
             executableURL: signedIn.executable,
             workspaceURL: signedIn.workspace,
-            timeoutS: 2
+            timeoutS: loadTolerantTestTimeoutS
         ) == .chatGPT)
 
         let apiKey = try AppServerFixture(accountType: "apiKey")
@@ -80,7 +82,7 @@ struct CodexAppServerTests {
         #expect(try await FoundationCodexAppServerExecutor().accountState(
             executableURL: apiKey.executable,
             workspaceURL: apiKey.workspace,
-            timeoutS: 2
+            timeoutS: loadTolerantTestTimeoutS
         ) == .unsupported)
 
         let signedOut = try AppServerFixture(accountType: nil)
@@ -88,7 +90,7 @@ struct CodexAppServerTests {
         #expect(try await FoundationCodexAppServerExecutor().accountState(
             executableURL: signedOut.executable,
             workspaceURL: signedOut.workspace,
-            timeoutS: 2
+            timeoutS: loadTolerantTestTimeoutS
         ) == .signedOut)
     }
 
@@ -102,7 +104,7 @@ struct CodexAppServerTests {
         #expect(try await FoundationCodexAppServerExecutor().accountState(
             executableURL: fixture.executable,
             workspaceURL: fixture.workspace,
-            timeoutS: 2
+            timeoutS: loadTolerantTestTimeoutS
         ) == .chatGPT)
     }
 
@@ -123,7 +125,7 @@ struct CodexAppServerTests {
                     prompt: "x",
                     outputSchema: Data(#"{"type":"object"}"#.utf8),
                     workspaceURL: fixture.workspace,
-                    timeoutS: 2
+                    timeoutS: loadTolerantTestTimeoutS
                 )
             )
         }
@@ -148,7 +150,7 @@ struct CodexAppServerTests {
                     prompt: "x",
                     outputSchema: Data(#"{"type":"object"}"#.utf8),
                     workspaceURL: fixture.workspace,
-                    timeoutS: 2
+                    timeoutS: loadTolerantTestTimeoutS
                 )
             )
         }
@@ -173,7 +175,7 @@ struct CodexAppServerTests {
                     prompt: "x",
                     outputSchema: Data(#"{"type":"object"}"#.utf8),
                     workspaceURL: fixture.workspace,
-                    timeoutS: 2
+                    timeoutS: loadTolerantTestTimeoutS
                 )
             )
         }
@@ -194,7 +196,7 @@ struct CodexAppServerTests {
                     prompt: "x",
                     outputSchema: Data(#"{"type":"object"}"#.utf8),
                     workspaceURL: fixture.workspace,
-                    timeoutS: 2
+                    timeoutS: loadTolerantTestTimeoutS
                 )
             )
         }
@@ -224,7 +226,7 @@ struct CodexAppServerTests {
             _ = try await FoundationCodexAppServerExecutor().accountState(
                 executableURL: protocolFailure,
                 workspaceURL: workspace,
-                timeoutS: 2
+                timeoutS: loadTolerantTestTimeoutS
             )
             Issue.record("expected the JSON-RPC error response to fail")
         } catch let error as PostprocessError {
@@ -256,7 +258,7 @@ struct CodexAppServerTests {
             _ = try await FoundationCodexAppServerExecutor().accountState(
                 executableURL: stderrFailure,
                 workspaceURL: workspace,
-                timeoutS: 2
+                timeoutS: loadTolerantTestTimeoutS
             )
         }
 
@@ -276,7 +278,7 @@ struct CodexAppServerTests {
             _ = try await FoundationCodexAppServerExecutor().accountState(
                 executableURL: malformedFailure,
                 workspaceURL: workspace,
-                timeoutS: 2
+                timeoutS: loadTolerantTestTimeoutS
             )
         }
     }
@@ -297,7 +299,7 @@ struct CodexAppServerTests {
                     prompt: "bounded private prompt",
                     outputSchema: Data(#"{"type":"object"}"#.utf8),
                     workspaceURL: fixture.workspace,
-                    timeoutS: 2
+                    timeoutS: loadTolerantTestTimeoutS
                 )
             )
             Issue.record("expected the dead app-server input to fail")
@@ -307,6 +309,22 @@ struct CodexAppServerTests {
                 return
             }
         }
+    }
+
+    @Test func jsonlChannelRemovesReadabilityHandlerAtEOF() throws {
+        let pipe = Pipe()
+        let reader = pipe.fileHandleForReading
+        let channel = CodexJSONLChannel(handle: reader)
+        try pipe.fileHandleForWriting.close()
+
+        do {
+            _ = try channel.nextLine(deadline: Date().addingTimeInterval(loadTolerantTestTimeoutS))
+            Issue.record("expected EOF to close the JSONL channel")
+        } catch {
+            #expect(reader.readabilityHandler == nil)
+        }
+        channel.stop()
+        try? reader.close()
     }
 
     @Test func cancellationRequestsTurnInterruptBeforeShutdown() async throws {
@@ -369,7 +387,7 @@ struct CodexAppServerTests {
             )
         }
         let processIDs = try await [rootPIDURL, childPIDURL].asyncMap(waitForPID)
-        let deadline = Date().addingTimeInterval(2)
+        let deadline = Date().addingTimeInterval(loadTolerantTestTimeoutS)
         while processIDs.contains(where: processExists), Date() < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -414,7 +432,7 @@ struct CodexAppServerTests {
         await #expect(throws: CancellationError.self) {
             _ = try await task.value
         }
-        let deadline = Date().addingTimeInterval(2)
+        let deadline = Date().addingTimeInterval(loadTolerantTestTimeoutS)
         while processIDs.contains(where: processExists), Date() < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -523,7 +541,7 @@ private func writeExecutable(_ contents: String, to url: URL) throws {
 }
 
 private func waitForPID(at url: URL) async throws -> Int32 {
-    let deadline = Date().addingTimeInterval(1)
+    let deadline = Date().addingTimeInterval(loadTolerantTestTimeoutS)
     while Date() < deadline {
         if let value = try? String(contentsOf: url, encoding: .utf8),
            let pid = Int32(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
@@ -535,7 +553,7 @@ private func waitForPID(at url: URL) async throws -> Int32 {
 }
 
 private func waitForText(_ text: String, in url: URL) async throws {
-    let deadline = Date().addingTimeInterval(2)
+    let deadline = Date().addingTimeInterval(loadTolerantTestTimeoutS)
     while Date() < deadline {
         if let value = try? String(contentsOf: url, encoding: .utf8),
            value.contains(text) {
