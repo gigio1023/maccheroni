@@ -239,7 +239,7 @@
   "publication_settings": {
     "term_recall_gate": {
       "kind": "term_recall",
-      "source": "docs/benchmark-verdict.md",
+      "source": "docs/moss-long-audio-verdict.md",
       "value": "0.75"
     }
   },

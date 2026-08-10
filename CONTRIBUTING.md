@@ -48,6 +48,36 @@ delete an existing run, and never retrofit a scorer to make a preserved run
 pass — the scorers derive their verdicts and carry negative tests that pin
 that behavior.
 
+### Publishing a benchmark number
+
+Every number in the README tables and in the two generated figures comes from
+`benchmarks/published-results.json`. Nothing else is a source: do not edit a
+README metric or a committed SVG by hand.
+
+To publish a new or re-measured value:
+
+1. Preserve the run under `benchmarks/runs/`, then copy its exact value, run ID,
+   run kind, artifact path, artifact SHA-256, and measurement time into the
+   `sources` block. Values are exact decimal strings, not JSON numbers; the
+   declaration rounds them for display.
+2. Point the relevant fixture metric at that source, and add the fixture to
+   `readme.row_order` if it is new.
+3. Update the corresponding cells and image alt text in all ten README files.
+4. Regenerate the figures, then verify:
+
+```bash
+uv run --no-project python -m unittest discover -s benchmarks/scripts/figures/tests
+uv run --no-project python benchmarks/scripts/figures/check_readme_benchmarks.py
+uv run --no-project python benchmarks/scripts/figures/render_readme_figures.py
+```
+
+`render_readme_figures.py` writes to `docs/assets` by default; pass
+`--output-dir` to render elsewhere, and `--data` to render from an alternative
+declaration. The consistency check compares the ten READMEs against the
+declaration only. It does not open a run artifact, recompute an artifact hash,
+or inspect a committed SVG, so artifact provenance and figure contents remain
+owner-verified.
+
 ## Verification standard
 
 Every claim in this repository is held to command-level evidence: a completion
