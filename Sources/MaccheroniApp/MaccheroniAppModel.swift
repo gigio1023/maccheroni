@@ -543,7 +543,7 @@ final class MaccheroniAppModel {
             guard codexAvailability.isAuthenticated else {
                 throw TranscriptionRunnerError.pipelineFailed(
                     appString(
-                        "Codex is not signed in. Run codex login in Terminal, then try again, or select Local."
+                        "Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local."
                     )
                 )
             }

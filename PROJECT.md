@@ -335,6 +335,16 @@ not deleted.
   model, prompt, batch, output-budget, and historical evidence records. New manifests
   identify the backend as `codex-app-server`; historical `codex-cli` manifests remain
   valid and decodable.
+- D34 [inference] Replaces D33's authentication-custody clause (decided 2026-08-10).
+  For each readiness probe or text transformation, Maccheroni reads the active native
+  Codex ChatGPT credential only long enough to extract a safely unexpired access token,
+  account ID, and plan type, then injects those fields through `account/login/start`
+  into an app-server whose fresh mode-0700 `CODEX_HOME` contains no user configuration
+  and whose credential store is forced to `ephemeral`. Maccheroni never logs, persists,
+  refreshes, or modifies the credential; when safe validity cannot be proved or the
+  child requests refresh, the operation fails before output promotion and directs the
+  user to refresh or sign in through Codex. Native Codex remains the sole writer of its
+  credential store.
 
 ## Project-wide Done Criteria
 

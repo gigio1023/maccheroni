@@ -45,9 +45,45 @@ public protocol CodexAppServerExecuting: Sendable {
 
 public struct FoundationCodexAppServerExecutor: CodexAppServerExecuting {
     private let terminationTiming: ProcessTerminationTiming
+    private let environment: [String: String]
+    private let temporaryDirectory: URL
+    private let credentialSource: CodexCredentialSource
+    private let terminateProcess: @Sendable (
+        Int32,
+        @escaping @Sendable () -> Bool,
+        ProcessTerminationTiming
+    ) async -> ProcessTerminationResult
+    private let removeScratch: @Sendable (URL) throws -> Void
 
     public init(terminationTiming: ProcessTerminationTiming = .default) {
         self.terminationTiming = terminationTiming
+        self.environment = ProcessInfo.processInfo.environment
+        self.temporaryDirectory = FileManager.default.temporaryDirectory
+        self.credentialSource = CodexCredentialSource()
+        self.terminateProcess = ProcessTerminator.terminate
+        self.removeScratch = { try FileManager.default.removeItem(at: $0) }
+    }
+
+    init(
+        terminationTiming: ProcessTerminationTiming = .default,
+        environment: [String: String],
+        temporaryDirectory: URL,
+        credentialSource: CodexCredentialSource,
+        terminateProcess: @escaping @Sendable (
+            Int32,
+            @escaping @Sendable () -> Bool,
+            ProcessTerminationTiming
+        ) async -> ProcessTerminationResult = ProcessTerminator.terminate,
+        removeScratch: @escaping @Sendable (URL) throws -> Void = {
+            try FileManager.default.removeItem(at: $0)
+        }
+    ) {
+        self.terminationTiming = terminationTiming
+        self.environment = environment
+        self.temporaryDirectory = temporaryDirectory
+        self.credentialSource = credentialSource
+        self.terminateProcess = terminateProcess
+        self.removeScratch = removeScratch
     }
 
     public func accountState(
@@ -56,21 +92,26 @@ public struct FoundationCodexAppServerExecutor: CodexAppServerExecuting {
         timeoutS: TimeInterval
     ) async throws -> CodexAppServerAccountState {
         let timing = terminationTiming
+        let environment = environment
+        let temporaryDirectory = temporaryDirectory
+        let credentialSource = credentialSource
+        let terminateProcess = terminateProcess
+        let removeScratch = removeScratch
         let task = Task.detached {
             let session = try CodexAppServerSession(
                 executableURL: executableURL,
                 workspaceURL: workspaceURL,
                 timeoutS: timeoutS,
-                terminationTiming: timing
+                terminationTiming: timing,
+                parentEnvironment: environment,
+                temporaryDirectory: temporaryDirectory,
+                terminateProcess: terminateProcess,
+                removeScratch: removeScratch
             )
-            do {
+            return try await session.perform {
                 try session.initialize()
-                let state = try session.readAccountState()
-                await session.shutdown()
-                return state
-            } catch {
-                await session.shutdown()
-                throw error
+                try session.authenticate(using: credentialSource)
+                return try session.readAccountState()
             }
         }
         return try await withTaskCancellationHandler {
@@ -82,26 +123,29 @@ public struct FoundationCodexAppServerExecutor: CodexAppServerExecuting {
 
     public func run(_ invocation: CodexAppServerInvocation) async throws -> Data {
         let timing = terminationTiming
+        let environment = environment
+        let temporaryDirectory = temporaryDirectory
+        let credentialSource = credentialSource
+        let terminateProcess = terminateProcess
+        let removeScratch = removeScratch
         let task = Task.detached {
             let session = try CodexAppServerSession(
                 executableURL: invocation.executableURL,
                 workspaceURL: invocation.workspaceURL,
                 timeoutS: invocation.timeoutS,
-                terminationTiming: timing
+                terminationTiming: timing,
+                parentEnvironment: environment,
+                temporaryDirectory: temporaryDirectory,
+                terminateProcess: terminateProcess,
+                removeScratch: removeScratch
             )
-            do {
+            return try await session.perform {
                 try session.initialize()
+                try session.authenticate(using: credentialSource)
                 guard try session.readAccountState() == .chatGPT else {
-                    throw PostprocessError.authenticationRequired(
-                        "Codex requires a ChatGPT subscription sign-in. Run `codex login` in Terminal, then try again, or select Local."
-                    )
+                    throw Self.accountMismatchFailure()
                 }
-                let output = try session.runTurn(invocation)
-                await session.shutdown()
-                return output
-            } catch {
-                await session.shutdown()
-                throw error
+                return try session.runTurn(invocation)
             }
         }
         return try await withTaskCancellationHandler {
@@ -110,6 +154,52 @@ public struct FoundationCodexAppServerExecutor: CodexAppServerExecuting {
             task.cancel()
         }
     }
+
+    private static func accountMismatchFailure() -> PostprocessError {
+        .authenticationRequired(
+            "Codex did not accept the ChatGPT subscription credential. Refresh or sign in through Codex, then retry, or select Local."
+        )
+    }
+
+    func authenticationIntegrationProbe(
+        executableURL: URL,
+        workspaceURL: URL,
+        timeoutS: TimeInterval
+    ) async throws -> CodexAuthenticationIntegrationProbe {
+        let timing = terminationTiming
+        let environment = environment
+        let temporaryDirectory = temporaryDirectory
+        let credentialSource = credentialSource
+        let terminateProcess = terminateProcess
+        let removeScratch = removeScratch
+        return try await Task.detached {
+            let session = try CodexAppServerSession(
+                executableURL: executableURL,
+                workspaceURL: workspaceURL,
+                timeoutS: timeoutS,
+                terminationTiming: timing,
+                parentEnvironment: environment,
+                temporaryDirectory: temporaryDirectory,
+                terminateProcess: terminateProcess,
+                removeScratch: removeScratch
+            )
+            return try await session.perform {
+                try session.initialize()
+                try session.authenticate(using: credentialSource)
+                let accountState = try session.readAccountState()
+                let layerTypes = try session.readConfigLayerTypes(workspaceURL: workspaceURL)
+                return CodexAuthenticationIntegrationProbe(
+                    accountState: accountState,
+                    configLayerTypes: layerTypes
+                )
+            }
+        }.value
+    }
+}
+
+struct CodexAuthenticationIntegrationProbe: Equatable, Sendable {
+    let accountState: CodexAppServerAccountState
+    let configLayerTypes: [String]
 }
 
 private final class CodexAppServerSession: @unchecked Sendable {
@@ -122,20 +212,33 @@ private final class CodexAppServerSession: @unchecked Sendable {
     private let process: Process
     private let input: FileHandle
     private let output: FileHandle
-    private let errorOutput: FileHandle
-    private let errorURL: URL
     private let scratchURL: URL
     private let channel: CodexJSONLChannel
     private let deadline: Date
     private let timeoutS: TimeInterval
     private let terminationTiming: ProcessTerminationTiming
+    private let terminateProcess: @Sendable (
+        Int32,
+        @escaping @Sendable () -> Bool,
+        ProcessTerminationTiming
+    ) async -> ProcessTerminationResult
+    private let removeScratch: @Sendable (URL) throws -> Void
     private var nextRequestID = 1
+    private var injectedAuthentication = false
 
     init(
         executableURL: URL,
         workspaceURL: URL,
         timeoutS: TimeInterval,
-        terminationTiming: ProcessTerminationTiming
+        terminationTiming: ProcessTerminationTiming,
+        parentEnvironment: [String: String],
+        temporaryDirectory: URL,
+        terminateProcess: @escaping @Sendable (
+            Int32,
+            @escaping @Sendable () -> Bool,
+            ProcessTerminationTiming
+        ) async -> ProcessTerminationResult,
+        removeScratch: @escaping @Sendable (URL) throws -> Void
     ) throws {
         guard timeoutS > 0 else {
             throw PostprocessError.backendFailed("codex app server timeout must be positive")
@@ -143,7 +246,9 @@ private final class CodexAppServerSession: @unchecked Sendable {
         self.timeoutS = timeoutS
         self.deadline = Date().addingTimeInterval(timeoutS)
         self.terminationTiming = terminationTiming
-        self.scratchURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+        self.terminateProcess = terminateProcess
+        self.removeScratch = removeScratch
+        self.scratchURL = temporaryDirectory.appendingPathComponent(
             "maccheroni-codex-app-server-\(UUID().uuidString.lowercased())",
             isDirectory: true
         )
@@ -152,9 +257,34 @@ private final class CodexAppServerSession: @unchecked Sendable {
                 at: scratchURL,
                 withIntermediateDirectories: false
             )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: scratchURL.path
+            )
         } catch {
+            try? FileManager.default.removeItem(at: scratchURL)
             throw PostprocessError.launchFailed(
                 "cannot create Codex app server scratch directory"
+            )
+        }
+
+        let isolatedHomeURL = scratchURL.appendingPathComponent(
+            "codex-home",
+            isDirectory: true
+        )
+        do {
+            try FileManager.default.createDirectory(
+                at: isolatedHomeURL,
+                withIntermediateDirectories: false
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: isolatedHomeURL.path
+            )
+        } catch {
+            try? removeScratch(scratchURL)
+            throw PostprocessError.launchFailed(
+                "cannot create isolated Codex app server home"
             )
         }
 
@@ -162,16 +292,6 @@ private final class CodexAppServerSession: @unchecked Sendable {
         let standardOutput = Pipe()
         self.input = standardInput.fileHandleForWriting
         self.output = standardOutput.fileHandleForReading
-        self.errorURL = scratchURL.appendingPathComponent("stderr")
-        do {
-            try Data().write(to: errorURL, options: .withoutOverwriting)
-            self.errorOutput = try FileHandle(forWritingTo: errorURL)
-        } catch {
-            try? FileManager.default.removeItem(at: scratchURL)
-            throw PostprocessError.launchFailed(
-                "cannot prepare Codex app server diagnostics"
-            )
-        }
         self.channel = CodexJSONLChannel(handle: output)
         self.process = Process()
         process.executableURL = executableURL
@@ -179,23 +299,24 @@ private final class CodexAppServerSession: @unchecked Sendable {
             "app-server",
             "-c", #"openai_base_url="""#,
             "-c", #"chatgpt_base_url="https://chatgpt.com/backend-api/""#,
+            "-c", #"cli_auth_credentials_store="ephemeral""#,
             "--listen", "stdio://",
         ]
-        var environment = ProcessInfo.processInfo.environment
+        var environment = parentEnvironment
         for key in Self.strippedCredentialEnvironmentKeys {
             environment.removeValue(forKey: key)
         }
+        environment["CODEX_HOME"] = isolatedHomeURL.path
         process.environment = environment
         process.currentDirectoryURL = workspaceURL
         process.standardInput = standardInput
         process.standardOutput = standardOutput
-        process.standardError = errorOutput
+        process.standardError = FileHandle.nullDevice
         guard Darwin.fcntl(input.fileDescriptor, F_SETNOSIGPIPE, 1) != -1 else {
             channel.finish()
             try? input.close()
             try? output.close()
-            try? errorOutput.close()
-            try? FileManager.default.removeItem(at: scratchURL)
+            try? removeScratch(scratchURL)
             throw PostprocessError.launchFailed(
                 "could not configure Codex app server input"
             )
@@ -206,8 +327,13 @@ private final class CodexAppServerSession: @unchecked Sendable {
             channel.finish()
             try? input.close()
             try? output.close()
-            try? errorOutput.close()
-            try? FileManager.default.removeItem(at: scratchURL)
+            do {
+                try removeScratch(scratchURL)
+            } catch {
+                throw PostprocessError.launchFailed(
+                    "could not launch codex app server and scratch cleanup failed"
+                )
+            }
             throw PostprocessError.launchFailed(
                 "could not launch codex app server"
             )
@@ -229,6 +355,36 @@ private final class CodexAppServerSession: @unchecked Sendable {
             ]
         )
         try notify(method: "initialized", params: [:])
+    }
+
+    func authenticate(using source: CodexCredentialSource) throws {
+        do {
+            try source.withCredential(requiredValidityS: timeoutS) { credential in
+                do {
+                    let result = try request(
+                        method: "account/login/start",
+                        params: [
+                            "type": "chatgptAuthTokens",
+                            "accessToken": credential.accessToken,
+                            "chatgptAccountId": credential.accountID,
+                            "chatgptPlanType": credential.planType ?? NSNull(),
+                        ]
+                    )
+                    guard let object = result as? [String: Any],
+                          object["type"] as? String == "chatgptAuthTokens" else {
+                        throw Self.authenticationUnavailableFailure()
+                    }
+                    injectedAuthentication = true
+                } catch let error as PostprocessError {
+                    if case .authenticationRequired = error { throw error }
+                    throw Self.authenticationUnavailableFailure()
+                }
+            }
+        } catch let error as PostprocessError {
+            throw error
+        } catch {
+            throw Self.authenticationUnavailableFailure()
+        }
     }
 
     func readAccountState() throws -> CodexAppServerAccountState {
@@ -378,6 +534,25 @@ private final class CodexAppServerSession: @unchecked Sendable {
         return serverObject.keys.sorted()
     }
 
+    func readConfigLayerTypes(workspaceURL: URL) throws -> [String] {
+        let result = try request(
+            method: "config/read",
+            params: ["cwd": workspaceURL.path, "includeLayers": true]
+        )
+        guard let object = result as? [String: Any],
+              object["config"] is [String: Any],
+              let layers = object["layers"] as? [[String: Any]] else {
+            throw protocolFailure("config/read returned no effective config")
+        }
+        return try layers.map { layer in
+            guard let name = layer["name"] as? [String: Any],
+                  let type = name["type"] as? String else {
+                throw protocolFailure("config/read returned invalid effective config layers")
+            }
+            return type
+        }
+    }
+
     private func assertNoManagedToolRequirements() throws {
         let result = try request(method: "configRequirements/read", params: nil)
         guard let object = result as? [String: Any],
@@ -523,20 +698,65 @@ private final class CodexAppServerSession: @unchecked Sendable {
         }
     }
 
-    func shutdown() async {
+    func perform<T>(_ operation: () throws -> T) async throws -> T {
+        let result: Result<T, Error>
+        do {
+            result = .success(try operation())
+        } catch {
+            result = .failure(error)
+        }
+        do {
+            try await shutdown()
+        } catch let error as CodexShutdownError {
+            switch (result, error) {
+            case let (.success(value), .cleanup):
+                return value
+            case let (.failure(operationFailure), .cleanup):
+                throw operationFailure
+            case (_, let .termination(failure)):
+                throw failure
+            }
+        }
+        return try result.get()
+    }
+
+    private func shutdown() async throws {
         channel.stop()
         try? input.close()
         if process.isRunning {
             let liveness = CodexProcessLiveness(process)
-            _ = await ProcessTerminator.terminate(
-                processID: process.processIdentifier,
-                isRunning: { liveness.process.isRunning },
-                timing: terminationTiming
+            let result = await terminateProcess(
+                process.processIdentifier,
+                { liveness.process.isRunning },
+                terminationTiming
             )
+            switch result {
+            case .alreadyExited, .terminatedAfterSIGTERM, .terminatedAfterSIGKILL:
+                break
+            case .signalFailed:
+                throw CodexShutdownError.termination(
+                    .backendFailed(
+                        "codex app server termination was not confirmed after signalling failed; scratch was retained"
+                    )
+                )
+            case .exitWaitTimedOut:
+                throw CodexShutdownError.termination(
+                    .backendFailed(
+                        "codex app server termination was not confirmed before the exit deadline; scratch was retained"
+                    )
+                )
+            }
         }
         try? output.close()
-        try? errorOutput.close()
-        try? FileManager.default.removeItem(at: scratchURL)
+        do {
+            try removeScratch(scratchURL)
+        } catch {
+            throw CodexShutdownError.cleanup(
+                .backendFailed(
+                    "codex app server scratch cleanup failed after process termination"
+                )
+            )
+        }
     }
 
     private func request(
@@ -584,6 +804,17 @@ private final class CodexAppServerSession: @unchecked Sendable {
 
     private func respondFailClosed(to message: [String: Any], method: String) throws {
         guard let id = message["id"] else { return }
+        if method == "account/chatgptAuthTokens/refresh" {
+            let failure = Self.refreshRequiredFailure()
+            try write([
+                "id": id,
+                "error": [
+                    "code": -32000,
+                    "message": failure.errorDescription ?? "authentication required",
+                ],
+            ])
+            throw failure
+        }
         let result: [String: Any]
         switch method {
         case "item/permissions/requestApproval":
@@ -614,6 +845,10 @@ private final class CodexAppServerSession: @unchecked Sendable {
             options: [.withoutEscapingSlashes]
         )
         data.append(0x0A)
+        defer {
+            data.resetBytes(in: data.startIndex ..< data.endIndex)
+            data.removeAll(keepingCapacity: false)
+        }
         do {
             try input.write(contentsOf: data)
         } catch {
@@ -674,7 +909,9 @@ private final class CodexAppServerSession: @unchecked Sendable {
             in: .whitespacesAndNewlines
         )
         let displayedMessage: String
-        if let message, !message.isEmpty {
+        if injectedAuthentication {
+            displayedMessage = "message unavailable after authentication"
+        } else if let message, !message.isEmpty {
             displayedMessage = message
         } else {
             displayedMessage = "message unavailable"
@@ -683,76 +920,19 @@ private final class CodexAppServerSession: @unchecked Sendable {
     }
 
     private func diagnosticMessage(_ message: String) -> String {
-        let sanitizedMessage = SubprocessFailureMessage.sanitized(
-            standardError: Data(message.utf8)
+        SubprocessFailureMessage.sanitized(standardError: Data(message.utf8))
+    }
+
+    private static func authenticationUnavailableFailure() -> PostprocessError {
+        .authenticationRequired(
+            "Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local."
         )
-        let sanitizedStderrTail = SubprocessFailureMessage.sanitized(
-            standardError: stderrTail(maximumBytes: 384)
+    }
+
+    private static func refreshRequiredFailure() -> PostprocessError {
+        .authenticationRequired(
+            "Codex requested a token refresh. Refresh or sign in through Codex, then retry, or select Local."
         )
-        guard !sanitizedStderrTail.isEmpty else { return sanitizedMessage }
-        let primary = Self.boundedUTF8Prefix(sanitizedMessage, maximumBytes: 320)
-        let stderr = Self.boundedUTF8Suffix(sanitizedStderrTail, maximumBytes: 160)
-        return "\(primary); stderr tail: \(stderr)"
-    }
-
-    private func stderrTail(maximumBytes: UInt64) -> Data {
-        try? errorOutput.synchronize()
-        guard let reader = try? FileHandle(forReadingFrom: errorURL) else {
-            return Data()
-        }
-        defer { try? reader.close() }
-        guard let end = try? reader.seekToEnd() else { return Data() }
-        let start = end > maximumBytes ? end - maximumBytes : 0
-        let readStart = start > 0 ? start - 1 : 0
-        do {
-            try reader.seek(toOffset: readStart)
-            var data = try reader.readToEnd() ?? Data()
-            guard start > 0, let precedingByte = data.first else { return data }
-            data.removeFirst()
-            guard precedingByte != 10, precedingByte != 13 else { return data }
-            while let byte = data.first {
-                data.removeFirst()
-                if byte == 10 || byte == 13 { break }
-            }
-            return data
-        } catch {
-            return Data()
-        }
-    }
-
-    private static func boundedUTF8Prefix(
-        _ text: String,
-        maximumBytes: Int
-    ) -> String {
-        guard text.utf8.count > maximumBytes else { return text }
-        let marker = SubprocessFailureMessage.truncationMarker
-        let budget = maximumBytes - marker.utf8.count
-        var result = ""
-        var usedBytes = 0
-        for character in text {
-            let size = String(character).utf8.count
-            guard usedBytes + size <= budget else { break }
-            result.append(character)
-            usedBytes += size
-        }
-        return result + marker
-    }
-
-    private static func boundedUTF8Suffix(
-        _ text: String,
-        maximumBytes: Int
-    ) -> String {
-        guard text.utf8.count > maximumBytes else { return text }
-        var result = ""
-        var usedBytes = 0
-        for character in text.reversed() {
-            let value = String(character)
-            let size = value.utf8.count
-            guard usedBytes + size <= maximumBytes else { break }
-            result = value + result
-            usedBytes += size
-        }
-        return result
     }
 
     private func rpcID(_ value: Any?) -> Int? {
@@ -891,6 +1071,11 @@ private final class CodexAppServerSession: @unchecked Sendable {
         if let object = value as? [String: Any] { return object.isEmpty }
         return false
     }
+}
+
+private enum CodexShutdownError: Error {
+    case termination(PostprocessError)
+    case cleanup(PostprocessError)
 }
 
 private final class CodexProcessLiveness: @unchecked Sendable {

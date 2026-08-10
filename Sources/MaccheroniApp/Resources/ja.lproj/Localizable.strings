@@ -466,8 +466,8 @@
 	<string>Codex CLI が見つかりません。インストールしてターミナルで codex login を実行するか、当面は Local を選択してください。</string>
 	<key>Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile.</key>
 	<string>Codex はインストールされていますが、サインインしていません。ターミナルで codex login を実行するか、当面は Local を選択してください。</string>
-	<key>Codex is not signed in. Run codex login in Terminal, then try again, or select Local.</key>
-	<string>Codex にサインインしていません。ターミナルで codex login を実行してからもう一度試すか、Local を選択してください。</string>
+	<key>Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local.</key>
+	<string>Codex のサインインは期限切れか、有効期限が近すぎます。Codex で更新またはサインインしてから再試行するか、Local を選択してください。</string>
 	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
 	<string>Codex はインストールされていますが、サインイン状態を確認できませんでした。再試行するか、当面は Local を選択してください。</string>
 	<key>Codex is signed in and ready.</key>
