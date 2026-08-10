@@ -56,16 +56,52 @@ enum LibraryStorageSettings {
     }
 }
 
+struct LibraryBookmarkResolution: Sendable {
+    var url: URL
+    var isStale: Bool
+}
+
+struct LibraryBookmarkAccess: Sendable {
+    var resolve: @Sendable (Data) throws -> LibraryBookmarkResolution
+    var create: @Sendable (URL) throws -> Data
+
+    static let system = LibraryBookmarkAccess(
+        resolve: { bookmark in
+            var isStale = false
+            let url = try URL(
+                resolvingBookmarkData: bookmark,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            return LibraryBookmarkResolution(url: url, isStale: isStale)
+        },
+        create: { url in
+            try url.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+        }
+    )
+}
+
 struct LibraryRepository: Sendable {
     let root: URL
     let runsRoot: URL
     let recordingsRoot: URL
+    private let bookmarkAccess: LibraryBookmarkAccess
 
     var indexURL: URL { root.appendingPathComponent("library.json") }
     var requestsRoot: URL { root.appendingPathComponent("Requests", isDirectory: true) }
     var glossariesRoot: URL { root.appendingPathComponent("Glossaries", isDirectory: true) }
 
-    init(root: URL, runsRoot: URL? = nil, recordingsRoot: URL? = nil) {
+    init(
+        root: URL,
+        runsRoot: URL? = nil,
+        recordingsRoot: URL? = nil,
+        bookmarkAccess: LibraryBookmarkAccess = .system
+    ) {
         let standardizedRoot = root.standardizedFileURL
         self.root = standardizedRoot
         self.runsRoot = (runsRoot
@@ -74,6 +110,7 @@ struct LibraryRepository: Sendable {
         self.recordingsRoot = (recordingsRoot
             ?? standardizedRoot.appendingPathComponent("Recordings", isDirectory: true))
             .standardizedFileURL
+        self.bookmarkAccess = bookmarkAccess
     }
 
     static var local: LibraryRepository {
@@ -142,31 +179,41 @@ struct LibraryRepository: Sendable {
     }
 
     func bookmark(for url: URL) throws -> Data {
-        try url.bookmarkData(
-            options: .withSecurityScope,
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        )
+        try bookmarkAccess.create(url)
     }
 
     func resolveOriginal(for record: LibraryRecord) throws -> URL {
         if let bookmark = record.securityScopedBookmark {
-            var stale = false
-            let resolved = try URL(
-                resolvingBookmarkData: bookmark,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &stale
-            )
-            guard !stale, FileManager.default.fileExists(atPath: resolved.path) else {
+            let resolution = try bookmarkAccess.resolve(bookmark)
+            guard FileManager.default.fileExists(atPath: resolution.url.path) else {
                 throw LibraryRepositoryError.originalUnavailable
             }
-            return resolved
+            if resolution.isStale {
+                let refreshedBookmark = try bookmarkAccess.create(resolution.url)
+                try persistRefreshedBookmark(
+                    refreshedBookmark,
+                    resolvedURL: resolution.url,
+                    recordID: record.id
+                )
+            }
+            return resolution.url
         }
         guard FileManager.default.fileExists(atPath: record.sourceURL.path) else {
             throw LibraryRepositoryError.originalUnavailable
         }
         return record.sourceURL
+    }
+
+    private func persistRefreshedBookmark(
+        _ bookmark: Data,
+        resolvedURL: URL,
+        recordID: UUID
+    ) throws {
+        var records = try loadRecords()
+        guard let index = records.firstIndex(where: { $0.id == recordID }) else { return }
+        records[index].sourceURL = resolvedURL
+        records[index].securityScopedBookmark = bookmark
+        try saveRecords(records)
     }
 
     func loadRun(at runURL: URL) throws -> LoadedRun {

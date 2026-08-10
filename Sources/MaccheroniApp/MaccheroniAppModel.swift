@@ -5,12 +5,27 @@ import MaccheroniCore
 import MaccheroniPostprocess
 import Observation
 
+enum RunLoadIssue: Equatable {
+    case missing
+    case missingArtifact(String)
+    case decoding(String)
+    case integrity(String)
+
+    var canReveal: Bool {
+        switch self {
+        case .missing: false
+        case .missingArtifact, .decoding, .integrity: true
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class MaccheroniAppModel {
     private(set) var profiles: [AppProfile]
     private(set) var records: [LibraryRecord]
     private(set) var selectedRun: LoadedRun?
+    private(set) var selectedRunIssue: RunLoadIssue?
     private(set) var progress: RunProgressSnapshot?
     private(set) var captureMeters = CaptureMeters.silent
     private(set) var captureElapsedS: Double = 0
@@ -50,12 +65,14 @@ final class MaccheroniAppModel {
     private let runner: any TranscriptionRunning
     private let recorder: any RecordingControlling
     private let defaults: UserDefaults
+    private let recordSaver: ([LibraryRecord]) throws -> Void
     private var activeTask: Task<Void, Never>?
     private var captureTimer: Task<Void, Never>?
     private var player: AVPlayer?
     private var playbackTask: Task<Void, Never>?
     private var activeSecurityURL: URL?
     private var activeRecordingSelection: RecordingSelection?
+    private var activeRecordingRecordID: UUID?
 
     init(
         repository: LibraryRepository,
@@ -63,7 +80,8 @@ final class MaccheroniAppModel {
         runner: any TranscriptionRunning,
         recorder: any RecordingControlling,
         defaults: UserDefaults = .standard,
-        codexAvailability: CodexAvailability = .unavailable
+        codexAvailability: CodexAvailability = .unavailable,
+        recordSaver: (([LibraryRecord]) throws -> Void)? = nil
     ) throws {
         self.repository = repository
         self.profiles = profiles
@@ -71,6 +89,7 @@ final class MaccheroniAppModel {
         self.recorder = recorder
         self.defaults = defaults
         self.codexAvailability = codexAvailability
+        self.recordSaver = recordSaver ?? repository.saveRecords
         let storedProfile = defaults.string(forKey: "selectedProfile")
             .flatMap(AppProfileID.init(rawValue:))
         let storedPostprocess = defaults.string(forKey: "selectedPostprocess")
@@ -87,7 +106,8 @@ final class MaccheroniAppModel {
         let initialTranslationTarget = storedTranslationTarget == .system
             ? .english
             : (storedTranslationTarget ?? .english)
-        selectedProfileID = storedProfile ?? .koreanITMeeting
+        let initialProfile = storedProfile ?? .koreanITMeeting
+        selectedProfileID = initialProfile
         selectedPostprocess = initialPostprocess
         selectedPostprocessMode = initialPostprocessMode
         selectedTranslationTarget = initialTranslationTarget
@@ -107,10 +127,27 @@ final class MaccheroniAppModel {
             )
         }
         try repository.prepareDirectories()
-        let loadedRecords = try repository.loadRecords().sorted {
+        var loadedRecords = try repository.loadRecords().sorted {
             $0.createdAt > $1.createdAt
         }
+        let recoveredCaptureRecords = try Self.recoverUnindexedCaptureSessions(
+            recordingsRoot: repository.recordingsRoot,
+            existingRecords: loadedRecords,
+            profileID: initialProfile,
+            postprocess: initialPostprocess,
+            postprocessMode: initialPostprocessMode,
+            translationTarget: initialTranslationTarget
+        )
+        loadedRecords.append(contentsOf: recoveredCaptureRecords)
+        loadedRecords.sort { $0.createdAt > $1.createdAt }
+        var reconciledInterruptedRun = false
+        for index in loadedRecords.indices where loadedRecords[index].state == .transcribing {
+            loadedRecords[index].state = .interrupted
+            loadedRecords[index].failureMessage = appString("Transcription Cancelled")
+            reconciledInterruptedRun = true
+        }
         records = loadedRecords
+        selectedRunIssue = nil
         runFailures = Dictionary(
             uniqueKeysWithValues: loadedRecords.compactMap { record in
                 guard let runURL = record.runURL,
@@ -121,6 +158,9 @@ final class MaccheroniAppModel {
         )
         recorder.setMeterHandler { [weak self] meters in
             self?.captureMeters = meters
+        }
+        if reconciledInterruptedRun || !recoveredCaptureRecords.isEmpty {
+            try self.recordSaver(loadedRecords)
         }
     }
 
@@ -146,19 +186,18 @@ final class MaccheroniAppModel {
     var isTranscribing: Bool { activeRecordID != nil && activeTask != nil }
     var canImportAudio: Bool { !isRecording && activeTask == nil }
     var canStartTranscription: Bool { !isRecording && activeTask == nil }
+    var canStartRecording: Bool { !isRecording && activeTask == nil }
 
     func canRetryTranscription(_ record: LibraryRecord) -> Bool {
         guard canStartTranscription,
-              !isMOSSLimitExhausted(record)
+              !(isMOSSLimitExhausted(record) && usesUnchangedMOSSConfiguration(record))
         else { return false }
-        if Self.supportedTranscriptionExtensions.contains(
-            record.sourceURL.pathExtension.lowercased()
-        ) {
+        if isReadableAudio(record) {
             return true
         }
         return record.sourceKind == .appRecording
-            && record.microphoneURL != nil
-            && record.systemAudioURL != nil
+            && record.microphoneURL.map(Self.isReadableAudio(at:)) == true
+            && record.systemAudioURL.map(Self.isReadableAudio(at:)) == true
     }
 
     func isTranscribing(recordID: UUID) -> Bool {
@@ -175,6 +214,10 @@ final class MaccheroniAppModel {
 
     func isMOSSLimitExhausted(_ record: LibraryRecord) -> Bool {
         failure(for: record)?.code == "MOSS_LIMIT_EXHAUSTED"
+    }
+
+    func usesUnchangedMOSSConfiguration(_ record: LibraryRecord) -> Bool {
+        selectedProfileID == record.profileID
     }
 
     var storageRoot: URL { repository.root }
@@ -226,23 +269,56 @@ final class MaccheroniAppModel {
         activeTask = Task { [weak self] in
             guard let self else { return }
             defer { finishActiveTranscription() }
+            var pendingRecordIDs: [UUID] = []
+            var failures: [String] = []
             for url in urls {
-                var recordID: UUID?
                 do {
                     let record = try await makeImportedRecord(url: url)
-                    recordID = record.id
                     try persist(record)
-                    selection = .record(record.id)
-                    try await transcribe(recordID: record.id)
+                    pendingRecordIDs.append(record.id)
                 } catch is CancellationError {
-                    if let recordID { markCancelled(recordID: recordID) }
                     break
                 } catch {
-                    if let recordID { markFailed(recordID: recordID, message: error.localizedDescription) }
-                    errorMessage = error.localizedDescription
-                    break
+                    failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
                 }
             }
+            for recordID in pendingRecordIDs {
+                guard let record = records.first(where: { $0.id == recordID }) else { continue }
+                selection = .record(recordID)
+                do {
+                    try await transcribe(recordID: recordID)
+                } catch is CancellationError {
+                    markCancelled(recordID: recordID)
+                    break
+                } catch {
+                    let runnerMessage = error.localizedDescription
+                    do {
+                        try markFailed(recordID: recordID, message: runnerMessage)
+                        failures.append("\(record.sourceURL.lastPathComponent): \(runnerMessage)")
+                    } catch {
+                        failures.append(Self.combinedFailureMessage(
+                            operation: runnerMessage,
+                            persistence: error
+                        ))
+                    }
+                }
+            }
+            if !failures.isEmpty {
+                errorMessage = failures.joined(separator: "\n")
+            }
+        }
+    }
+
+    func handleImportResult(_ result: Result<[URL], any Error>) {
+        switch result {
+        case let .success(urls):
+            importAudio(urls)
+        case let .failure(error):
+            let cocoaError = error as NSError
+            guard !(cocoaError.domain == NSCocoaErrorDomain
+                && cocoaError.code == NSUserCancelledError)
+            else { return }
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -257,14 +333,44 @@ final class MaccheroniAppModel {
         )
         activeTask = Task { [weak self] in
             guard let self else { return }
+            var captureStarted = false
             do {
-                try await recorder.start(in: repository.recordingsRoot)
+                let session = try await recorder.start(in: repository.recordingsRoot)
+                captureStarted = true
+                let record = LibraryRecord(
+                    id: UUID(),
+                    createdAt: session.startedAt,
+                    displayName: appString("Recording \(session.startedAt.formatted(date: .abbreviated, time: .shortened))"),
+                    sourceKind: .appRecording,
+                    sourceURL: session.microphoneURL,
+                    securityScopedBookmark: nil,
+                    microphoneURL: session.microphoneURL,
+                    systemAudioURL: session.systemAudioURL,
+                    runURL: nil,
+                    profileID: activeRecordingSelection?.profileID ?? selectedProfileID,
+                    postprocess: activeRecordingSelection?.postprocess ?? selectedPostprocess,
+                    postprocessMode: activeRecordingSelection?.postprocessMode.mode,
+                    translationTargetLanguage: activeRecordingSelection?.postprocessMode == .translation
+                        ? activeRecordingSelection?.translationTarget.rawValue
+                        : nil,
+                    durationS: 0,
+                    state: .interrupted,
+                    speakerNames: [:],
+                    conflictResolutions: [:],
+                    failureMessage: appString("Transcription Cancelled")
+                )
+                try persist(record)
+                activeRecordingRecordID = record.id
                 isRecording = true
                 captureElapsedS = 0
                 startCaptureTimer()
             } catch {
+                if captureStarted {
+                    await recorder.cancel()
+                }
                 errorMessage = error.localizedDescription
                 activeRecordingSelection = nil
+                activeRecordingRecordID = nil
             }
             activeTask = nil
         }
@@ -273,12 +379,13 @@ final class MaccheroniAppModel {
     func stopRecordingAndTranscribe() {
         guard isRecording,
               activeTask == nil,
-              let recordingSelection = activeRecordingSelection
+              activeRecordingSelection != nil,
+              let provisionalRecordID = activeRecordingRecordID
         else { return }
         syncPostprocessSelectionsFromDefaults()
         activeTask = Task { [weak self] in
             guard let self else { return }
-            var recordID: UUID?
+            let recordID = provisionalRecordID
             defer { finishActiveTranscription() }
             captureTimer?.cancel()
             do {
@@ -286,62 +393,35 @@ final class MaccheroniAppModel {
                 isRecording = false
                 captureMeters = .silent
                 activeRecordingSelection = nil
-                let record = LibraryRecord(
-                    id: UUID(),
-                    createdAt: artifacts.startedAt,
-                    displayName: appString("Recording \(artifacts.startedAt.formatted(date: .abbreviated, time: .shortened))"),
-                    sourceKind: .appRecording,
+                try updateRecordingRecord(
+                    id: recordID,
                     sourceURL: artifacts.combinedURL,
-                    securityScopedBookmark: nil,
                     microphoneURL: artifacts.microphoneURL,
                     systemAudioURL: artifacts.systemAudioURL,
-                    runURL: nil,
-                    profileID: recordingSelection.profileID,
-                    postprocess: recordingSelection.postprocess,
-                    postprocessMode: recordingSelection.postprocessMode.mode,
-                    translationTargetLanguage: recordingSelection.postprocessMode == .translation
-                        ? recordingSelection.translationTarget.rawValue
-                        : nil,
                     durationS: artifacts.durationS,
                     state: .recorded,
-                    speakerNames: [:],
-                    conflictResolutions: [:],
                     failureMessage: nil
                 )
-                try persist(record)
-                recordID = record.id
-                selection = .record(record.id)
-                try await transcribe(recordID: record.id)
+                activeRecordingRecordID = nil
+                selection = .record(recordID)
+                try await transcribe(recordID: recordID)
             } catch let error as RecordingFinalizationError {
                 isRecording = false
                 captureMeters = .silent
                 activeRecordingSelection = nil
                 let artifacts = error.artifacts
-                let record = LibraryRecord(
-                    id: UUID(),
-                    createdAt: artifacts.startedAt,
-                    displayName: appString("Recording \(artifacts.startedAt.formatted(date: .abbreviated, time: .shortened))"),
-                    sourceKind: .appRecording,
-                    sourceURL: artifacts.microphoneURL,
-                    securityScopedBookmark: nil,
-                    microphoneURL: artifacts.microphoneURL,
-                    systemAudioURL: artifacts.systemAudioURL,
-                    runURL: nil,
-                    profileID: recordingSelection.profileID,
-                    postprocess: recordingSelection.postprocess,
-                    postprocessMode: recordingSelection.postprocessMode.mode,
-                    translationTargetLanguage: recordingSelection.postprocessMode == .translation
-                        ? recordingSelection.translationTarget.rawValue
-                        : nil,
-                    durationS: artifacts.durationS,
-                    state: .failed,
-                    speakerNames: [:],
-                    conflictResolutions: [:],
-                    failureMessage: error.localizedDescription
-                )
                 do {
-                    try persist(record)
-                    selection = .record(record.id)
+                    try updateRecordingRecord(
+                        id: recordID,
+                        sourceURL: artifacts.microphoneURL,
+                        microphoneURL: artifacts.microphoneURL,
+                        systemAudioURL: artifacts.systemAudioURL,
+                        durationS: artifacts.durationS,
+                        state: .failed,
+                        failureMessage: error.localizedDescription
+                    )
+                    activeRecordingRecordID = nil
+                    selection = .record(recordID)
                     errorMessage = error.localizedDescription
                 } catch {
                     errorMessage = error.localizedDescription
@@ -350,13 +430,22 @@ final class MaccheroniAppModel {
                 isRecording = false
                 captureMeters = .silent
                 activeRecordingSelection = nil
-                if let recordID { markCancelled(recordID: recordID) }
+                activeRecordingRecordID = nil
+                markCancelled(recordID: recordID)
             } catch {
                 isRecording = false
                 captureMeters = .silent
                 activeRecordingSelection = nil
                 errorMessage = error.localizedDescription
-                if let recordID { markFailed(recordID: recordID, message: error.localizedDescription) }
+                activeRecordingRecordID = nil
+                do {
+                    try markFailed(recordID: recordID, message: error.localizedDescription)
+                } catch {
+                    errorMessage = Self.combinedFailureMessage(
+                        operation: errorMessage ?? "",
+                        persistence: error
+                    )
+                }
             }
         }
     }
@@ -372,7 +461,7 @@ final class MaccheroniAppModel {
             return
         }
         guard activeTask == nil, let record = selectedRecord else { return }
-        guard !isMOSSLimitExhausted(record) else {
+        guard !(isMOSSLimitExhausted(record) && usesUnchangedMOSSConfiguration(record)) else {
             errorMessage = appString(
                 "This run reached the MOSS output limit after bounded splitting. Choose a different profile or use a shorter copy before retrying."
             )
@@ -384,14 +473,22 @@ final class MaccheroniAppModel {
             guard let self else { return }
             defer { finishActiveTranscription() }
             do {
-                try applySelectedFallbackBackendForRetry(recordID: record.id)
+                try applySelectedExecutionConfigurationForRetry(recordID: record.id)
                 try prepareRetrySource(recordID: record.id)
                 try await transcribe(recordID: record.id)
             } catch is CancellationError {
                 markCancelled(recordID: record.id)
             } catch {
-                markFailed(recordID: record.id, message: error.localizedDescription)
-                errorMessage = error.localizedDescription
+                let runnerMessage = error.localizedDescription
+                do {
+                    try markFailed(recordID: record.id, message: runnerMessage)
+                    errorMessage = runnerMessage
+                } catch {
+                    errorMessage = Self.combinedFailureMessage(
+                        operation: runnerMessage,
+                        persistence: error
+                    )
+                }
             }
         }
     }
@@ -430,7 +527,7 @@ final class MaccheroniAppModel {
         guard let record = selectedRecord else { return }
         do {
             stopPlayback()
-            let source = try repository.resolveOriginal(for: record)
+            let source = try resolveOriginalRefreshingRecord(record)
             if source.startAccessingSecurityScopedResource() {
                 activeSecurityURL = source
             }
@@ -461,7 +558,7 @@ final class MaccheroniAppModel {
 
     func revealOriginal(_ record: LibraryRecord) {
         do {
-            let source = try repository.resolveOriginal(for: record)
+            let source = try resolveOriginalRefreshingRecord(record)
             NSWorkspace.shared.activateFileViewerSelecting([source])
         } catch {
             errorMessage = error.localizedDescription
@@ -469,17 +566,27 @@ final class MaccheroniAppModel {
     }
 
     func revealRun(_ record: LibraryRecord) {
-        guard let runURL = record.runURL else { return }
+        guard let runURL = record.runURL,
+              FileManager.default.fileExists(atPath: runURL.path)
+        else {
+            errorMessage = appString("Recording Not Found")
+            return
+        }
         NSWorkspace.shared.activateFileViewerSelecting([runURL])
+    }
+
+    func canRevealRun(_ record: LibraryRecord) -> Bool {
+        record.runURL.map { FileManager.default.fileExists(atPath: $0.path) } == true
     }
 
     func glossaryURL(for profileID: AppProfileID) -> URL {
         repository.glossariesRoot.appendingPathComponent("\(profileID.rawValue).txt")
     }
 
-    func loadGlossary(for profileID: AppProfileID) -> String {
+    func loadGlossary(for profileID: AppProfileID) throws -> String {
         let url = glossaryURL(for: profileID)
-        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        guard FileManager.default.fileExists(atPath: url.path) else { return "" }
+        return try String(contentsOf: url, encoding: .utf8)
     }
 
     func saveGlossary(_ text: String, for profileID: AppProfileID) throws {
@@ -500,13 +607,7 @@ final class MaccheroniAppModel {
     private func makeImportedRecord(url: URL) async throws -> LibraryRecord {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-        let duration = try await AVURLAsset(url: url).load(.duration)
-        let seconds = CMTimeGetSeconds(duration)
-        guard seconds.isFinite, seconds > 0 else {
-            throw TranscriptionRunnerError.pipelineFailed(
-                appString("The selected file has no readable audio duration.")
-            )
-        }
+        let seconds = try Self.readableAudioDuration(at: url)
         return LibraryRecord(
             id: UUID(),
             createdAt: Date(),
@@ -552,14 +653,14 @@ final class MaccheroniAppModel {
         records[index].failureMessage = nil
         runFailures.removeValue(forKey: recordID)
         activeRecordID = recordID
-        try repository.saveRecords(records)
+        try recordSaver(records)
         let glossary = glossaryURL(for: record.profileID)
-        let glossaryURL = (try? String(contentsOf: glossary, encoding: .utf8))?
+        let glossaryURL = try loadGlossary(for: record.profileID)
             .split(whereSeparator: \.isNewline)
             .contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) == true
             ? glossary
             : nil
-        let source = try repository.resolveOriginal(for: record)
+        let source = try resolveOriginalRefreshingRecord(record)
         let accessing = source.startAccessingSecurityScopedResource()
         defer { if accessing { source.stopAccessingSecurityScopedResource() } }
         let request = TranscriptionRequest(
@@ -593,7 +694,7 @@ final class MaccheroniAppModel {
         records[finalIndex].state = loaded.requiresReview ? .hasConflicts : .done
         records[finalIndex].failureMessage = nil
         runFailures.removeValue(forKey: recordID)
-        try repository.saveRecords(records)
+        try recordSaver(records)
         if selection == .record(recordID) {
             selectedRun = loaded
         }
@@ -604,9 +705,10 @@ final class MaccheroniAppModel {
             throw TranscriptionRunnerError.resultMissing
         }
         let record = records[index]
-        guard !Self.supportedTranscriptionExtensions.contains(
-            record.sourceURL.pathExtension.lowercased()
-        ) else {
+        let sourceIsPreservedChannel = record.sourceKind == .appRecording
+            && (record.sourceURL == record.microphoneURL
+                || record.sourceURL == record.systemAudioURL)
+        if !sourceIsPreservedChannel, isReadableAudio(record) {
             return
         }
         guard record.sourceKind == .appRecording,
@@ -616,7 +718,7 @@ final class MaccheroniAppModel {
             throw LibraryRepositoryError.originalUnavailable
         }
 
-        let outputURL = record.sourceURL.deletingLastPathComponent().appendingPathComponent(
+        let outputURL = microphoneURL.deletingLastPathComponent().appendingPathComponent(
             "combined-retry-\(UUID().uuidString.lowercased()).wav"
         )
         try RecordingMixer.mix(
@@ -629,28 +731,61 @@ final class MaccheroniAppModel {
         records[index].state = .recorded
         records[index].failureMessage = nil
         runFailures.removeValue(forKey: recordID)
-        try repository.saveRecords(records)
+        try recordSaver(records)
     }
 
-    private func applySelectedFallbackBackendForRetry(recordID: UUID) throws {
-        guard let index = records.firstIndex(where: { $0.id == recordID }),
-              records[index].postprocess == .codex,
-              selectedPostprocess != .codex
-        else { return }
-        records[index].postprocess = selectedPostprocess
-        try repository.saveRecords(records)
+    private func applySelectedExecutionConfigurationForRetry(recordID: UUID) throws {
+        guard let index = records.firstIndex(where: { $0.id == recordID }) else { return }
+        records[index].profileID = selectedProfileID
+        if records[index].postprocess == .codex, selectedPostprocess != .codex {
+            records[index].postprocess = selectedPostprocess
+        }
+        try recordSaver(records)
     }
 
     private func persist(_ record: LibraryRecord) throws {
         records.append(record)
         records.sort { $0.createdAt > $1.createdAt }
-        try repository.saveRecords(records)
+        try recordSaver(records)
     }
 
     private func refreshSelectedRun() {
         selectedRun = nil
-        guard let runURL = selectedRecord?.runURL else { return }
-        selectedRun = try? repository.loadRun(at: runURL)
+        selectedRunIssue = nil
+        guard let selectedRecord else { return }
+        guard let runURL = selectedRecord.runURL else {
+            if selectedRecord.state == .done || selectedRecord.state == .hasConflicts {
+                selectedRunIssue = .missing
+            }
+            return
+        }
+        let manifestURL = runURL.appendingPathComponent("manifest.json")
+        guard FileManager.default.fileExists(atPath: runURL.path) else {
+            selectedRunIssue = .missing
+            return
+        }
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
+            selectedRunIssue = .missingArtifact(
+                LibraryRepositoryError.artifactMissing("manifest.json").localizedDescription
+            )
+            return
+        }
+        do {
+            selectedRun = try repository.loadRun(at: runURL)
+        } catch let error as LibraryRepositoryError {
+            switch error {
+            case .artifactHashMismatch, .unsafeArtifactPath:
+                selectedRunIssue = .integrity(error.localizedDescription)
+            case .artifactMissing:
+                selectedRunIssue = .missingArtifact(error.localizedDescription)
+            case .originalUnavailable:
+                selectedRunIssue = .missing
+            }
+        } catch let error as DecodingError {
+            selectedRunIssue = .decoding(error.localizedDescription)
+        } catch {
+            selectedRunIssue = .decoding(error.localizedDescription)
+        }
     }
 
     private func startCaptureTimer() {
@@ -668,24 +803,16 @@ final class MaccheroniAppModel {
         guard let index = records.firstIndex(where: { $0.id == recordID }) else { return }
         records[index].state = .cancelled
         records[index].failureMessage = nil
-        if let runURL = records[index].runURL,
-           let failure = Self.readFailure(at: runURL)
-        {
-            runFailures[recordID] = failure
-        }
+        runFailures.removeValue(forKey: recordID)
         saveRecordsReportingErrors()
     }
 
-    private func markFailed(recordID: UUID, message: String) {
+    private func markFailed(recordID: UUID, message: String) throws {
         guard let index = records.firstIndex(where: { $0.id == recordID }) else { return }
         records[index].state = .failed
         records[index].failureMessage = message
-        if let runURL = records[index].runURL,
-           let failure = Self.readFailure(at: runURL)
-        {
-            runFailures[recordID] = failure
-        }
-        saveRecordsReportingErrors()
+        runFailures.removeValue(forKey: recordID)
+        try recordSaver(records)
     }
 
     private func finishActiveTranscription() {
@@ -696,13 +823,143 @@ final class MaccheroniAppModel {
 
     private func saveRecordsReportingErrors() {
         do {
-            try repository.saveRecords(records)
+            try recordSaver(records)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private static let supportedTranscriptionExtensions: Set<String> = ["m4a", "mp3", "wav"]
+    private func updateRecordingRecord(
+        id: UUID,
+        sourceURL: URL,
+        microphoneURL: URL,
+        systemAudioURL: URL,
+        durationS: Double,
+        state: LibraryItemState,
+        failureMessage: String?
+    ) throws {
+        guard let index = records.firstIndex(where: { $0.id == id }) else {
+            throw TranscriptionRunnerError.resultMissing
+        }
+        records[index].sourceURL = sourceURL
+        records[index].microphoneURL = microphoneURL
+        records[index].systemAudioURL = systemAudioURL
+        records[index].durationS = durationS
+        records[index].state = state
+        records[index].failureMessage = failureMessage
+        try recordSaver(records)
+    }
+
+    private func resolveOriginalRefreshingRecord(_ record: LibraryRecord) throws -> URL {
+        let resolved = try repository.resolveOriginal(for: record)
+        guard record.securityScopedBookmark != nil,
+              let refreshed = try repository.loadRecords().first(where: { $0.id == record.id }),
+              let index = records.firstIndex(where: { $0.id == record.id })
+        else { return resolved }
+        records[index] = refreshed
+        return resolved
+    }
+
+    private func isReadableAudio(_ record: LibraryRecord) -> Bool {
+        guard let source = try? resolveOriginalRefreshingRecord(record) else { return false }
+        let accessing = source.startAccessingSecurityScopedResource()
+        defer { if accessing { source.stopAccessingSecurityScopedResource() } }
+        return Self.isReadableAudio(at: source)
+    }
+
+    private static func isReadableAudio(at url: URL) -> Bool {
+        (try? readableAudioDuration(at: url)) != nil
+    }
+
+    private static func readableAudioDuration(at url: URL) throws -> Double {
+        do {
+            let file = try AVAudioFile(forReading: url)
+            let sampleRate = file.processingFormat.sampleRate
+            let seconds = sampleRate > 0 ? Double(file.length) / sampleRate : 0
+            guard seconds.isFinite, seconds > 0 else {
+                throw TranscriptionRunnerError.pipelineFailed(
+                    appString("The selected file has no readable audio duration.")
+                )
+            }
+            return seconds
+        } catch let error as TranscriptionRunnerError {
+            throw error
+        } catch {
+            throw TranscriptionRunnerError.pipelineFailed(
+                appString("The selected file has no readable audio duration.")
+            )
+        }
+    }
+
+    private static func recoverUnindexedCaptureSessions(
+        recordingsRoot: URL,
+        existingRecords: [LibraryRecord],
+        profileID: AppProfileID,
+        postprocess: PostprocessChoice,
+        postprocessMode: PostprocessOperationChoice,
+        translationTarget: AppLanguage
+    ) throws -> [LibraryRecord] {
+        let indexedURLs = Set(existingRecords.flatMap { record in
+            [record.sourceURL, record.microphoneURL, record.systemAudioURL]
+                .compactMap { $0?.standardizedFileURL }
+        })
+        let directories = try FileManager.default.contentsOfDirectory(
+            at: recordingsRoot,
+            includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey],
+            options: [.skipsHiddenFiles]
+        )
+        return directories.compactMap { directory in
+            let values = try? directory.resourceValues(forKeys: [.isDirectoryKey, .creationDateKey])
+            guard values?.isDirectory == true else { return nil }
+            let microphoneURL = directory.appendingPathComponent("microphone.caf")
+                .standardizedFileURL
+            let systemAudioURL = directory.appendingPathComponent("system-audio.caf")
+                .standardizedFileURL
+            guard FileManager.default.fileExists(atPath: microphoneURL.path),
+                  FileManager.default.fileExists(atPath: systemAudioURL.path),
+                  !indexedURLs.contains(microphoneURL),
+                  !indexedURLs.contains(systemAudioURL)
+            else { return nil }
+            let startedAt = values?.creationDate ?? Date()
+            let duration = max(
+                (try? readableAudioDuration(at: microphoneURL)) ?? 0,
+                (try? readableAudioDuration(at: systemAudioURL)) ?? 0
+            )
+            return LibraryRecord(
+                id: UUID(),
+                createdAt: startedAt,
+                displayName: appString(
+                    "Recording \(startedAt.formatted(date: .abbreviated, time: .shortened))"
+                ),
+                sourceKind: .appRecording,
+                sourceURL: microphoneURL,
+                securityScopedBookmark: nil,
+                microphoneURL: microphoneURL,
+                systemAudioURL: systemAudioURL,
+                runURL: nil,
+                profileID: profileID,
+                postprocess: postprocess,
+                postprocessMode: postprocessMode.mode,
+                translationTargetLanguage: postprocessMode == .translation
+                    ? translationTarget.rawValue
+                    : nil,
+                durationS: duration,
+                state: .interrupted,
+                speakerNames: [:],
+                conflictResolutions: [:],
+                failureMessage: appString("Transcription Cancelled")
+            )
+        }
+    }
+
+    private static func combinedFailureMessage(
+        operation: String,
+        persistence: any Error
+    ) -> String {
+        [operation, persistence.localizedDescription]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
 
     private static func readFailure(at runURL: URL) -> Failure? {
         guard let data = try? Data(

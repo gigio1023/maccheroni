@@ -476,6 +476,8 @@
 	<string>교정</string>
 	<key>Input Mode</key>
 	<string>입력 모드</string>
+	<key>Interrupted</key>
+	<string>중단됨</string>
 	<key>Installed and signed in</key>
 	<string>설치됨, 로그인됨</string>
 	<key>Installed, not signed in. Run codex login in Terminal.</key>

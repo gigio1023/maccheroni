@@ -308,6 +308,7 @@ private struct RecordingControl: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(model.isRecording ? .red : .accentColor)
+            .disabled(!model.isRecording && !model.canStartRecording)
             .keyboardShortcut(.space, modifiers: [])
             .accessibilityHint(model.isRecording
                 ? appLocalized("Stops capture and begins transcription.")

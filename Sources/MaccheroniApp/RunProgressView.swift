@@ -16,7 +16,8 @@ struct RunProgressView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
-                if model.isMOSSLimitExhausted(record) {
+                if model.isMOSSLimitExhausted(record),
+                   model.usesUnchangedMOSSConfiguration(record) {
                     MOSSConstraintFailureNotice(
                         detail: model.failure(for: record)?.message
                     )
@@ -158,9 +159,10 @@ struct RunProgressView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        } else if model.isMOSSLimitExhausted(record) {
+        } else if model.isMOSSLimitExhausted(record),
+                  model.usesUnchangedMOSSConfiguration(record) {
             HStack {
-                if record.runURL != nil {
+                if model.canRevealRun(record) {
                     Button(appLocalized("Reveal Preserved Run")) {
                         model.revealRun(record)
                     }
@@ -171,14 +173,15 @@ struct RunProgressView: View {
                 }
                 .buttonStyle(.bordered)
             }
-        } else if record.state == .failed || record.state == .cancelled || record.state == .recorded {
+        } else if record.state == .failed || record.state == .cancelled
+                    || record.state == .recorded || record.state == .interrupted {
             HStack {
                 Button(appLocalized("Try Again")) {
                     model.retrySelectedTranscription()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!model.canRetryTranscription(record))
-                if record.runURL != nil {
+                if model.canRevealRun(record) {
                     Button(appLocalized("Reveal Preserved Run")) {
                         model.revealRun(record)
                     }
@@ -205,6 +208,7 @@ struct RunProgressView: View {
         return switch record.state {
         case .failed: appLocalized("Transcription Failed")
         case .cancelled: appLocalized("Transcription Cancelled")
+        case .interrupted: record.state.title
         case .recorded: appLocalized("Ready to Transcribe")
         default: appLocalized("Transcribing")
         }
@@ -218,7 +222,7 @@ struct RunProgressView: View {
         }
         return switch record.state {
         case .failed: appLocalized("The original audio and completed artifacts were preserved. You can inspect the run or try again.")
-        case .cancelled: appLocalized("The original audio and every completed intermediate artifact were preserved.")
+        case .cancelled, .interrupted: appLocalized("The original audio and every completed intermediate artifact were preserved.")
         case .recorded: appLocalized("The recording is preserved and ready for the selected profile.")
         default: appLocalized("Maccheroni is processing the full recording locally.")
         }
@@ -230,7 +234,7 @@ struct RunProgressView: View {
         }
         return switch record.state {
         case .failed: "xmark.octagon.fill"
-        case .cancelled: "stop.circle.fill"
+        case .cancelled, .interrupted: "stop.circle.fill"
         case .recorded: "record.circle"
         default: "waveform"
         }
@@ -242,7 +246,7 @@ struct RunProgressView: View {
         }
         return switch record.state {
         case .failed: .red
-        case .cancelled, .recorded: .secondary
+        case .cancelled, .interrupted, .recorded: .secondary
         default: .primary
         }
     }

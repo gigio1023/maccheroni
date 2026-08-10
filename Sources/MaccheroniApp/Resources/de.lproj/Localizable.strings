@@ -476,6 +476,8 @@
 	<string>Korrigieren</string>
 	<key>Input Mode</key>
 	<string>Eingabemodus</string>
+	<key>Interrupted</key>
+	<string>Unterbrochen</string>
 	<key>Installed and signed in</key>
 	<string>Installiert und angemeldet</string>
 	<key>Installed, not signed in. Run codex login in Terminal.</key>

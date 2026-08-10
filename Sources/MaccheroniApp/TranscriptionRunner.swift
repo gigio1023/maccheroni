@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import MaccheroniCore
 
@@ -6,6 +7,8 @@ enum TranscriptionRunnerError: Error, LocalizedError {
     case launchFailed(String)
     case pipelineFailed(String)
     case resultMissing
+    case resultInvalid
+    case resultAmbiguous
 
     var errorDescription: String? {
         switch self {
@@ -15,7 +18,7 @@ enum TranscriptionRunnerError: Error, LocalizedError {
             appString("The transcription engine could not start: \(message)")
         case let .pipelineFailed(message):
             message
-        case .resultMissing:
+        case .resultMissing, .resultInvalid, .resultAmbiguous:
             appString("The transcription engine finished without a run directory.")
         }
     }
@@ -107,11 +110,13 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
                 await terminate(task, liveness: liveness)
                 break
             }
-            if runURL == nil {
-                let current = try childDirectories(of: request.outputRoot)
-                runURL = current.subtracting(directoriesBefore)
-                    .sorted { $0.lastPathComponent < $1.lastPathComponent }
-                    .last
+            // A directory appearing under the shared root is not proof that this
+            // process created it. Only trust a path reported by the CLI while it
+            // is running; directory discovery is a post-exit fallback.
+            if runURL == nil,
+               let reported = try? reportedRunURL(from: stdoutURL),
+               let validated = try? validate(reported, for: request) {
+                runURL = validated
             }
             if let runURL, let manifest = try? readManifest(at: runURL) {
                 progress(snapshot(
@@ -135,18 +140,15 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
         }
         stdout.synchronizeFile()
         stderr.synchronizeFile()
-        if runURL == nil {
-            let current = try childDirectories(of: request.outputRoot)
-            runURL = current.subtracting(directoriesBefore)
-                .sorted { $0.lastPathComponent < $1.lastPathComponent }
-                .last
-        }
-        if runURL == nil {
-            let printed = try String(contentsOf: stdoutURL, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !printed.isEmpty {
-                runURL = URL(fileURLWithPath: printed)
-            }
+        var runResolutionError: Error?
+        do {
+            runURL = try resolveRunURL(
+                for: request,
+                stdoutURL: stdoutURL,
+                directoriesBefore: directoriesBefore
+            )
+        } catch {
+            runResolutionError = error
         }
         if let runURL, let manifest = try? readManifest(at: runURL) {
             progress(snapshot(
@@ -169,6 +171,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
                     : message
             )
         }
+        if let runResolutionError { throw runResolutionError }
         guard let runURL else { throw TranscriptionRunnerError.resultMissing }
         let manifest = try readManifest(at: runURL)
         progress(snapshot(
@@ -299,6 +302,80 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
             Manifest.self,
             from: Data(contentsOf: runURL.appendingPathComponent("manifest.json"))
         )
+    }
+
+    private func resolveRunURL(
+        for request: TranscriptionRequest,
+        stdoutURL: URL,
+        directoriesBefore: Set<URL>
+    ) throws -> URL {
+        if let reported = try reportedRunURL(from: stdoutURL) {
+            return try validate(reported, for: request)
+        }
+
+        let current = try childDirectories(of: request.outputRoot)
+        let candidates = current.subtracting(directoriesBefore)
+        guard !candidates.isEmpty else {
+            throw TranscriptionRunnerError.resultMissing
+        }
+        guard candidates.count == 1, let candidate = candidates.first else {
+            throw TranscriptionRunnerError.resultAmbiguous
+        }
+        return try validate(candidate, for: request)
+    }
+
+    private func reportedRunURL(from stdoutURL: URL) throws -> URL? {
+        let output = try String(contentsOf: stdoutURL, encoding: .utf8)
+        let lines = output
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return nil }
+        guard lines.count == 1, lines[0].hasPrefix("/") else {
+            throw TranscriptionRunnerError.resultInvalid
+        }
+        return URL(fileURLWithPath: lines[0], isDirectory: true).standardizedFileURL
+    }
+
+    @discardableResult
+    private func validate(
+        _ candidate: URL,
+        for request: TranscriptionRequest
+    ) throws -> URL {
+        let root = request.outputRoot.standardizedFileURL.resolvingSymlinksInPath()
+        let runURL = candidate.standardizedFileURL.resolvingSymlinksInPath()
+        let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        guard runURL.path.hasPrefix(rootPrefix) else {
+            throw TranscriptionRunnerError.resultInvalid
+        }
+
+        let manifest: Manifest
+        do {
+            manifest = try readManifest(at: runURL)
+        } catch {
+            throw TranscriptionRunnerError.resultInvalid
+        }
+        let sourceValues = try request.sourceURL.resourceValues(forKeys: [.fileSizeKey])
+        guard manifest.input.fileName == request.sourceURL.lastPathComponent,
+              manifest.runID == runURL.lastPathComponent,
+              manifest.input.sizeBytes == sourceValues.fileSize,
+              manifest.input.sha256 == (try sha256(of: request.sourceURL))
+        else {
+            throw TranscriptionRunnerError.resultInvalid
+        }
+        return runURL
+    }
+
+    private func sha256(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var digest = SHA256()
+        while true {
+            let data = try handle.read(upToCount: 1_048_576) ?? Data()
+            guard !data.isEmpty else { break }
+            digest.update(data: data)
+        }
+        return digest.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     private func snapshot(

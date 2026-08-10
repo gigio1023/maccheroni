@@ -85,6 +85,7 @@ private struct StatusGlyph: View {
         case .hasConflicts: "exclamationmark.bubble.fill"
         case .failed: "xmark.octagon.fill"
         case .cancelled: "stop.circle"
+        case .interrupted: "exclamationmark.arrow.trianglehead.counterclockwise"
         }
     }
 
@@ -95,7 +96,7 @@ private struct StatusGlyph: View {
         case .done: .green
         case .hasConflicts: .orange
         case .failed: .red
-        case .cancelled: .secondary
+        case .cancelled, .interrupted: .secondary
         }
     }
 }

@@ -454,6 +454,7 @@ struct AppShellTests {
             "Correct",
             "Directory choices apply the next time Maccheroni launches. Existing recordings and run artifacts stay where they are.",
             "Input Mode",
+            "Interrupted",
             "Installed and signed in",
             "Installed, but sign-in status could not be checked.",
             "Installed, not signed in. Run codex login in Terminal.",
@@ -491,7 +492,7 @@ struct AppShellTests {
         )
 
         #expect(catalog.sourceLanguage == "en")
-        #expect(catalog.strings.count == 268)
+        #expect(catalog.strings.count == 269)
         #expect(requiredFinalKeys.isSubset(of: Set(catalog.strings.keys)))
         for (key, entry) in catalog.strings {
             #expect(Set(entry.localizations.keys) == Set(locales), "locale parity: \(key)")
@@ -656,10 +657,16 @@ struct AppShellTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let directory = root.appendingPathComponent("preserved-recording", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        let microphoneURL = directory.appendingPathComponent("microphone.caf")
-        let systemURL = directory.appendingPathComponent("system-audio.caf")
-        try Data("preserved microphone".utf8).write(to: microphoneURL)
-        try Data("preserved system audio".utf8).write(to: systemURL)
+        let microphoneURL = try appShellSyntheticCAF(
+            in: directory,
+            name: "microphone.caf",
+            frequency: 440
+        )
+        let systemURL = try appShellSyntheticCAF(
+            in: directory,
+            name: "system-audio.caf",
+            frequency: 660
+        )
         let microphoneHash = try appShellSHA256(of: microphoneURL)
         let systemHash = try appShellSHA256(of: systemURL)
         let artifacts = PreservedRecordingArtifacts(
@@ -897,6 +904,7 @@ struct AppShellTests {
             message: "The backend stopped unexpectedly."
         )
         var limitRecord = appShellRecord(sourceURL: limit.inputURL)
+        limitRecord.profileID = .italianDialogue
         limitRecord.runURL = limit.runURL
         limitRecord.state = .failed
         limitRecord.failureMessage = limit.manifest.failure?.message
@@ -912,6 +920,7 @@ struct AppShellTests {
         let runner = AppShellControllableRunner()
         let (defaults, suiteName) = try appShellIsolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(AppProfileID.italianDialogue.rawValue, forKey: "selectedProfile")
         let model = try MaccheroniAppModel(
             repository: repository,
             profiles: try AppProfileRegistry.load(),
@@ -936,12 +945,501 @@ struct AppShellTests {
             "This run reached the MOSS output limit after bounded splitting. Choose a different profile or use a shorter copy before retrying."
         ))
 
+        model.selectedProfileID = .englishMeeting
+        #expect(model.canRetryTranscription(limitRecord))
+        model.retrySelectedTranscription()
+        await appShellWait { runner.isWaiting }
+        #expect(runner.latestRequest?.profile.id == .englishMeeting)
+        runner.fail(with: AppShellFakeError.notImplemented)
+        await appShellWait { !model.isTranscribing }
+        let failedAlternateRetry = try #require(
+            model.records.first(where: { $0.id == limitRecord.id })
+        )
+        #expect(!model.isMOSSLimitExhausted(failedAlternateRetry))
+        #expect(model.canRetryTranscription(failedAlternateRetry))
+
         model.select(.record(retryableRecord.id))
         #expect(!model.isMOSSLimitExhausted(retryableRecord))
         #expect(model.canRetryTranscription(retryableRecord))
         model.retrySelectedTranscription()
         await appShellWait { runner.isWaiting }
         #expect(runner.latestRequest?.sourceURL == backendFailure.inputURL)
+        runner.fail(with: AppShellFakeError.notImplemented)
+        await appShellWait { !model.isTranscribing }
+    }
+
+    @Test @MainActor
+    func multiFileImportIndexesLaterReadableFilesAndAggregatesFailures() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let invalidURL = root.appendingPathComponent("broken.wav")
+        try Data("not audio".utf8).write(to: invalidURL)
+        let readableURL = try appShellSyntheticCAF(
+            in: root,
+            name: "later.caf",
+            frequency: 440
+        )
+        let finalReadableURL = try appShellSyntheticCAF(
+            in: root,
+            name: "final.aiff",
+            frequency: 660
+        )
+        let repository = LibraryRepository(root: root)
+        let runner = AppShellImmediateFailRunner {
+            #expect((try? repository.loadRecords().count) == 2)
+        }
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: runner,
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+
+        model.importAudio([invalidURL, readableURL, finalReadableURL])
+        await appShellWait { model.canImportAudio }
+
+        #expect(model.records.count == 2)
+        #expect(Set(model.records.map(\.sourceURL)) == Set([readableURL, finalReadableURL]))
+        // The import path standardizes the URL, so compare resolved paths.
+        #expect(
+            runner.requests.map { $0.sourceURL.resolvingSymlinksInPath() }
+                == [readableURL, finalReadableURL].map { $0.resolvingSymlinksInPath() }
+        )
+        #expect(model.errorMessage?.contains("broken.wav") == true)
+        #expect(model.errorMessage?.contains("later.caf") == true)
+        #expect(model.errorMessage?.contains("final.aiff") == true)
+    }
+
+    @Test @MainActor
+    func cafAndAIFFImportsUseTheSameRetryReadabilityCheck() throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cafURL = try appShellSyntheticCAF(in: root, name: "source.caf", frequency: 440)
+        let aiffURL = try appShellSyntheticCAF(in: root, name: "source.aiff", frequency: 660)
+        var cafRecord = appShellRecord(sourceURL: cafURL)
+        cafRecord.state = .failed
+        var aiffRecord = appShellRecord(sourceURL: aiffURL)
+        aiffRecord.id = UUID(uuidString: "00000000-0000-0000-0000-000000000018")!
+        aiffRecord.state = .cancelled
+        let repository = LibraryRepository(root: root)
+        try repository.saveRecords([cafRecord, aiffRecord])
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+
+        #expect(model.canRetryTranscription(cafRecord))
+        #expect(model.canRetryTranscription(aiffRecord))
+    }
+
+    @Test @MainActor
+    func staleBookmarkRefreshAlsoUpdatesTheInMemoryLibraryRecord() throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let movedURL = try appShellSyntheticCAF(in: root, name: "moved.aiff", frequency: 440)
+        let staleBookmark = Data("stale bookmark".utf8)
+        let refreshedBookmark = Data("refreshed bookmark".utf8)
+        let bookmarkAccess = LibraryBookmarkAccess(
+            resolve: { _ in LibraryBookmarkResolution(url: movedURL, isStale: true) },
+            create: { _ in refreshedBookmark }
+        )
+        let repository = LibraryRepository(root: root, bookmarkAccess: bookmarkAccess)
+        var record = appShellRecord(sourceURL: root.appendingPathComponent("old.aiff"))
+        record.securityScopedBookmark = staleBookmark
+        record.state = .failed
+        try repository.saveRecords([record])
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+
+        #expect(model.canRetryTranscription(record))
+        let refreshed = try #require(model.records.first)
+        #expect(refreshed.sourceURL == movedURL)
+        #expect(refreshed.securityScopedBookmark == refreshedBookmark)
+    }
+
+    @Test @MainActor
+    func missingCombinedWAVRetriesFromIntactChannelOriginals() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = root.appendingPathComponent("recording", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        let microphoneURL = try appShellSyntheticCAF(
+            in: directory,
+            name: "microphone.caf",
+            frequency: 440
+        )
+        let systemURL = try appShellSyntheticCAF(
+            in: directory,
+            name: "system-audio.caf",
+            frequency: 660
+        )
+        let missingCombinedURL = directory.appendingPathComponent("combined.wav")
+        var record = appShellRecord(sourceURL: missingCombinedURL)
+        record.sourceKind = .appRecording
+        record.microphoneURL = microphoneURL
+        record.systemAudioURL = systemURL
+        record.state = .failed
+        let repository = LibraryRepository(root: root)
+        try repository.saveRecords([record])
+        let runner = AppShellControllableRunner()
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: runner,
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+
+        model.select(.record(record.id))
+        #expect(model.canRetryTranscription(record))
+        model.retrySelectedTranscription()
+        await appShellWait { runner.isWaiting }
+
+        let retryURL = try #require(runner.latestRequest?.sourceURL)
+        #expect(retryURL != missingCombinedURL)
+        #expect(retryURL.pathExtension == "wav")
+        #expect(FileManager.default.fileExists(atPath: retryURL.path))
+        runner.fail(with: AppShellFakeError.notImplemented)
+        await appShellWait { !model.isTranscribing }
+    }
+
+    @Test @MainActor
+    func invalidUTF8GlossaryLoadFailsWithoutChangingOriginalBytes() throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: LibraryRepository(root: root),
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+        let glossaryURL = model.glossaryURL(for: .koreanITMeeting)
+        let invalidBytes = Data([0x23, 0x20, 0xFF, 0x0A])
+        try invalidBytes.write(to: glossaryURL)
+
+        #expect(throws: (any Error).self) {
+            _ = try model.loadGlossary(for: .koreanITMeeting)
+        }
+        #expect(try Data(contentsOf: glossaryURL) == invalidBytes)
+    }
+
+    @Test @MainActor
+    func captureStartPersistsAProvisionalRecordBeforeStop() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = root.appendingPathComponent("recording", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        let microphoneURL = directory.appendingPathComponent("microphone.caf")
+        let systemURL = directory.appendingPathComponent("system-audio.caf")
+        let combinedURL = directory.appendingPathComponent("combined.wav")
+        try Data("microphone".utf8).write(to: microphoneURL)
+        try Data("system".utf8).write(to: systemURL)
+        let startedAt = Date(timeIntervalSince1970: 1_722_686_400)
+        let artifacts = RecordingArtifacts(
+            directory: directory,
+            microphoneURL: microphoneURL,
+            systemAudioURL: systemURL,
+            combinedURL: combinedURL,
+            startedAt: startedAt,
+            stoppedAt: startedAt.addingTimeInterval(5)
+        )
+        let repository = LibraryRepository(root: root)
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellSuccessfulRecorder(artifacts: artifacts),
+            defaults: defaults
+        )
+
+        model.startRecording()
+        await appShellWait { model.isRecording }
+
+        let record = try #require(model.records.first)
+        #expect(model.records.count == 1)
+        #expect(record.state == .interrupted)
+        #expect(record.microphoneURL == microphoneURL)
+        #expect(record.systemAudioURL == systemURL)
+        #expect(try repository.loadRecords() == model.records)
+        model.shutdown()
+    }
+
+    @Test @MainActor
+    func launchReconcilesAnUnindexedCaptureDirectory() throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = LibraryRepository(root: root)
+        try repository.prepareDirectories()
+        let directory = repository.recordingsRoot.appendingPathComponent(
+            "interrupted-startup",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        let microphoneURL = try appShellSyntheticCAF(
+            in: directory,
+            name: "microphone.caf",
+            frequency: 440
+        )
+        let systemURL = try appShellSyntheticCAF(
+            in: directory,
+            name: "system-audio.caf",
+            frequency: 660
+        )
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+
+        let recovered = try #require(model.records.first)
+        #expect(recovered.state == .interrupted)
+        #expect(recovered.microphoneURL == microphoneURL)
+        #expect(recovered.systemAudioURL == systemURL)
+        #expect(model.canRetryTranscription(recovered))
+        let saved = try #require(repository.loadRecords().first)
+        #expect(saved.id == recovered.id)
+        #expect(saved.state == .interrupted)
+        #expect(saved.microphoneURL == microphoneURL)
+        #expect(saved.systemAudioURL == systemURL)
+    }
+
+    @Test @MainActor
+    func launchReconcilesOrphanedTranscriptionIntoRetryableInterruptedState() throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceURL = try appShellSyntheticCAF(in: root, name: "source.caf", frequency: 440)
+        var record = appShellRecord(sourceURL: sourceURL)
+        record.state = .transcribing
+        let repository = LibraryRepository(root: root)
+        try repository.saveRecords([record])
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+
+        let recovered = try #require(model.records.first)
+        #expect(recovered.state == .interrupted)
+        #expect(recovered.failureMessage != nil)
+        #expect(model.canRetryTranscription(recovered))
+        #expect(try repository.loadRecords().first?.state == .interrupted)
+    }
+
+    @Test @MainActor
+    func runnerAndFailurePersistenceErrorsAreBothSurfaced() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceURL = try appShellSyntheticCAF(in: root, name: "source.caf", frequency: 440)
+        var record = appShellRecord(sourceURL: sourceURL)
+        record.state = .failed
+        let repository = LibraryRepository(root: root)
+        try repository.saveRecords([record])
+        var sawTranscribingSave = false
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellImmediateFailRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults,
+            recordSaver: { records in
+                if records.contains(where: { $0.state == .transcribing }) {
+                    sawTranscribingSave = true
+                    try repository.saveRecords(records)
+                } else if sawTranscribingSave,
+                          records.contains(where: { $0.state == .failed }) {
+                    throw AppShellPersistenceError.couldNotSaveFailure
+                } else {
+                    try repository.saveRecords(records)
+                }
+            }
+        )
+
+        model.select(.record(record.id))
+        model.retrySelectedTranscription()
+        await appShellWait { !model.isTranscribing && model.errorMessage != nil }
+
+        #expect(model.errorMessage?.contains(AppShellFakeError.notImplemented.localizedDescription) == true)
+        #expect(model.errorMessage?.contains(AppShellPersistenceError.couldNotSaveFailure.localizedDescription) == true)
+    }
+
+    @Test @MainActor
+    func pickerProviderFailureIsVisibleWhileUserCancellationStaysSilent() throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: LibraryRepository(root: root),
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+
+        model.handleImportResult(.failure(AppShellPickerError.providerFailed))
+        #expect(model.errorMessage == AppShellPickerError.providerFailed.localizedDescription)
+        model.clearError()
+        model.handleImportResult(.failure(NSError(
+            domain: NSCocoaErrorDomain,
+            code: NSUserCancelledError
+        )))
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test @MainActor
+    func missingDecodingAndIntegrityRunFailuresStayDistinct() throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceURL = try appShellSyntheticCAF(in: root, name: "source.caf", frequency: 440)
+        var record = appShellRecord(sourceURL: sourceURL)
+        record.state = .done
+        record.runURL = root.appendingPathComponent("missing-run", isDirectory: true)
+        let repository = LibraryRepository(root: root)
+        try repository.saveRecords([record])
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+
+        record.runURL = nil
+        try repository.saveRecords([record])
+        let noRunModel = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+        noRunModel.select(.record(record.id))
+        #expect(noRunModel.selectedRunIssue == .missing)
+
+        record.runURL = root.appendingPathComponent("missing-run", isDirectory: true)
+        try repository.saveRecords([record])
+        model.select(.record(record.id))
+        #expect(model.selectedRunIssue == .missing)
+        #expect(!model.canRevealRun(record))
+
+        let incompleteRun = root.appendingPathComponent("incomplete-run", isDirectory: true)
+        try FileManager.default.createDirectory(at: incompleteRun, withIntermediateDirectories: false)
+        record.runURL = incompleteRun
+        try repository.saveRecords([record])
+        let incompleteModel = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+        incompleteModel.select(.record(record.id))
+        guard case .missingArtifact = incompleteModel.selectedRunIssue else {
+            Issue.record("Expected a missing-artifact issue")
+            return
+        }
+        #expect(incompleteModel.selectedRunIssue?.canReveal == true)
+        #expect(incompleteModel.canRevealRun(record))
+
+        let decodingRun = root.appendingPathComponent("decoding-run", isDirectory: true)
+        try FileManager.default.createDirectory(at: decodingRun, withIntermediateDirectories: false)
+        try Data("not json".utf8).write(to: decodingRun.appendingPathComponent("manifest.json"))
+        record.runURL = decodingRun
+        try repository.saveRecords([record])
+        let decodingModel = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+        decodingModel.select(.record(record.id))
+        guard case .decoding = decodingModel.selectedRunIssue else {
+            Issue.record("Expected a decoding issue")
+            return
+        }
+
+        let fixture = try appShellRunFixture(in: root, runID: "integrity-run")
+        try Data("tampered".utf8).write(to: fixture.segmentsURL)
+        record.runURL = fixture.runURL
+        try repository.saveRecords([record])
+        let integrityModel = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+        integrityModel.select(.record(record.id))
+        guard case .integrity = integrityModel.selectedRunIssue else {
+            Issue.record("Expected an integrity issue")
+            return
+        }
+    }
+
+    @Test @MainActor
+    func recordingControlAvailabilityTurnsOffDuringTranscription() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceURL = try appShellSyntheticCAF(in: root, name: "source.caf", frequency: 440)
+        let record = appShellRecord(sourceURL: sourceURL)
+        let repository = LibraryRepository(root: root)
+        try repository.saveRecords([record])
+        let runner = AppShellControllableRunner()
+        let recorder = AppShellFakeRecorder()
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: runner,
+            recorder: recorder,
+            defaults: defaults
+        )
+
+        model.select(.record(record.id))
+        model.retrySelectedTranscription()
+        await appShellWait { runner.isWaiting }
+        #expect(!model.canStartRecording)
+        model.startRecording()
+        await Task.yield()
+        #expect(recorder.startCount == 0)
         runner.fail(with: AppShellFakeError.notImplemented)
         await appShellWait { !model.isTranscribing }
     }
@@ -1008,7 +1506,11 @@ private func appShellRunFixture(
     let rawURL = primaryURL.appendingPathComponent("raw.txt")
     let segmentsURL = mergedURL.appendingPathComponent("segments.json")
     let conflictsURL = mergedURL.appendingPathComponent("conflicts.json")
-    try Data("immutable input".utf8).write(to: inputURL)
+    _ = try appShellSyntheticCAF(
+        in: root,
+        name: inputURL.lastPathComponent,
+        frequency: 440
+    )
     try Data("immutable raw transcript".utf8).write(to: rawURL)
 
     let source = SourceAudio(
@@ -1093,9 +1595,10 @@ private func appShellFailedRunFixture(
         withIntermediateDirectories: false
     )
     let inputURL = root.appendingPathComponent("original-\(runID).wav")
-    try Data("immutable \(runID) input".utf8).write(
-        to: inputURL,
-        options: .withoutOverwriting
+    _ = try appShellSyntheticCAF(
+        in: root,
+        name: inputURL.lastPathComponent,
+        frequency: 440
     )
     let inputHash = try appShellSHA256(of: inputURL)
     let manifest = Manifest(
@@ -1261,15 +1764,46 @@ private final class AppShellControllableRunner: TranscriptionRunning {
 }
 
 @MainActor
+private final class AppShellImmediateFailRunner: TranscriptionRunning {
+    private(set) var requests: [TranscriptionRequest] = []
+    private let beforeRun: (() -> Void)?
+
+    init(beforeRun: (() -> Void)? = nil) {
+        self.beforeRun = beforeRun
+    }
+
+    func run(
+        _ request: TranscriptionRequest,
+        progress _: @escaping @MainActor (RunProgressSnapshot) -> Void
+    ) async throws -> URL {
+        beforeRun?()
+        requests.append(request)
+        throw AppShellFakeError.notImplemented
+    }
+
+    func cancel() {}
+}
+
+@MainActor
 private final class AppShellFakeRecorder: RecordingControlling {
     var meters = CaptureMeters.silent
     private var handler: (@MainActor (CaptureMeters) -> Void)?
+    private(set) var startCount = 0
 
     func setMeterHandler(_ handler: (@MainActor (CaptureMeters) -> Void)?) {
         self.handler = handler
     }
 
-    func start(in _: URL) async throws {}
+    func start(in outputRoot: URL) async throws -> RecordingSessionMetadata {
+        startCount += 1
+        let directory = outputRoot.appendingPathComponent("fake-recording", isDirectory: true)
+        return RecordingSessionMetadata(
+            directory: directory,
+            microphoneURL: directory.appendingPathComponent("microphone.caf"),
+            systemAudioURL: directory.appendingPathComponent("system-audio.caf"),
+            startedAt: Date(timeIntervalSince1970: 1_722_686_400)
+        )
+    }
 
     func stop() async throws -> RecordingArtifacts {
         throw AppShellFakeError.notImplemented
@@ -1288,7 +1822,14 @@ private final class AppShellSuccessfulRecorder: RecordingControlling {
     }
 
     func setMeterHandler(_: (@MainActor (CaptureMeters) -> Void)?) {}
-    func start(in _: URL) async throws {}
+    func start(in _: URL) async throws -> RecordingSessionMetadata {
+        RecordingSessionMetadata(
+            directory: artifacts.directory,
+            microphoneURL: artifacts.microphoneURL,
+            systemAudioURL: artifacts.systemAudioURL,
+            startedAt: artifacts.startedAt
+        )
+    }
 
     func stop() async throws -> RecordingArtifacts {
         artifacts
@@ -1307,7 +1848,14 @@ private final class AppShellFinalizationFailingRecorder: RecordingControlling {
     }
 
     func setMeterHandler(_: (@MainActor (CaptureMeters) -> Void)?) {}
-    func start(in _: URL) async throws {}
+    func start(in _: URL) async throws -> RecordingSessionMetadata {
+        RecordingSessionMetadata(
+            directory: artifacts.directory,
+            microphoneURL: artifacts.microphoneURL,
+            systemAudioURL: artifacts.systemAudioURL,
+            startedAt: artifacts.startedAt
+        )
+    }
 
     func stop() async throws -> RecordingArtifacts {
         throw RecordingFinalizationError(artifacts: artifacts, message: "mix failed")
@@ -1318,6 +1866,18 @@ private final class AppShellFinalizationFailingRecorder: RecordingControlling {
 
 private enum AppShellFakeError: Error {
     case notImplemented
+}
+
+private enum AppShellPersistenceError: Error, LocalizedError {
+    case couldNotSaveFailure
+
+    var errorDescription: String? { "failure state could not be persisted" }
+}
+
+private enum AppShellPickerError: Error, LocalizedError {
+    case providerFailed
+
+    var errorDescription: String? { "the document provider failed" }
 }
 
 private struct AppShellStringCatalog: Decodable {

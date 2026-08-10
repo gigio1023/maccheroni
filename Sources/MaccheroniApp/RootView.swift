@@ -41,10 +41,7 @@ struct RootView: View {
             allowedContentTypes: [.audio],
             allowsMultipleSelection: true
         ) { result in
-            switch result {
-            case let .success(urls): model.importAudio(urls)
-            case .failure: break
-            }
+            model.handleImportResult(result)
         }
         .alert(appLocalized("Maccheroni Needs Attention"), isPresented: Binding(
             get: { model.errorMessage != nil },
@@ -84,9 +81,13 @@ struct RootView: View {
                     if let run = model.selectedRun {
                         TranscriptView(model: model, record: record, run: run)
                     } else {
-                        RunUnavailableView(record: record, reveal: { model.revealRun(record) })
+                        RunUnavailableView(
+                            record: record,
+                            issue: model.selectedRunIssue ?? .missing,
+                            reveal: { model.revealRun(record) }
+                        )
                     }
-                case .recorded, .transcribing, .failed, .cancelled:
+                case .recorded, .transcribing, .failed, .cancelled, .interrupted:
                     RunProgressView(model: model, record: record)
                 }
             } else {
@@ -102,15 +103,23 @@ struct RootView: View {
 
 private struct RunUnavailableView: View {
     let record: LibraryRecord
+    let issue: RunLoadIssue
     let reveal: () -> Void
 
     var body: some View {
         ContentUnavailableView {
             Label(appLocalized("Run Could Not Be Opened"), systemImage: "exclamationmark.triangle")
         } description: {
-            Text(appLocalized("The raw run remains on disk, but one or more required artifacts failed an integrity check."))
+            switch issue {
+            case .missing:
+                Text(appLocalized("Recording Not Found"))
+            case let .missingArtifact(message), let .decoding(message):
+                Text(verbatim: message)
+            case .integrity:
+                Text(appLocalized("The raw run remains on disk, but one or more required artifacts failed an integrity check."))
+            }
         } actions: {
-            if record.runURL != nil {
+            if record.runURL != nil, issue.canReveal {
                 Button(appLocalized("Reveal Run in Finder"), action: reveal)
             }
         }
