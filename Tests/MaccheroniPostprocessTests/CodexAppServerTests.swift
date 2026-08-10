@@ -655,8 +655,9 @@ struct CodexAppServerTests {
 
         let after = nativeCredentialMetadata(home: home, keychainAccount: account)
         #expect(probe.accountState == .chatGPT)
-        #expect(!probe.configLayerTypes.contains("user"))
-        #expect(!probe.configLayerTypes.contains("project"))
+        // The real app-server always enumerates the user and system layers, so
+        // only an empty layer proves isolation. Session flags are ours.
+        #expect(probe.populatedConfigLayerTypes == ["sessionFlags"])
         #expect(before == after)
     }
 }

@@ -187,10 +187,12 @@ public struct FoundationCodexAppServerExecutor: CodexAppServerExecuting {
                 try session.initialize()
                 try session.authenticate(using: credentialSource)
                 let accountState = try session.readAccountState()
-                let layerTypes = try session.readConfigLayerTypes(workspaceURL: workspaceURL)
+                let layerTypes = try session.readNonEmptyConfigLayerTypes(
+                    workspaceURL: workspaceURL
+                )
                 return CodexAuthenticationIntegrationProbe(
                     accountState: accountState,
-                    configLayerTypes: layerTypes
+                    populatedConfigLayerTypes: layerTypes
                 )
             }
         }.value
@@ -199,7 +201,9 @@ public struct FoundationCodexAppServerExecutor: CodexAppServerExecuting {
 
 struct CodexAuthenticationIntegrationProbe: Equatable, Sendable {
     let accountState: CodexAppServerAccountState
-    let configLayerTypes: [String]
+    /// Layer types that actually carry settings. An isolated home yields only
+    /// `sessionFlags`; a leaked operator home adds a populated `user` layer.
+    let populatedConfigLayerTypes: [String]
 }
 
 private final class CodexAppServerSession: @unchecked Sendable {
@@ -534,7 +538,13 @@ private final class CodexAppServerSession: @unchecked Sendable {
         return serverObject.keys.sorted()
     }
 
-    func readConfigLayerTypes(workspaceURL: URL) throws -> [String] {
+    /// Config layer types whose layer carries at least one setting.
+    ///
+    /// `config/read` always enumerates the `user` and `system` layers even when the
+    /// isolated `CODEX_HOME` holds no configuration, so layer presence proves
+    /// nothing. Emptiness does: an isolated home reports `"config": {}` for the
+    /// user layer, while the operator's real home fills it.
+    func readNonEmptyConfigLayerTypes(workspaceURL: URL) throws -> [String] {
         let result = try request(
             method: "config/read",
             params: ["cwd": workspaceURL.path, "includeLayers": true]
@@ -544,12 +554,15 @@ private final class CodexAppServerSession: @unchecked Sendable {
               let layers = object["layers"] as? [[String: Any]] else {
             throw protocolFailure("config/read returned no effective config")
         }
-        return try layers.map { layer in
+        return try layers.compactMap { layer in
             guard let name = layer["name"] as? [String: Any],
                   let type = name["type"] as? String else {
                 throw protocolFailure("config/read returned invalid effective config layers")
             }
-            return type
+            guard let settings = layer["config"] as? [String: Any] else {
+                throw protocolFailure("config/read returned a layer without settings")
+            }
+            return settings.isEmpty ? nil : type
         }
     }
 
