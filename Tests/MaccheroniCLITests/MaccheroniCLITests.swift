@@ -267,6 +267,48 @@ struct MaccheroniCLITests {
         ])
         #expect(bundled.contains("profile=it-dialogue"))
         #expect(bundled.contains(SelectedASRBackend.moss.model.hfModelID))
+
+        var privacyDependencies = testDependencies()
+        privacyDependencies.doctor = { _, _ in
+            [
+                "asr_error=missing \(root.path)/private model/file.bin",
+                "check.asr_doctor=true",
+            ]
+        }
+        let privacyApp = testApplication(
+            runID: "doctor-privacy",
+            dependencies: privacyDependencies
+        )
+        let privacyBoundDoctor = try await privacyApp.execute(arguments: [
+            "doctor",
+            "--profile", "ko-meeting",
+            "--profiles", profiles.path,
+        ])
+        #expect(!privacyBoundDoctor.contains(root.path))
+        #expect(privacyBoundDoctor.contains("asr_error=missing <redacted-path>"))
+
+        privacyDependencies.doctor = { _, _ in
+            [
+                "asr_error=missing \(root.path)/private model/file.bin",
+                "check.asr_doctor=false",
+            ]
+        }
+        let failingPrivacyApp = testApplication(
+            runID: "doctor-privacy-failure",
+            dependencies: privacyDependencies
+        )
+        do {
+            _ = try await failingPrivacyApp.execute(arguments: [
+                "doctor",
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+            ])
+            Issue.record("expected failed doctor diagnostics")
+        } catch let error as CLIError {
+            let description = try #require(error.errorDescription)
+            #expect(!description.contains(root.path))
+            #expect(description.contains("asr_error=missing <redacted-path>"))
+        }
     }
 
     @Test
@@ -347,6 +389,45 @@ struct MaccheroniCLITests {
             Issue.record("expected an unknown option to be rejected")
         } catch let error as CLIError {
             #expect(error.code == "USAGE_ERROR")
+        }
+    }
+
+    @Test
+    func completedCodexTurnsValidateWhenCLIVersionIsUnavailable() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "input.wav")
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+
+        for (mode, targetLanguage) in [
+            (PostprocessMode.correction, nil),
+            (PostprocessMode.translation, "en"),
+        ] {
+            let profiles = try profileFile(
+                in: root,
+                fileName: "codex-\(mode.rawValue).json",
+                postprocess: "codex",
+                postprocessMode: mode,
+                targetLanguage: targetLanguage
+            )
+            let app = testApplication(
+                runID: "codex-\(mode.rawValue)",
+                dependencies: testDependencies(codexVersion: "unavailable")
+            )
+
+            let runPath = try await app.execute(arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--output-root", outputRoot.path,
+            ])
+            let manifest: Manifest = try decode(
+                "manifest.json",
+                in: URL(fileURLWithPath: runPath, isDirectory: true)
+            )
+            #expect(manifest.status == .succeeded)
+            #expect(manifest.postprocess?.backend
+                == BackendDescriptor(name: "codex-app-server", version: "unavailable"))
         }
     }
 
@@ -1226,6 +1307,7 @@ struct MaccheroniCLITests {
 private func testDependencies(
     failASRAtOrAfterS: Double? = nil,
     postprocessFailure: Bool = false,
+    codexVersion: String = "codex-cli test",
     inputSHA256: @escaping @Sendable (URL) throws -> String = {
         try AudioPreprocessor.sha256(of: $0)
     }
@@ -1361,7 +1443,7 @@ private func testDependencies(
                 provenance = ManifestPostprocess(
                     backend: BackendDescriptor(
                         name: "codex-app-server",
-                        version: "codex-cli test"
+                        version: codexVersion
                     ),
                     modelID: CodexPostprocessBackend.modelName,
                     glossarySHA256: request.glossary?.sha256,
@@ -1474,7 +1556,7 @@ private func testDependencies(
                 provenance = ManifestPostprocess(
                     backend: BackendDescriptor(
                         name: "codex-app-server",
-                        version: "codex-cli test"
+                        version: codexVersion
                     ),
                     modelID: CodexPostprocessBackend.modelName,
                     glossarySHA256: request.glossary?.sha256,

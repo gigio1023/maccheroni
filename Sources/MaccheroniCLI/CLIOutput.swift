@@ -1,4 +1,5 @@
 import Foundation
+import MaccheroniCore
 
 enum CLIOutputError: Error, LocalizedError {
     case malformedDoctorLine(String)
@@ -104,7 +105,9 @@ enum CLIOutput {
             guard !line.isEmpty,
                   let separator = line.firstIndex(of: "=")
             else {
-                throw CLIOutputError.malformedDoctorLine(line)
+                throw CLIOutputError.malformedDoctorLine(
+                    PrivacyBoundText.redactingFilePaths(in: line)
+                )
             }
             let key = String(line[..<separator])
             let value = String(line[line.index(after: separator)...])
@@ -112,7 +115,9 @@ enum CLIOutput {
                 of: "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
                 options: .regularExpression
             ) != nil else {
-                throw CLIOutputError.malformedDoctorLine(line)
+                throw CLIOutputError.malformedDoctorLine(
+                    PrivacyBoundText.redactingFilePaths(in: line)
+                )
             }
             guard values[key] == nil else {
                 throw CLIOutputError.duplicateDoctorKey(key)
@@ -148,25 +153,7 @@ enum CLIOutput {
     }
 
     private static func privacyBoundDoctorValue(_ value: String) -> String {
-        var output = ""
-        var token = ""
-        for character in value {
-            if character.isWhitespace {
-                output += redactedPathToken(token)
-                output.append(character)
-                token = ""
-            } else {
-                token.append(character)
-            }
-        }
-        return output + redactedPathToken(token)
-    }
-
-    private static func redactedPathToken(_ token: String) -> String {
-        if token.hasPrefix("/") || token.hasPrefix("file:///") {
-            return "<redacted-path>"
-        }
-        return token
+        PrivacyBoundText.redactingFilePaths(in: value)
     }
 }
 

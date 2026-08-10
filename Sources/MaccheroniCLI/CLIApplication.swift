@@ -1855,7 +1855,9 @@ public struct CLIApplication: Sendable {
             $0.hasPrefix("check.") && $0.hasSuffix("=false")
         }
         return CLIDoctorReport(
-            diagnostics: lines.joined(separator: "\n"),
+            diagnostics: PrivacyBoundText.redactingFilePaths(
+                in: lines.joined(separator: "\n")
+            ),
             isReady: !failed
         )
     }
@@ -2206,7 +2208,7 @@ public struct CLIApplication: Sendable {
         switch backend {
         case .codex:
             guard provenance.backend.name == "codex-app-server",
-                  provenance.backend.version != "unavailable",
+                  !provenance.backend.version.isEmpty,
                   provenance.modelID == CodexPostprocessBackend.modelName,
                   provenance.modelRevision == nil,
                   provenance.quantization == nil,
@@ -2328,7 +2330,7 @@ public struct CLIApplication: Sendable {
         switch backend {
         case .codex:
             guard provenance.backend.name == "codex-app-server",
-                  provenance.backend.version != "unavailable",
+                  !provenance.backend.version.isEmpty,
                   provenance.modelID == CodexPostprocessBackend.modelName,
                   provenance.modelRevision == nil,
                   provenance.quantization == nil,

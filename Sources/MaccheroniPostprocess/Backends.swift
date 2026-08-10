@@ -38,6 +38,7 @@ public enum CodexAvailability: Equatable, Sendable {
 
 public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, Sendable {
     public static let modelName = "gpt-5.6-sol"
+    static let maximumVersionOutputUTF8Bytes = 256 * 1_024
     public static let defaultBatchPolicy = PostprocessBatchPolicy(
         maximumPromptUTF8Bytes: 16_384,
         maximumSegmentsPerBatch: 32,
@@ -110,7 +111,6 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
             executableURL: executableURL,
             timeoutS: timeoutS
         )
-        guard version != "unavailable" else { return .unavailable }
         let workspace: URL
         do {
             workspace = try makeEmptyDirectory(
@@ -144,7 +144,8 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
             executableURL: executableURL,
             arguments: ["--version"],
             timeoutS: timeoutS
-        ), result.status == 0 else {
+        ), result.status == 0,
+           !result.standardOutputWasTruncated else {
             return "unavailable"
         }
         let value = String(decoding: result.standardOutput, as: UTF8.self)
@@ -243,6 +244,7 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
     private struct CommandResult {
         var status: Int32
         var standardOutput: Data
+        var standardOutputWasTruncated: Bool
     }
 
     private final class CommandLiveness: @unchecked Sendable {
@@ -250,6 +252,63 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
 
         init(_ process: Process) {
             self.process = process
+        }
+    }
+
+    private final class CommandPipeDrain: @unchecked Sendable {
+        private let handle: FileHandle
+        private let maximumRetainedBytes: Int?
+        private let completion = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var data = Data()
+        private var wasTruncated = false
+        private var succeeded = false
+
+        init(handle: FileHandle, maximumRetainedBytes: Int?) {
+            self.handle = handle
+            self.maximumRetainedBytes = maximumRetainedBytes
+        }
+
+        func start() {
+            DispatchQueue.global(qos: .userInitiated).async { [self] in
+                var captured = Data()
+                var readSucceeded = true
+                var truncated = false
+                do {
+                    while let chunk = try handle.read(upToCount: 64 * 1_024),
+                          !chunk.isEmpty {
+                        if let maximumRetainedBytes {
+                            let remaining = max(0, maximumRetainedBytes - captured.count)
+                            if remaining > 0 {
+                                captured.append(contentsOf: chunk.prefix(remaining))
+                            }
+                            if chunk.count > remaining { truncated = true }
+                        }
+                    }
+                } catch {
+                    readSucceeded = false
+                }
+                lock.lock()
+                data = captured
+                wasTruncated = truncated
+                succeeded = readSucceeded
+                lock.unlock()
+                completion.signal()
+            }
+        }
+
+        func wait(until deadline: DispatchTime) -> Bool {
+            completion.wait(timeout: deadline) == .success
+        }
+
+        func snapshot() -> (data: Data, wasTruncated: Bool)? {
+            lock.lock()
+            defer { lock.unlock() }
+            return succeeded ? (data, wasTruncated) : nil
+        }
+
+        func stop() {
+            try? handle.close()
         }
     }
 
@@ -261,18 +320,30 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
         guard timeoutS > 0 else { return nil }
         let process = Process()
         let output = Pipe()
+        let errorOutput = Pipe()
         let completion = DispatchSemaphore(value: 0)
         process.executableURL = executableURL
         process.arguments = arguments
         process.standardOutput = output
-        process.standardError = Pipe()
+        process.standardError = errorOutput
         process.terminationHandler = { _ in completion.signal() }
         do {
             try process.run()
+            let outputDrain = CommandPipeDrain(
+                handle: output.fileHandleForReading,
+                maximumRetainedBytes: maximumVersionOutputUTF8Bytes
+            )
+            let errorDrain = CommandPipeDrain(
+                handle: errorOutput.fileHandleForReading,
+                maximumRetainedBytes: nil
+            )
+            outputDrain.start()
+            errorDrain.start()
             let liveness = CommandLiveness(process)
             let milliseconds = Int((timeoutS * 1_000).rounded(.up))
+            let deadline = DispatchTime.now() + .milliseconds(milliseconds)
             guard completion.wait(
-                timeout: .now() + .milliseconds(milliseconds)
+                timeout: deadline
             ) == .success else {
                 let terminated = DispatchSemaphore(value: 0)
                 let processID = process.processIdentifier
@@ -289,11 +360,22 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
                     terminated.signal()
                 }
                 _ = terminated.wait(timeout: .now() + .seconds(2))
+                outputDrain.stop()
+                errorDrain.stop()
+                return nil
+            }
+            guard outputDrain.wait(until: deadline),
+                  errorDrain.wait(until: deadline),
+                  let standardOutput = outputDrain.snapshot(),
+                  errorDrain.snapshot() != nil else {
+                outputDrain.stop()
+                errorDrain.stop()
                 return nil
             }
             return CommandResult(
                 status: process.terminationStatus,
-                standardOutput: output.fileHandleForReading.readDataToEndOfFile()
+                standardOutput: standardOutput.data,
+                standardOutputWasTruncated: standardOutput.wasTruncated
             )
         } catch {
             return nil
@@ -329,31 +411,11 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
 enum SubprocessFailureMessage {
     static let maximumUTF8Bytes = 512
     static let truncationMarker = "...(truncated)"
-    static let redactedPathMarker = "<redacted-path>"
 
     static func sanitized(standardError: Data) -> String {
         let text = String(decoding: standardError, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return truncated(redactingAbsolutePaths(text))
-    }
-
-    private static func redactingAbsolutePaths(_ text: String) -> String {
-        var result = ""
-        var token = ""
-        for character in text {
-            if character.isWhitespace {
-                result += redacted(token)
-                result.append(character)
-                token = ""
-            } else {
-                token.append(character)
-            }
-        }
-        return result + redacted(token)
-    }
-
-    private static func redacted(_ token: String) -> String {
-        token.hasPrefix("/") ? redactedPathMarker : token
+        return truncated(PrivacyBoundText.redactingFilePaths(in: text))
     }
 
     private static func truncated(_ text: String) -> String {

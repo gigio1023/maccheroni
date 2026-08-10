@@ -111,7 +111,7 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 157 tests
+swift build && swift test          # 178 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -157,7 +157,7 @@ zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 | Путь | Содержимое |
 |---|---|
 | `Sources/` | Пакет Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 157 тестов на основе fixtures в 17 наборах |
+| `Tests/` | 178 тестов на основе fixtures в 18 наборах |
 | `benchmarks/scripts/` | Средства запуска и оценки с производными вердиктами и негативными тестами |
 | `docs/` | Обзор исследований, проверки исходного кода, политика ограничений, контракты (схемы JSON), дизайн интерфейса |
 | `scripts/` | Сборка bundle приложения, сборка harness MOSS, настройка среды постобработки |
