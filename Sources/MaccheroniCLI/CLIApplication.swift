@@ -342,11 +342,12 @@ private enum ASRAttemptStatus: String, Codable, Sendable {
     case limitExhausted = "limit_exhausted"
     case invalidEOSOutput = "invalid_eos_output"
     case asrTimeout = "asr_timeout"
+    case asrEvidenceUnavailable = "asr_evidence_unavailable"
     case asrMalformedOutput = "asr_malformed_output"
     case asrCoverageShortfall = "asr_coverage_shortfall"
     case asrModelIdentityMismatch = "asr_model_identity_mismatch"
     case backendFailed = "backend_failed"
-    case canceled
+    case canceled = "CANCELED"
 }
 
 private struct ASRAttemptOutcomeRecord: Codable, Sendable {
@@ -1267,9 +1268,17 @@ public struct CLIApplication: Sendable {
                 code = "INPUT_MUTATED"
                 message = "original input hash changed during the run"
             }
-            let status: RunStatus = code == "INPUT_MUTATED"
-                ? .failed
-                : (chunks.contains { $0.status == .succeeded } ? .partial : .failed)
+            let status: RunStatus
+            switch code {
+            case "INPUT_MUTATED":
+                status = .failed
+            case "CANCELED":
+                status = .canceled
+            default:
+                status = chunks.contains { $0.status == .succeeded }
+                    ? .partial
+                    : .failed
+            }
             let failedManifest = manifest(
                 status: status,
                 failure: Failure(code: code, message: message),
@@ -2114,11 +2123,13 @@ public struct CLIApplication: Sendable {
         }
         guard let metrics = evidence.metrics,
               metrics.maxTokens == policy.maximumTokens,
-              metrics.contextHardCapTokens == policy.contextHardCapTokens,
+              let contextHardCapTokens = metrics.contextHardCapTokens,
+              let policyContextHardCapTokens = policy.contextHardCapTokens,
+              contextHardCapTokens == policyContextHardCapTokens,
               let attemptTokenPlan,
               metrics.promptTokens == attemptTokenPlan.promptTokens,
               metrics.promptTokens + metrics.generatedTokens
-                <= metrics.contextHardCapTokens,
+                <= contextHardCapTokens,
               let languageEvidence = evidence.language,
               let mossContextPlan,
               languageEvidence.requested == languageValue(language),
@@ -3010,6 +3021,7 @@ private func typedASRAttemptStatus(
     switch error {
     case .invalidEOSOutput: return .invalidEOSOutput
     case .timedOut: return .asrTimeout
+    case .evidenceUnavailable: return .asrEvidenceUnavailable
     case .malformedOutput: return .asrMalformedOutput
     case .coverageShortfall: return .asrCoverageShortfall
     case .modelIdentityMismatch: return .asrModelIdentityMismatch

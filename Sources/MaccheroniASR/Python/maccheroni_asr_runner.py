@@ -425,8 +425,15 @@ def validate_moss_eos_structure(
 
 
 def run_vibevoice(
-    *, spec: ModelSpec, audio: Path, duration: float, entries: Sequence[str], cache_root: Path, work: Path
-) -> tuple[str, list[dict[str, Any]], str | None, list[str], Path]:
+    *,
+    spec: ModelSpec,
+    audio: Path,
+    duration: float,
+    entries: Sequence[str],
+    max_tokens: int,
+    cache_root: Path,
+    work: Path,
+) -> dict[str, Any]:
     try:
         found = version("mlx-audio")
     except PackageNotFoundError as error:
@@ -444,12 +451,12 @@ def run_vibevoice(
     os.environ["HF_HOME"] = str(cache_root / "models" / "huggingface")
     os.environ["HF_HUB_OFFLINE"] = "1"
     model = load_model(spec.hf_model_id, revision=spec.revision)
-    generate_transcription(
+    result = generate_transcription(
         model=model,
         audio=str(audio),
         output_path=str(raw_prefix),
         format="json",
-        max_tokens=8192,
+        max_tokens=max_tokens,
         prefill_step_size=2048,
         context=context,
     )
@@ -490,7 +497,59 @@ def run_vibevoice(
             "text": text,
             "speaker": speaker,
         })
-    return raw_text, segments, sha256_bytes(context.encode("utf-8")) if context else None, ["mlx_audio.stt.generate"], raw_artifact
+    prompt_tokens = getattr(result, "prompt_tokens", None)
+    generated_tokens = getattr(result, "generation_tokens", None)
+    total_time = getattr(result, "total_time", None)
+    for name, value in (("prompt_tokens", prompt_tokens), ("generation_tokens", generated_tokens)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise RunnerError("malformed_output", f"VibeVoice {name} evidence is invalid")
+    if isinstance(total_time, bool) or not isinstance(total_time, (int, float)) or not math.isfinite(float(total_time)) or total_time < 0:
+        raise RunnerError("malformed_output", "VibeVoice total_time evidence is invalid")
+    if generated_tokens > max_tokens:
+        raise RunnerError("malformed_output", "VibeVoice generated token count exceeds the requested cap")
+
+    # mlx-audio 0.4.6 consumes EOS without yielding it. Exhausting the
+    # generator therefore yields exactly max_tokens non-EOS tokens, while an
+    # EOS stop always reports fewer than max_tokens generated tokens.
+    reached_limit = generated_tokens == max_tokens
+    metrics = {
+        "preprocessing_s": None,
+        "audio_encoder_s": None,
+        "decoder_prefill_s": None,
+        "token_decode_s": None,
+        "total_s": float(total_time),
+        "model_load_s": None,
+        "audio_duration_s": duration,
+        "prompt_tokens": prompt_tokens,
+        "generated_tokens": generated_tokens,
+        "requested_max_tokens": max_tokens,
+        "max_tokens": max_tokens,
+        "context_hard_cap_tokens": None,
+        "peak_rss_bytes": None,
+    }
+    aggregate_reason = "mlx-audio 0.4.6 reports only aggregate generation total_time"
+    metrics_unavailable = {
+        "preprocessing_s": aggregate_reason,
+        "audio_encoder_s": aggregate_reason,
+        "decoder_prefill_s": aggregate_reason,
+        "token_decode_s": aggregate_reason,
+        "model_load_s": aggregate_reason,
+        "context_hard_cap_tokens": "mlx-audio 0.4.6 does not expose the model context hard cap",
+        "peak_rss_bytes": "mlx-audio 0.4.6 does not report process peak RSS",
+    }
+    return {
+        "raw_text": "" if reached_limit else raw_text,
+        "segments": [] if reached_limit else segments,
+        "payload_hash": sha256_bytes(context.encode("utf-8")) if context else None,
+        "command": ["mlx_audio.stt.generate"],
+        "artifact": raw_artifact,
+        "outcome": "limit" if reached_limit else "complete",
+        "stop_reason": "maximumTokens" if reached_limit else "endOfSequence",
+        "terminal_evidence": "observed",
+        "timing_granularity": "segment",
+        "metrics": metrics,
+        "metrics_unavailable": metrics_unavailable,
+    }
 
 
 def run_qwen(
@@ -500,10 +559,11 @@ def run_qwen(
     duration: float,
     entries: Sequence[str],
     language: str | None,
+    max_tokens: int,
     cache_root: Path,
     timeout_seconds: float,
     work: Path,
-) -> tuple[str, list[dict[str, Any]], str | None, list[str], Path]:
+) -> dict[str, Any]:
     assert_hf_snapshot(cache_root, spec)
     speech = shutil.which("speech")
     if speech is None:
@@ -529,7 +589,58 @@ def run_qwen(
         raise RunnerError("malformed_output", "Qwen emitted an empty transcript")
     artifact = work / "qwen.stdout.txt"
     artifact.write_text(raw_output, encoding="utf-8", newline="\n")
-    return transcript, [{"start_s": 0.0, "end_s": duration, "text": transcript, "speaker": ""}], sha256_bytes(context.encode("utf-8")) if context else None, command, artifact
+    terminal_reason = "speech 0.0.23 emits transcript text but no decoder terminal reason"
+    timing_reason = "speech 0.0.23 emits no timestamped Qwen segments"
+    unsupported_reason = (
+        "Qwen output cannot be verified because speech 0.0.23 exposes neither "
+        "a token cap and terminal reason nor intra-chunk timestamps"
+    )
+    metrics = {
+        "preprocessing_s": None,
+        "audio_encoder_s": None,
+        "decoder_prefill_s": None,
+        "token_decode_s": None,
+        "total_s": None,
+        "model_load_s": None,
+        "audio_duration_s": duration,
+        "prompt_tokens": None,
+        "generated_tokens": None,
+        "requested_max_tokens": max_tokens,
+        "max_tokens": None,
+        "context_hard_cap_tokens": None,
+        "peak_rss_bytes": None,
+    }
+    metrics_unavailable = {
+        "preprocessing_s": "speech 0.0.23 does not report Qwen stage timings",
+        "audio_encoder_s": "speech 0.0.23 does not report Qwen stage timings",
+        "decoder_prefill_s": "speech 0.0.23 does not report Qwen stage timings",
+        "token_decode_s": "speech 0.0.23 does not report Qwen stage timings",
+        "total_s": "speech 0.0.23 does not report Qwen backend total time",
+        "model_load_s": "speech 0.0.23 does not report Qwen model-load time",
+        "prompt_tokens": "speech 0.0.23 does not report Qwen prompt tokens",
+        "generated_tokens": "speech 0.0.23 does not report Qwen generated tokens",
+        "max_tokens": "speech 0.0.23 does not accept an effective Qwen output cap",
+        "context_hard_cap_tokens": "speech 0.0.23 does not expose the Qwen context hard cap",
+        "peak_rss_bytes": "speech 0.0.23 does not report process peak RSS",
+    }
+    return {
+        "raw_text": transcript,
+        "segments": [],
+        "payload_hash": sha256_bytes(context.encode("utf-8")) if context else None,
+        "command": command,
+        "artifact": artifact,
+        "outcome": "unverified",
+        "stop_reason": None,
+        "terminal_evidence": "unavailable",
+        "timing_granularity": "chunk",
+        "metrics": metrics,
+        "metrics_unavailable": metrics_unavailable,
+        "evidence_unavailable": {
+            "terminal_reason": terminal_reason,
+            "intra_chunk_timing": timing_reason,
+        },
+        "failure": {"code": "evidence_unavailable", "message": unsupported_reason},
+    }
 
 
 def run_moss(
@@ -601,6 +712,7 @@ def run_moss(
         raise RunnerError("coverage_shortfall", "MOSS metrics audio duration differs from input chunk")
     if int(metrics["max_tokens"]) != max_tokens or int(metrics["context_hard_cap_tokens"]) != 131072:
         raise RunnerError("harness_contract_mismatch", "MOSS did not retain max token or context-limit evidence")
+    metrics["requested_max_tokens"] = max_tokens
     common = {"command": command, "artifact": output, "fingerprint": fingerprint, "instruction_hash": instruction_hash, "metrics": metrics, "stop_reason": stop_reason, "helper_returncode": result.returncode}
     if invalid_eos_output:
         message = failure.get("message") if isinstance(failure, dict) else None
@@ -687,22 +799,53 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     started = time.monotonic()
     failure: dict[str, Any] | None = None
     diagnostics: dict[str, Any] | None = None
+    evidence_unavailable: dict[str, str] | None = None
     if spec.backend == "vibevoice":
-        raw_text, segments, payload_hash, command, backend_artifact = run_vibevoice(spec=spec, audio=audio, duration=duration, entries=entries, cache_root=cache_root, work=work)
+        backend = run_vibevoice(
+            spec=spec,
+            audio=audio,
+            duration=duration,
+            entries=entries,
+            max_tokens=args.max_tokens,
+            cache_root=cache_root,
+            work=work,
+        )
+        raw_text, segments = backend["raw_text"], backend["segments"]
+        payload_hash, command, backend_artifact = backend["payload_hash"], backend["command"], backend["artifact"]
         helper = None
-        outcome, stop_reason, metrics = "complete", "endOfSequence", {"preprocessing_s": 0, "audio_encoder_s": 0, "decoder_prefill_s": 0, "token_decode_s": 0, "total_s": 0, "model_load_s": 0, "audio_duration_s": duration, "prompt_tokens": 0, "generated_tokens": 0, "max_tokens": args.max_tokens, "context_hard_cap_tokens": args.max_tokens, "peak_rss_bytes": 0}
+        outcome, stop_reason = backend["outcome"], backend["stop_reason"]
+        terminal_evidence, timing_granularity = backend["terminal_evidence"], backend["timing_granularity"]
+        metrics, metrics_unavailable = backend["metrics"], backend["metrics_unavailable"]
         instruction_hash = payload_hash or sha256_bytes(b"vibevoice-no-prompt")
         prompt_guidance = False
     elif spec.backend == "qwen3":
-        raw_text, segments, payload_hash, command, backend_artifact = run_qwen(spec=spec, audio=audio, duration=duration, entries=entries, language=language, cache_root=cache_root, timeout_seconds=args.timeout_seconds, work=work)
+        backend = run_qwen(
+            spec=spec,
+            audio=audio,
+            duration=duration,
+            entries=entries,
+            language=language,
+            max_tokens=args.max_tokens,
+            cache_root=cache_root,
+            timeout_seconds=args.timeout_seconds,
+            work=work,
+        )
+        raw_text, segments = backend["raw_text"], backend["segments"]
+        payload_hash, command, backend_artifact = backend["payload_hash"], backend["command"], backend["artifact"]
         helper = None
-        outcome, stop_reason, metrics = "complete", "endOfSequence", {"preprocessing_s": 0, "audio_encoder_s": 0, "decoder_prefill_s": 0, "token_decode_s": 0, "total_s": 0, "model_load_s": 0, "audio_duration_s": duration, "prompt_tokens": 0, "generated_tokens": 0, "max_tokens": args.max_tokens, "context_hard_cap_tokens": args.max_tokens, "peak_rss_bytes": 0}
+        outcome, stop_reason = backend["outcome"], backend["stop_reason"]
+        terminal_evidence, timing_granularity = backend["terminal_evidence"], backend["timing_granularity"]
+        metrics, metrics_unavailable = backend["metrics"], backend["metrics_unavailable"]
+        evidence_unavailable = backend["evidence_unavailable"]
+        failure = backend["failure"]
         instruction_hash = payload_hash or sha256_bytes(b"qwen3-no-context")
         prompt_guidance = False
     else:
         moss = run_moss(spec=spec, audio=audio, duration=duration, entries=entries, language=args.language, max_tokens=args.max_tokens, cache_root=cache_root, work=work, timeout_seconds=args.timeout_seconds)
         raw_text, segments, command, backend_artifact = moss["raw_text"], moss["segments"], moss["command"], moss["artifact"]
         helper, outcome, stop_reason, metrics = moss["fingerprint"], moss["outcome"], moss["stop_reason"], moss["metrics"]
+        terminal_evidence, timing_granularity = "observed", "segment"
+        metrics_unavailable = {}
         instruction_hash, prompt_guidance = moss["instruction_hash"], args.language != "auto"
         failure = moss.get("failure")
         diagnostics = moss.get("diagnostics")
@@ -718,6 +861,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "model": {"role": "asr", "hf_model_id": spec.hf_model_id, "revision": spec.revision, "quantization": spec.quantization},
         "outcome": outcome,
         "stop_reason": stop_reason,
+        "terminal_evidence": terminal_evidence,
+        "timing_granularity": timing_granularity,
         "language": {"requested": args.language, "instruction_sha256": instruction_hash, "prompt_guidance_applied": prompt_guidance},
         "raw_text": raw_text,
         "segments": [{**segment, "start_s": segment["start_s"] + args.start_s, "end_s": segment["end_s"] + args.start_s} for segment in segments],
@@ -736,9 +881,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "work_directory": str(work),
         "runner_wall_time_s": time.monotonic() - started,
         "metrics": metrics,
+        "metrics_unavailable": metrics_unavailable,
     }
-    if outcome == "invalid_eos_output":
+    if failure is not None:
         document["failure"] = failure
+    if evidence_unavailable:
+        document["evidence_unavailable"] = evidence_unavailable
     if diagnostics:
         document["diagnostics"] = diagnostics
     encoded = json.dumps(document, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
@@ -823,7 +971,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             document = run(args)
         print(json.dumps(document, ensure_ascii=False, sort_keys=True))
-        if document.get("outcome") == "invalid_eos_output":
+        if document.get("outcome") in {"invalid_eos_output", "unverified"}:
             failure = document["failure"]
             print(json.dumps({"error": failure}, ensure_ascii=False), file=sys.stderr)
             return 2

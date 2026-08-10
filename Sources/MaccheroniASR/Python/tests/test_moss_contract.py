@@ -237,6 +237,7 @@ class MossContractTests(unittest.TestCase):
                     runner.run_process = lambda *args, code=exit_code, **kwargs: subprocess.CompletedProcess([], code, "", "")
                     found = runner.run_moss(spec=runner.MODELS["moss"], audio=cache / "audio.wav", duration=4.0, entries=["Maccheroni"], language="it", max_tokens=5120, cache_root=cache, work=work, timeout_seconds=1)
                     self.assertEqual(found["outcome"], expected_outcome)
+                    self.assertEqual(found["metrics"]["requested_max_tokens"], 5120)
                     if expected_outcome == "limit":
                         self.assertEqual(found["raw_text"], "")
                         self.assertEqual(found["segments"], [])

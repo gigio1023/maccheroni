@@ -597,6 +597,7 @@ public enum RunStatus: String, Codable, Sendable {
     case succeeded
     case partial
     case failed
+    case canceled
 }
 
 public struct Manifest: Codable, Equatable, Sendable {
