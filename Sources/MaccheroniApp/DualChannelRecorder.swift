@@ -47,7 +47,7 @@ final class DualChannelRecorder: NSObject, RecordingControlling, SCStreamDelegat
         handler?(meters)
     }
 
-    func start(in outputRoot: URL) async throws {
+    func start(in outputRoot: URL) async throws -> RecordingSessionMetadata {
         guard stream == nil else { throw RecordingError.alreadyRecording }
         meters = .silent
         captureFailure = nil
@@ -115,6 +115,12 @@ final class DualChannelRecorder: NSObject, RecordingControlling, SCStreamDelegat
             )
             stream = newStream
             try await newStream.startCapture()
+            return RecordingSessionMetadata(
+                directory: directory,
+                microphoneURL: microphoneURL,
+                systemAudioURL: systemAudioURL,
+                startedAt: startedAt
+            )
         } catch {
             newWriter.finishRetainingArtifacts()
             stream = nil

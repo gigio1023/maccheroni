@@ -476,6 +476,8 @@
 	<string>校正</string>
 	<key>Input Mode</key>
 	<string>输入模式</string>
+	<key>Interrupted</key>
+	<string>已中断</string>
 	<key>Installed and signed in</key>
 	<string>已安装且已登录</string>
 	<key>Installed, not signed in. Run codex login in Terminal.</key>

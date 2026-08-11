@@ -1,6 +1,7 @@
+import Foundation
 import SwiftUI
 
-private enum GlossaryCategory: String, CaseIterable, Identifiable {
+enum GlossaryCategory: String, CaseIterable, Identifiable {
     case people
     case terms
     case places
@@ -16,10 +17,210 @@ private enum GlossaryCategory: String, CaseIterable, Identifiable {
     }
 }
 
-private struct GlossaryDraftEntry: Identifiable, Equatable {
+struct GlossaryDraftEntry: Identifiable, Equatable {
     let id: UUID
     var term: String
     var category: GlossaryCategory
+}
+
+enum GlossaryDraftError: Error, Equatable {
+    case emptyTerm
+    case commentLikeTerm
+    case multilineTerm
+    case containsControlCharacter
+    case termTooLong
+    case duplicateTerm
+}
+
+struct GlossaryDraftRemoval {
+    fileprivate struct Item {
+        let index: Int
+        let line: GlossaryDraftLine
+    }
+
+    fileprivate let items: [Item]
+    var isEmpty: Bool { items.isEmpty }
+}
+
+private struct GlossaryDraftLine: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case preserved
+        case entry(GlossaryDraftEntry)
+    }
+
+    let id: UUID
+    var contents: String
+    var lineEnding: String
+    var kind: Kind
+}
+
+struct GlossaryDraftDocument {
+    private var lines: [GlossaryDraftLine]
+
+    init(text: String) {
+        lines = []
+        guard !text.isEmpty else { return }
+
+        var category = GlossaryCategory.terms
+        let components = text.components(separatedBy: "\n")
+        for (index, component) in components.enumerated() {
+            let isTrailingSentinel = index == components.count - 1
+                && component.isEmpty
+                && text.hasSuffix("\n")
+            guard !isTrailingSentinel else { continue }
+
+            let hasLineEnding = index < components.count - 1
+            let usesCRLF = hasLineEnding && component.hasSuffix("\r")
+            let contents = usesCRLF ? String(component.dropLast()) : component
+            let lineEnding = hasLineEnding ? (usesCRLF ? "\r\n" : "\n") : ""
+            var parsedContents = contents
+            if lines.isEmpty, parsedContents.unicodeScalars.first == "\u{FEFF}" {
+                parsedContents.removeFirst()
+            }
+            let trimmed = parsedContents.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if let parsedCategory = Self.categoryMarker(in: trimmed) {
+                category = parsedCategory
+                lines.append(
+                    GlossaryDraftLine(
+                        id: UUID(),
+                        contents: contents,
+                        lineEnding: lineEnding,
+                        kind: .preserved
+                    )
+                )
+            } else if !trimmed.isEmpty, !trimmed.hasPrefix("#") {
+                let entry = GlossaryDraftEntry(id: UUID(), term: trimmed, category: category)
+                lines.append(
+                    GlossaryDraftLine(
+                        id: entry.id,
+                        contents: contents,
+                        lineEnding: lineEnding,
+                        kind: .entry(entry)
+                    )
+                )
+            } else {
+                lines.append(
+                    GlossaryDraftLine(
+                        id: UUID(),
+                        contents: contents,
+                        lineEnding: lineEnding,
+                        kind: .preserved
+                    )
+                )
+            }
+        }
+    }
+
+    var entries: [GlossaryDraftEntry] {
+        lines.compactMap { line in
+            guard case let .entry(entry) = line.kind else { return nil }
+            return entry
+        }
+    }
+
+    func serialized() -> String {
+        lines.map { $0.contents + $0.lineEnding }.joined()
+    }
+
+    static func validationError(for candidate: String) -> GlossaryDraftError? {
+        if candidate.contains(where: \.isNewline) {
+            return .multilineTerm
+        }
+        let term = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            .precomposedStringWithCanonicalMapping
+        guard !term.isEmpty else { return .emptyTerm }
+        guard !term.hasPrefix("#") else { return .commentLikeTerm }
+        guard term.unicodeScalars.count <= 256 else { return .termTooLong }
+        guard !term.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            return .containsControlCharacter
+        }
+        return nil
+    }
+
+    @discardableResult
+    mutating func add(term candidate: String, category: GlossaryCategory) throws -> GlossaryDraftEntry {
+        if let error = Self.validationError(for: candidate) {
+            throw error
+        }
+        let term = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            .precomposedStringWithCanonicalMapping
+        guard !entries.contains(where: {
+            $0.term.precomposedStringWithCanonicalMapping == term
+        }) else {
+            throw GlossaryDraftError.duplicateTerm
+        }
+
+        let lineEnding = preferredLineEnding
+        if let lastIndex = lines.indices.last, lines[lastIndex].lineEnding.isEmpty {
+            lines[lastIndex].lineEnding = lineEnding
+        }
+        let marker = GlossaryDraftLine(
+            id: UUID(),
+            contents: "# category: \(category.rawValue)",
+            lineEnding: lineEnding,
+            kind: .preserved
+        )
+        let entry = GlossaryDraftEntry(id: UUID(), term: term, category: category)
+        let entryLine = GlossaryDraftLine(
+            id: entry.id,
+            contents: term,
+            lineEnding: lineEnding,
+            kind: .entry(entry)
+        )
+        lines.append(marker)
+        lines.append(entryLine)
+        return entry
+    }
+
+    mutating func removeEntries(at offsets: IndexSet) -> GlossaryDraftRemoval {
+        let entryIDs = entries.enumerated().compactMap { offset, entry in
+            offsets.contains(offset) ? entry.id : nil
+        }
+        let idSet = Set(entryIDs)
+        let items = lines.enumerated().compactMap { index, line -> GlossaryDraftRemoval.Item? in
+            guard idSet.contains(line.id) else { return nil }
+            return GlossaryDraftRemoval.Item(index: index, line: line)
+        }
+        for item in items.reversed() {
+            lines.remove(at: item.index)
+        }
+        return GlossaryDraftRemoval(items: items)
+    }
+
+    mutating func restore(_ removal: GlossaryDraftRemoval) {
+        for item in removal.items.sorted(by: { $0.index < $1.index }) {
+            lines.insert(item.line, at: min(item.index, lines.endIndex))
+        }
+    }
+
+    private var preferredLineEnding: String {
+        lines.lazy.map(\.lineEnding).first(where: { !$0.isEmpty }) ?? "\n"
+    }
+
+    private static func categoryMarker(in line: String) -> GlossaryCategory? {
+        let prefix = "# category: "
+        guard line.hasPrefix(prefix) else { return nil }
+        return GlossaryCategory(rawValue: String(line.dropFirst(prefix.count)))
+    }
+}
+
+struct GlossaryEditorState {
+    var document: GlossaryDraftDocument
+    var presentedErrorMessage: String?
+    let savingAllowed: Bool
+
+    init(load: () throws -> String) {
+        do {
+            document = GlossaryDraftDocument(text: try load())
+            presentedErrorMessage = nil
+            savingAllowed = true
+        } catch {
+            document = GlossaryDraftDocument(text: "")
+            presentedErrorMessage = error.localizedDescription
+            savingAllowed = false
+        }
+    }
 }
 
 struct GlossaryEditor: View {
@@ -27,16 +228,17 @@ struct GlossaryEditor: View {
     @Environment(\.undoManager) private var undoManager
     let model: MaccheroniAppModel
     let profileID: AppProfileID
-    @State private var entries: [GlossaryDraftEntry]
+    @State private var editorState: GlossaryEditorState
     @State private var newTerm = ""
     @State private var newCategory = GlossaryCategory.terms
-    @State private var errorMessage: String?
     @FocusState private var focusedOnNewTerm: Bool
 
     init(model: MaccheroniAppModel, profileID: AppProfileID) {
         self.model = model
         self.profileID = profileID
-        _entries = State(initialValue: Self.parse(model.loadGlossary(for: profileID)))
+        _editorState = State(initialValue: GlossaryEditorState {
+            try model.loadGlossary(for: profileID)
+        })
     }
 
     var body: some View {
@@ -54,13 +256,14 @@ struct GlossaryEditor: View {
                 Button(appLocalized("Save"), action: save)
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
+                    .disabled(!editorState.savingAllowed)
             }
             .padding(20)
 
             Divider()
 
             List {
-                ForEach(entries) { entry in
+                ForEach(editorState.document.entries) { entry in
                     GlossaryEntryRow(entry: entry) {
                         remove(entry)
                     }
@@ -68,6 +271,7 @@ struct GlossaryEditor: View {
                 .onDelete(perform: remove)
             }
             .frame(minHeight: 260)
+            .disabled(!editorState.savingAllowed)
 
             Divider()
 
@@ -83,82 +287,75 @@ struct GlossaryEditor: View {
                 .labelsHidden()
                 .frame(width: 110)
                 Button(appLocalized("Add"), action: add)
-                    .disabled(newTerm.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!canAddTerm)
             }
             .padding(20)
+            .disabled(!editorState.savingAllowed)
         }
         .frame(minWidth: 520, idealWidth: 600, minHeight: 420)
-        .task { focusedOnNewTerm = true }
-        .alert(appLocalized("Glossary Could Not Be Saved"), isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
+        .task { focusedOnNewTerm = editorState.savingAllowed }
+        .alert(appLocalized("Glossary"), isPresented: Binding(
+            get: { editorState.presentedErrorMessage != nil },
+            set: { if !$0 { editorState.presentedErrorMessage = nil } }
         )) {
-            Button(appLocalized("OK"), role: .cancel) { errorMessage = nil }
+            Button(appLocalized("OK"), role: .cancel) {
+                editorState.presentedErrorMessage = nil
+            }
         } message: {
-            Text(errorMessage ?? "")
+            Text(editorState.presentedErrorMessage ?? "")
         }
+    }
+
+    private var canAddTerm: Bool {
+        editorState.savingAllowed
+            && GlossaryDraftDocument.validationError(for: newTerm) == nil
+            && !editorState.document.entries.contains(where: {
+                $0.term.precomposedStringWithCanonicalMapping
+                    == newTerm.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .precomposedStringWithCanonicalMapping
+            })
     }
 
     private func add() {
-        let term = newTerm.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty,
-              !entries.contains(where: { $0.term.localizedCaseInsensitiveCompare(term) == .orderedSame })
-        else { return }
-        let entry = GlossaryDraftEntry(id: UUID(), term: term, category: newCategory)
-        entries.append(entry)
-        undoManager?.registerUndo(withTarget: UndoTarget { entries.removeAll { $0.id == entry.id } }) {
-            $0.action()
+        guard canAddTerm else { return }
+        do {
+            let previousDocument = editorState.document
+            try editorState.document.add(term: newTerm, category: newCategory)
+            undoManager?.registerUndo(withTarget: UndoTarget {
+                editorState.document = previousDocument
+            }) {
+                $0.action()
+            }
+            newTerm = ""
+            focusedOnNewTerm = true
+        } catch {
+            return
         }
-        newTerm = ""
-        focusedOnNewTerm = true
     }
 
     private func remove(_ offsets: IndexSet) {
-        let removed = offsets.map { entries[$0] }
-        entries.remove(atOffsets: offsets)
-        undoManager?.registerUndo(withTarget: UndoTarget { entries.append(contentsOf: removed) }) {
+        let removal = editorState.document.removeEntries(at: offsets)
+        guard !removal.isEmpty else { return }
+        undoManager?.registerUndo(withTarget: UndoTarget {
+            editorState.document.restore(removal)
+        }) {
             $0.action()
         }
     }
 
     private func remove(_ entry: GlossaryDraftEntry) {
-        guard let index = entries.firstIndex(of: entry) else { return }
+        guard let index = editorState.document.entries.firstIndex(of: entry) else { return }
         remove(IndexSet(integer: index))
     }
 
     private func save() {
+        guard editorState.savingAllowed else { return }
         do {
-            try model.saveGlossary(Self.serialize(entries), for: profileID)
+            try model.saveGlossary(editorState.document.serialized(), for: profileID)
             dismiss()
         } catch {
-            errorMessage = error.localizedDescription
+            editorState.presentedErrorMessage = error.localizedDescription
         }
-    }
-
-    private static func parse(_ text: String) -> [GlossaryDraftEntry] {
-        var category = GlossaryCategory.terms
-        var entries: [GlossaryDraftEntry] = []
-        for rawLine in text.split(whereSeparator: \.isNewline) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if line.hasPrefix("# category: "),
-               let parsed = GlossaryCategory(rawValue: String(line.dropFirst(12))) {
-                category = parsed
-            } else if !line.isEmpty, !line.hasPrefix("#") {
-                entries.append(GlossaryDraftEntry(id: UUID(), term: line, category: category))
-            }
-        }
-        return entries
-    }
-
-    private static func serialize(_ entries: [GlossaryDraftEntry]) -> String {
-        var lines: [String] = []
-        for category in GlossaryCategory.allCases {
-            let terms = entries.filter { $0.category == category }.map(\.term)
-            guard !terms.isEmpty else { continue }
-            lines.append("# category: \(category.rawValue)")
-            lines.append(contentsOf: terms)
-        }
-        return lines.isEmpty ? "" : lines.joined(separator: "\n") + "\n"
     }
 }
 

@@ -143,6 +143,7 @@ enum LibraryItemState: String, Codable, Sendable {
     case hasConflicts = "has-conflicts"
     case failed
     case cancelled
+    case interrupted
 
     var title: LocalizedStringResource {
         switch self {
@@ -152,6 +153,7 @@ enum LibraryItemState: String, Codable, Sendable {
         case .hasConflicts: appLocalized("Has Conflicts")
         case .failed: appLocalized("Failed")
         case .cancelled: appLocalized("Cancelled")
+        case .interrupted: appLocalized("Interrupted")
         }
     }
 
@@ -163,6 +165,7 @@ enum LibraryItemState: String, Codable, Sendable {
         case .hasConflicts: appString("Has Conflicts", locale: locale)
         case .failed: appString("Failed", locale: locale)
         case .cancelled: appString("Cancelled", locale: locale)
+        case .interrupted: appString("Interrupted", locale: locale)
         }
     }
 }
@@ -386,6 +389,13 @@ struct RecordingArtifacts: Equatable, Sendable {
     var durationS: Double { max(0, stoppedAt.timeIntervalSince(startedAt)) }
 }
 
+struct RecordingSessionMetadata: Equatable, Sendable {
+    var directory: URL
+    var microphoneURL: URL
+    var systemAudioURL: URL
+    var startedAt: Date
+}
+
 struct PreservedRecordingArtifacts: Equatable, Sendable {
     var directory: URL
     var microphoneURL: URL
@@ -419,7 +429,7 @@ protocol TranscriptionRunning: AnyObject {
 protocol RecordingControlling: AnyObject {
     var meters: CaptureMeters { get }
     func setMeterHandler(_ handler: (@MainActor (CaptureMeters) -> Void)?)
-    func start(in outputRoot: URL) async throws
+    func start(in outputRoot: URL) async throws -> RecordingSessionMetadata
     func stop() async throws -> RecordingArtifacts
     func cancel() async
 }

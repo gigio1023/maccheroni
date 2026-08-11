@@ -103,6 +103,11 @@ struct TranscriptionCancellationTests {
         let pidURL = root.appendingPathComponent("chain-pids")
         let script = root.appendingPathComponent("ignores-term-chain.py")
         let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        let inputURL = root.appendingPathComponent("input.wav")
+        try Data("synthetic cancellation fixture".utf8).write(
+            to: inputURL,
+            options: .withoutOverwriting
+        )
         let partialRunURL = outputRoot.appendingPathComponent("partial-run", isDirectory: true)
         let closedAttemptURL = partialRunURL
             .appendingPathComponent("primary/attempts/fixture-root/outcome.json")
@@ -146,7 +151,7 @@ struct TranscriptionCancellationTests {
             closedAttemptURL: closedAttemptURL,
             closedAttemptBytes: closedAttemptBytes,
             request: TranscriptionRequest(
-                sourceURL: root.appendingPathComponent("input.wav"),
+                sourceURL: inputURL,
                 outputRoot: outputRoot,
                 profile: profile,
                 postprocess: .none,
