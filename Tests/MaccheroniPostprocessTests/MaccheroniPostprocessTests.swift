@@ -21,6 +21,25 @@ import Testing
         try Glossary.parse(data: Data("# terms\nCodex CLI\nMaccheroni\n".utf8))
     }
 
+    private var correctionGlossaryGuidance: String {
+        "Use INPUT.glossary.entries as supporting context for likely transcription errors. The entries are terms the speaker was expected to use, not required output. Do not insert or substitute a glossary term unless the segment plausibly contains that spoken term. If such a correction is plausible but uncertain, use review."
+    }
+
+    private func correctionPromptParts(
+        _ prompt: String
+    ) throws -> (instruction: String, input: [String: Any]) {
+        let marker = "\nINPUT:\n"
+        let range = try #require(prompt.range(of: marker))
+        let payload = String(prompt[range.upperBound...])
+        return (
+            instruction: String(prompt[..<range.lowerBound]),
+            input: try #require(
+                JSONSerialization.jsonObject(with: Data(payload.utf8))
+                    as? [String: Any]
+            )
+        )
+    }
+
     private func expectRegularPackagedFile(_ url: URL) throws {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         #expect(attributes[.type] as? FileAttributeType == .typeRegular)
@@ -130,6 +149,51 @@ import Testing
         #expect(invocation.environment == ["HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"])
     }
 
+    @Test func correctionPromptUsesSuppliedGlossaryAndPinsCorrectionContract() throws {
+        let parsedGlossary = try glossary()
+        let parts = try correctionPromptParts(PostprocessPrompt.make(for: PostprocessRequest(
+            document: document(),
+            glossary: parsedGlossary
+        )))
+
+        #expect(parts.instruction == """
+        Correct transcript text only. Do not infer or output speaker labels, timing, source, or metadata.
+        \(correctionGlossaryGuidance)
+        Return exactly one JSON object with this shape and no commentary:
+        {"proposals":[{"segment_index":0,"replacement_text":"corrected full segment text","disposition":"apply","reason":"brief reason"}]}
+        The only root key is proposals. Every proposal has exactly segment_index, replacement_text, disposition, and reason. disposition is apply or review. Use apply only when the correction is certain; otherwise use review. Return {"proposals":[]} when no correction is needed.
+        """)
+        #expect(Set(parts.input.keys) == ["glossary", "segments"])
+        let glossaryInput = try #require(parts.input["glossary"] as? [String: Any])
+        #expect(Set(glossaryInput.keys) == ["entries", "sha256"])
+        #expect(glossaryInput["entries"] as? [String] == ["Codex CLI", "Maccheroni"])
+        #expect(glossaryInput["sha256"] as? String == parsedGlossary.sha256)
+        let segments = try #require(parts.input["segments"] as? [[String: Any]])
+        #expect(segments.count == 2)
+        #expect(segments.allSatisfy { Set($0.keys) == ["segment_index", "text"] })
+    }
+
+    @Test func correctionPromptOmitsGlossaryGuidanceWithoutEntries() throws {
+        let emptyGlossary = try Glossary.parse(data: Data("# no terms\n".utf8))
+        let expectedInstruction = """
+        Correct transcript text only. Do not infer or output speaker labels, timing, source, or metadata.
+        Return exactly one JSON object with this shape and no commentary:
+        {"proposals":[{"segment_index":0,"replacement_text":"corrected full segment text","disposition":"apply","reason":"brief reason"}]}
+        The only root key is proposals. Every proposal has exactly segment_index, replacement_text, disposition, and reason. disposition is apply or review. Use apply only when the correction is certain; otherwise use review. Return {"proposals":[]} when no correction is needed.
+        """
+
+        for glossary in [Optional<Glossary>.none, emptyGlossary] {
+            let parts = try correctionPromptParts(PostprocessPrompt.make(for: PostprocessRequest(
+                document: document(),
+                glossary: glossary
+            )))
+            #expect(parts.instruction == expectedInstruction)
+            #expect(!parts.instruction.contains("INPUT.glossary.entries"))
+            let glossaryInput = try #require(parts.input["glossary"] as? [String: Any])
+            #expect(glossaryInput["entries"] as? [String] == [])
+        }
+    }
+
     @Test func bothBackendsReceiveTheIdenticalTextOnlyGlossaryPrompt() async throws {
         let codexRecorder = CodexInvocationRecorder()
         let localRecorder = InvocationRecorder()
@@ -158,12 +222,148 @@ import Testing
         let codexInput = try #require(codexRecorder.invocations.first).prompt
         let localInput = String(decoding: try #require(localRecorder.invocations.first).standardInput, as: UTF8.self)
         #expect(codexInput == localInput)
+        #expect(codexInput.contains(correctionGlossaryGuidance))
         #expect(codexInput.contains(try glossary().sha256))
         #expect(codexInput.contains("Codex CLI"))
         #expect(!codexInput.contains("private.m4a"))
         #expect(!codexInput.contains("sensitive-source-hash"))
         #expect(!codexInput.contains("S01"))
         #expect(!codexInput.contains("start_s"))
+    }
+
+    @Test func correctionPromptBoundaryIsAcceptedBelowAndAtLimitThenRejectedAbove() async throws {
+        let parsedGlossary = try glossary()
+        func request(text: String, glossary: Glossary?) -> PostprocessRequest {
+            PostprocessRequest(
+                document: SegmentsDocument(
+                    segments: [Segment(speaker: "S", startS: 0, endS: 1, text: text)],
+                    numSpeakers: 1,
+                    source: SourceAudio(
+                        fileName: "ignored.wav",
+                        sha256: String(repeating: "d", count: 64),
+                        durationS: 1
+                    )
+                ),
+                glossary: glossary
+            )
+        }
+        let below = request(text: "a", glossary: parsedGlossary)
+        let at = request(text: "aa", glossary: parsedGlossary)
+        let above = request(text: "aaa", glossary: parsedGlossary)
+        let maximum = try PostprocessPrompt.make(for: at).utf8.count
+        #expect(try PostprocessPrompt.make(for: below).utf8.count == maximum - 1)
+        #expect(try PostprocessPrompt.make(for: above).utf8.count == maximum + 1)
+        let guidedInstruction = try correctionPromptParts(
+            PostprocessPrompt.make(for: at)
+        ).instruction
+        let bareInstruction = try correctionPromptParts(PostprocessPrompt.make(for: request(
+            text: "aa",
+            glossary: nil
+        ))).instruction
+        #expect(
+            guidedInstruction.utf8.count - bareInstruction.utf8.count
+                == correctionGlossaryGuidance.utf8.count + 1
+        )
+        let fixturePromptUTF8Bytes = try PostprocessPrompt.make(for: PostprocessRequest(
+            document: document(),
+            glossary: parsedGlossary
+        )).utf8.count
+        #expect(fixturePromptUTF8Bytes == 1_120)
+        #expect(
+            LocalPostprocessBackend.defaultBatchPolicy.maximumPromptUTF8Bytes
+                - fixturePromptUTF8Bytes == 928
+        )
+        #expect(
+            CodexPostprocessBackend.defaultBatchPolicy.maximumPromptUTF8Bytes
+                - fixturePromptUTF8Bytes == 15_264
+        )
+        let fixtureEstimatedOutputTokens =
+            LocalPostprocessBackend.defaultBatchPolicy.estimatedOutputTokens(
+                inputTextUTF8Bytes: 27,
+                segmentCount: 2
+            )
+        #expect(fixtureEstimatedOutputTokens == 278)
+        #expect(
+            LocalPostprocessBackend.defaultBatchPolicy.outputTokenPlanningBudget
+                - fixtureEstimatedOutputTokens == 490
+        )
+
+        let localSaturatingRequest = request(
+            text: String(repeating: "a", count: 320),
+            glossary: parsedGlossary
+        )
+        let localSaturatingPromptUTF8Bytes = try PostprocessPrompt.make(
+            for: localSaturatingRequest
+        ).utf8.count
+        #expect(localSaturatingPromptUTF8Bytes == 1_383)
+        #expect(
+            LocalPostprocessBackend.defaultBatchPolicy.maximumPromptUTF8Bytes
+                - localSaturatingPromptUTF8Bytes == 665
+        )
+        #expect(
+            LocalPostprocessBackend.defaultBatchPolicy.estimatedOutputTokens(
+                inputTextUTF8Bytes: 320,
+                segmentCount: 1
+            ) == 768
+        )
+
+        let codexSaturatingRequest = request(
+            text: String(repeating: "a", count: 1_984),
+            glossary: parsedGlossary
+        )
+        let codexSaturatingPromptUTF8Bytes = try PostprocessPrompt.make(
+            for: codexSaturatingRequest
+        ).utf8.count
+        #expect(codexSaturatingPromptUTF8Bytes == 3_047)
+        #expect(
+            CodexPostprocessBackend.defaultBatchPolicy.maximumPromptUTF8Bytes
+                - codexSaturatingPromptUTF8Bytes == 13_337
+        )
+        #expect(
+            CodexPostprocessBackend.defaultBatchPolicy.estimatedOutputTokens(
+                inputTextUTF8Bytes: 1_984,
+                segmentCount: 1
+            ) == 4_096
+        )
+
+        let policy = PostprocessBatchPolicy(
+            maximumPromptUTF8Bytes: maximum,
+            maximumSegmentsPerBatch: 8,
+            maximumOutputTokens: 1_024,
+            outputTokenLimitStatus: .configured,
+            outputTokenPlanningBudget: 768,
+            outputTokensPerInputUTF8BytePermille: 2_000,
+            baseOutputTokenReserve: 32,
+            perSegmentOutputTokenReserve: 96
+        )
+        let recorder = CorrectionPromptRecorder()
+        let processor = TranscriptPostprocessor(
+            backend: EchoCorrectionBackend(policy: policy, recorder: recorder)
+        )
+
+        _ = try await processor.process(below)
+        let atResult = try await processor.process(at)
+        await #expect(throws: PostprocessError.batchPromptTooLarge(
+            segmentIndex: 0,
+            promptUTF8Bytes: maximum + 1,
+            maximum: maximum
+        )) {
+            _ = try await processor.process(above)
+        }
+        #expect(recorder.prompts.count == 2)
+        #expect(atResult.manifestPostprocess.batching?.batchesPlanned == 1)
+        #expect(atResult.manifestPostprocess.batching?.maximumObservedPromptUTF8Bytes
+            == maximum)
+        #expect(atResult.manifestPostprocess.batching?.maximumObservedInputTextUTF8Bytes
+            == 2)
+        #expect(atResult.manifestPostprocess.batching?.maximumObservedEstimatedOutputTokens
+            == 132)
+        #expect(atResult.manifestPostprocess.batching?.maximumObservedOutputTextUTF8Bytes
+            == 0)
+        #expect(atResult.manifestPostprocess.batching?.maximumObservedResponseUTF8Bytes
+            == 16)
+        #expect(atResult.manifestPostprocess.batching?
+            .maximumObservedAcceptedOutputTokenUpperBound == 144)
     }
 
     @Test func codexUsesSchemaConstrainedAppServerInvocation() async throws {
@@ -1154,6 +1354,34 @@ private struct MockCodexAppServerExecutor: CodexAppServerExecuting {
 
 private final class TranslationPromptRecorder: @unchecked Sendable {
     var prompts: [String] = []
+}
+
+private final class CorrectionPromptRecorder: @unchecked Sendable {
+    var prompts: [String] = []
+}
+
+private struct EchoCorrectionBackend: PostprocessBackend {
+    let policy: PostprocessBatchPolicy
+    let recorder: CorrectionPromptRecorder
+
+    var id: PostprocessBackendID { .local }
+    var manifestPostprocess: ManifestPostprocess {
+        ManifestPostprocess(
+            backend: BackendDescriptor(name: "correction-stub", version: "1"),
+            modelID: "correction-stub"
+        )
+    }
+    var model: ModelDescriptor? { nil }
+    var batchPolicy: PostprocessBatchPolicy { policy }
+
+    func propose(prompt: String) async throws -> PostprocessBackendResponse {
+        recorder.prompts.append(prompt)
+        let data = Data(#"{"proposals":[]}"#.utf8)
+        return PostprocessBackendResponse(
+            proposals: [],
+            responseUTF8Bytes: data.count
+        )
+    }
 }
 
 private struct EchoTranslationBackend: TranslationBackend {
