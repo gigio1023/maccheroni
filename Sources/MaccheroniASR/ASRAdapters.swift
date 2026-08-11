@@ -57,7 +57,7 @@ public enum SelectedASRBackend: String, CaseIterable, Sendable {
     }
 
     public static let koreanDefault = SelectedASRBackend.vibeVoice
-    public static let koreanLowMemoryFallback = SelectedASRBackend.qwen3
+    public static let koreanFallback: SelectedASRBackend? = nil
     public static let italianDefault = SelectedASRBackend.moss
     public static let italianFallback = SelectedASRBackend.vibeVoice
 }

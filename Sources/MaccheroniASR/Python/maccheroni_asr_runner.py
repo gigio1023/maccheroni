@@ -469,34 +469,6 @@ def run_vibevoice(
         payload = json.loads(raw_json)
     except json.JSONDecodeError as error:
         raise RunnerError("malformed_output", "VibeVoice JSON is malformed") from error
-    raw_segments = payload.get("segments") if isinstance(payload, dict) else None
-    if not isinstance(raw_segments, list) or not raw_segments:
-        raise RunnerError("malformed_output", "VibeVoice JSON has no segments")
-    raw_text = payload.get("text")
-    if not isinstance(raw_text, str) or not raw_text:
-        raise RunnerError("malformed_output", "VibeVoice JSON has no transcript text field")
-    segments: list[dict[str, Any]] = []
-    previous = (-1.0, -1.0)
-    for index, item in enumerate(raw_segments):
-        if not isinstance(item, dict):
-            raise RunnerError("malformed_output", f"VibeVoice segment {index} is not an object")
-        start, end, text = validate_segment(item.get("start"), item.get("end"), item.get("text"), duration, index)
-        if (start, end) < previous:
-            raise RunnerError("malformed_output", "VibeVoice segments are not ordered")
-        previous = (start, end)
-        speaker = item.get("speaker_id")
-        if isinstance(speaker, bool):
-            speaker = ""
-        elif isinstance(speaker, (str, int)):
-            speaker = str(speaker).strip()
-        else:
-            speaker = ""
-        segments.append({
-            "start_s": start,
-            "end_s": end,
-            "text": text,
-            "speaker": speaker,
-        })
     prompt_tokens = getattr(result, "prompt_tokens", None)
     generated_tokens = getattr(result, "generation_tokens", None)
     total_time = getattr(result, "total_time", None)
@@ -537,14 +509,57 @@ def run_vibevoice(
         "context_hard_cap_tokens": "mlx-audio 0.4.6 does not expose the model context hard cap",
         "peak_rss_bytes": "mlx-audio 0.4.6 does not report process peak RSS",
     }
+    if reached_limit:
+        return {
+            "raw_text": "",
+            "segments": [],
+            "payload_hash": sha256_bytes(context.encode("utf-8")) if context else None,
+            "command": ["mlx_audio.stt.generate"],
+            "artifact": raw_artifact,
+            "outcome": "limit",
+            "stop_reason": "maximumTokens",
+            "terminal_evidence": "observed",
+            "timing_granularity": "segment",
+            "metrics": metrics,
+            "metrics_unavailable": metrics_unavailable,
+        }
+
+    raw_segments = payload.get("segments") if isinstance(payload, dict) else None
+    if not isinstance(raw_segments, list) or not raw_segments:
+        raise RunnerError("malformed_output", "VibeVoice JSON has no segments")
+    raw_text = payload.get("text")
+    if not isinstance(raw_text, str) or not raw_text:
+        raise RunnerError("malformed_output", "VibeVoice JSON has no transcript text field")
+    segments: list[dict[str, Any]] = []
+    previous = (-1.0, -1.0)
+    for index, item in enumerate(raw_segments):
+        if not isinstance(item, dict):
+            raise RunnerError("malformed_output", f"VibeVoice segment {index} is not an object")
+        start, end, text = validate_segment(item.get("start"), item.get("end"), item.get("text"), duration, index)
+        if (start, end) < previous:
+            raise RunnerError("malformed_output", "VibeVoice segments are not ordered")
+        previous = (start, end)
+        speaker = item.get("speaker_id")
+        if isinstance(speaker, bool):
+            speaker = ""
+        elif isinstance(speaker, (str, int)):
+            speaker = str(speaker).strip()
+        else:
+            speaker = ""
+        segments.append({
+            "start_s": start,
+            "end_s": end,
+            "text": text,
+            "speaker": speaker,
+        })
     return {
-        "raw_text": "" if reached_limit else raw_text,
-        "segments": [] if reached_limit else segments,
+        "raw_text": raw_text,
+        "segments": segments,
         "payload_hash": sha256_bytes(context.encode("utf-8")) if context else None,
         "command": ["mlx_audio.stt.generate"],
         "artifact": raw_artifact,
-        "outcome": "limit" if reached_limit else "complete",
-        "stop_reason": "maximumTokens" if reached_limit else "endOfSequence",
+        "outcome": "complete",
+        "stop_reason": "endOfSequence",
         "terminal_evidence": "observed",
         "timing_granularity": "segment",
         "metrics": metrics,

@@ -254,7 +254,7 @@ import Testing
 
     @Test func selectedBackendsExposeTheApprovedPinnedModels() {
         #expect(SelectedASRBackend.koreanDefault == .vibeVoice)
-        #expect(SelectedASRBackend.koreanLowMemoryFallback == .qwen3)
+        #expect(SelectedASRBackend.koreanFallback == nil)
         #expect(SelectedASRBackend.italianDefault == .moss)
         #expect(SelectedASRBackend.italianFallback == .vibeVoice)
         #expect(SelectedASRBackend.vibeVoice.model.revision.count == 40)

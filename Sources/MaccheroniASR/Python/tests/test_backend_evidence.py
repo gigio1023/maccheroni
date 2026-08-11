@@ -41,7 +41,12 @@ class BackendEvidenceTests(unittest.TestCase):
             "mlx_audio.stt.utils": utils_module,
         }
 
-    def run_vibevoice_stub(self, generated_tokens: int, max_tokens: int):
+    def run_vibevoice_stub(
+        self,
+        generated_tokens: int,
+        max_tokens: int,
+        raw_json: str = '{"text":"hello","segments":[{"start":0,"end":1,"text":"hello"}]}',
+    ):
         with tempfile.TemporaryDirectory() as root_string:
             root = Path(root_string)
             captured = {}
@@ -49,7 +54,7 @@ class BackendEvidenceTests(unittest.TestCase):
             def generate_transcription(**kwargs):
                 captured.update(kwargs)
                 Path(kwargs["output_path"] + ".json").write_text(
-                    '{"text":"hello","segments":[{"start":0,"end":1,"text":"hello"}]}',
+                    raw_json,
                     encoding="utf-8",
                 )
                 return StubSTTOutput(generated_tokens=generated_tokens)
@@ -86,13 +91,31 @@ class BackendEvidenceTests(unittest.TestCase):
         self.assertIn("preprocessing_s", result["metrics_unavailable"])
 
     def test_vibevoice_at_cap_is_typed_limit_without_promotable_text(self) -> None:
-        result, _ = self.run_vibevoice_stub(generated_tokens=5, max_tokens=5)
+        fixtures = {
+            "empty": '{"text":"","segments":[]}',
+            "partial-segment": '{"text":"unfinished","segments":[{"start":0,"text":"unfinished"}]}',
+        }
+        for name, raw_json in fixtures.items():
+            with self.subTest(name=name):
+                result, _ = self.run_vibevoice_stub(
+                    generated_tokens=5,
+                    max_tokens=5,
+                    raw_json=raw_json,
+                )
 
-        self.assertEqual(result["outcome"], "limit")
-        self.assertEqual(result["stop_reason"], "maximumTokens")
-        self.assertEqual(result["raw_text"], "")
-        self.assertEqual(result["segments"], [])
-        self.assertEqual(result["metrics"]["generated_tokens"], 5)
+                self.assertEqual(result["outcome"], "limit")
+                self.assertEqual(result["stop_reason"], "maximumTokens")
+                self.assertEqual(result["raw_text"], "")
+                self.assertEqual(result["segments"], [])
+                self.assertEqual(result["metrics"]["generated_tokens"], 5)
+
+    def test_vibevoice_below_cap_rejects_empty_output(self) -> None:
+        with self.assertRaisesRegex(runner.RunnerError, "has no segments"):
+            self.run_vibevoice_stub(
+                generated_tokens=4,
+                max_tokens=5,
+                raw_json='{"text":"","segments":[]}',
+            )
 
     def test_vibevoice_rejects_generation_count_above_effective_cap(self) -> None:
         with self.assertRaisesRegex(runner.RunnerError, "exceeds the requested cap"):

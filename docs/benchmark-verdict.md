@@ -7,7 +7,7 @@ Status: final. The maintainer confirmed the T7 verdict on 2026-08-03.
 | Path | Default | Fallback | Implementation role |
 | --- | --- | --- | --- |
 | Speaker diarization | community1 CoreML | FluidAudio offline CoreML | Create the whole-file timeline |
-| Korean ASR | VibeVoice ASR 8bit, `free_text_context` | Qwen3-ASR 1.7B MLX 8bit, `free_text_context` | Chunk transcription and glossary injection |
+| Korean ASR | VibeVoice ASR 8bit, `free_text_context` | None; Qwen3-ASR withdrawn by D37 | Chunk transcription and glossary injection |
 | Italian ASR | MOSS 0.9B MLX INT8, `hotword_instruction` | VibeVoice ASR 8bit, `free_text_context` | Chunk transcription and glossary injection |
 
 Every profile uses the selected whole-file speaker timeline. The default path
@@ -29,7 +29,7 @@ the Parakeet harness and benchmark artifacts remain regression evidence.
 | community1 | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c420d56e8472850649b016a486fd0acbe81` | `coreml-fp32` |
 | FluidAudio fallback | `FluidInference/speaker-diarization-coreml` | `1ed7a662fdc7109e36d822db793ee6eebdaf8594` | `coreml-fp32+fp16` |
 | VibeVoice 8bit | `mlx-community/VibeVoice-ASR-8bit` | `725c72e54d6ef875472c27fbc50fab470a960940` | `int8` |
-| Qwen3-ASR fallback | `aufklarer/Qwen3-ASR-1.7B-MLX-8bit` | `e5450a26d1fd417c45fc9c405651ddc3180a27a6` | `int8` |
+| Qwen3-ASR diagnostic only | `aufklarer/Qwen3-ASR-1.7B-MLX-8bit` | `e5450a26d1fd417c45fc9c405651ddc3180a27a6` | `int8` |
 | MOSS Italian | `aufklarer/MOSS-Transcribe-Diarize-0.9B-MLX-INT8` | `90aa65287111a327db98eb83e325bd5332945edd` | `int8-decoder+fp16-audio-vq-kv` |
 
 The model registry and every run manifest record all three fields together. A
@@ -62,9 +62,13 @@ bf16 variant produced the same transcript but took 5.42 times as long and used
 
 Qwen3-ASR with glossary-on recorded CER 0.366, WER 0.301, and term recall 0.25
 on the same sample. It cannot replace the default quality, but its peak memory
-was 3.74 GiB versus VibeVoice's 17.05 GiB. It is an explicitly selected fallback
-for low-memory devices or VibeVoice environment failures. The manifest and UI
-must disclose both fallback use and its lower term recall.
+was 3.74 GiB versus VibeVoice's 17.05 GiB. D23 selected it as the low-memory
+fallback from this benchmark evidence. D37 withdraws that product fallback:
+the pinned `speech` 0.0.23 backend exposes no enforceable token cap, terminal
+reason, token counts, or intra-chunk timestamps. Qwen attempts remain available
+for diagnostic evidence but fail with typed `asr_evidence_unavailable` rather
+than promoting unverifiable output. The fallback may return when a backend
+version exposes all required evidence.
 
 ### Italian ASR
 
@@ -92,7 +96,8 @@ that injection ran. The current replacement rule cannot be the v1 default.
   user-visible fallback.
 - T11 places VibeVoice 8bit, Qwen3-ASR 1.7B, and MOSS behind the `ASRBackend`
   contract. It passes the glossary in each backend's decode-time format and
-  preserves the raw output unchanged.
+  preserves the raw output unchanged. Qwen remains diagnostic-only and returns
+  typed `asr_evidence_unavailable`; it is not a product fallback.
 - The Parakeet product adapter is outside v1 scope. The reason it differs from
   the earlier T11 wording remains in local working notes as a plan deviation.
   Reconsider it when a CTC replacement threshold achieves both 0 excess
@@ -118,9 +123,9 @@ that injection ran. The current replacement rule cannot be the v1 default.
 - community1 over-segmented the 78-minute evaluation set into 8 labels. T14
   checks cross-chunk speaker consistency and conflicts without overwriting the
   raw timeline.
-- VibeVoice 8bit used 17.05 GiB peak memory on the mixed-language sample. When
-  memory is insufficient, the app proposes the Qwen fallback instead of
-  silently switching to a model with different quality.
+- VibeVoice 8bit used 17.05 GiB peak memory on the mixed-language sample. No
+  Korean fallback currently satisfies the promotion-evidence contract, so a
+  low-memory or VibeVoice environment failure must fail explicitly.
 - MOSS is a new backend. Pin the exact revision and keep implementation details
   behind the adapter. If exit status or processed coverage is unclear, fail the
   run.
@@ -149,7 +154,9 @@ during the benchmark, and the audio did not leave the device.
 - D22 supersedes D7. community1 CoreML is the default diarization spine;
   FluidAudio offline CoreML is the explicit fallback.
 - D23 supersedes D8. VibeVoice ASR 8bit with `free_text_context` is the Korean
-  default; Qwen3-ASR 1.7B MLX 8bit is the low-memory fallback.
+  default. Its Qwen3-ASR low-memory fallback clause is superseded by D37.
+- D37 withdraws Qwen3-ASR as a product fallback until a backend exposes the
+  terminal, token, and intra-chunk timestamp evidence required for promotion.
 - D24 supersedes D9. MOSS 0.9B MLX INT8 with `hotword_instruction` is the Italian
   default. VibeVoice 8bit is the fallback, and Parakeet CTC remains
   benchmark-only.
