@@ -245,16 +245,16 @@
   },
   "sources": {
     "italian-moss-asr": {
-      "artifact": "benchmarks/runs/it-asr/t6-20260803-italian-dialogue-moss-on-r2/scores.json",
-      "artifact_sha256": "ebb9245ead111088888cec1890ce83cdbfdeadb8db3f6c105fafedfc3e22522b",
-      "measured_at": "2026-08-02T19:27:28Z",
+      "artifact": "benchmarks/runs/it-asr/t6-20260803-italian-dialogue-moss-on-r2/scores-punctuation-removal.json",
+      "artifact_sha256": "4cee3602befb330504fd325c1cf97f59ebc7ab65fc02cf12440b8eb3a337f5fd",
+      "measured_at": "2026-08-11T07:20:15Z",
       "run_id": "t6-20260803-italian-dialogue-moss-on-r2",
       "run_kind": "standalone-asr",
       "values": {
         "cer.error_rate": "0.033112582781456956",
         "omissions.omitted_utterances": "0",
         "terms.term_recall": "0.7777777777777778",
-        "wer.error_rate": "0.08064516129032258"
+        "wer.error_rate": "0.0847457627118644"
       }
     },
     "italian-pyannote-diarization": {
@@ -268,16 +268,16 @@
       }
     },
     "korean-vibevoice-asr": {
-      "artifact": "benchmarks/runs/ko-asr/t4-20260803-hike-tech-vibe8-on-r1/scores.json",
-      "artifact_sha256": "3d77925705f5ec0a621e60e5abc938c53affd8f7f32fcc7c990226d19cb21fc6",
-      "measured_at": "2026-08-02T17:59:23Z",
+      "artifact": "benchmarks/runs/ko-asr/t4-20260803-hike-tech-vibe8-on-r1/scores-punctuation-removal.json",
+      "artifact_sha256": "f1a982b1a6232697b62784ffa3283850e75a75b7aa7e1b32e6a64e0c45c2c2f3",
+      "measured_at": "2026-08-11T07:20:15Z",
       "run_id": "t4-20260803-hike-tech-vibe8-on-r1",
       "run_kind": "standalone-asr",
       "values": {
         "cer.error_rate": "0.08123249299719888",
         "omissions.omitted_utterances": "0",
         "terms.term_recall": "0.95",
-        "wer.error_rate": "0.1282051282051282"
+        "wer.error_rate": "0.14102564102564102"
       }
     },
     "moss-leaf-candidate-120": {

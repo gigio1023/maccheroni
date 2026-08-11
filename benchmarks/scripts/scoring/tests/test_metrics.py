@@ -11,6 +11,42 @@ from metrics import (
 
 
 class TextMetricTests(unittest.TestCase):
+    def test_wer_ignores_attached_apostrophes_and_hyphens(self) -> None:
+        cases = (
+            ("ASCII apostrophe", "dont", "don't"),
+            ("typographic apostrophe", "dont", "don’t"),
+            ("hyphen", "stateoftheart", "state-of-the-art"),
+        )
+        for label, reference, hypothesis in cases:
+            with self.subTest(label=label):
+                result = text_error_rate(reference, hypothesis, unit="word")
+                self.assertEqual(result.errors, 0)
+                self.assertEqual(result.error_rate, 0.0)
+
+    def test_cer_ignores_attached_apostrophes_and_hyphens(self) -> None:
+        cases = (
+            ("ASCII apostrophe", "dont", "don't"),
+            ("typographic apostrophe", "dont", "don’t"),
+            ("hyphen", "stateoftheart", "state-of-the-art"),
+        )
+        for label, reference, hypothesis in cases:
+            with self.subTest(label=label):
+                result = text_error_rate(reference, hypothesis, unit="character")
+                self.assertEqual(result.errors, 0)
+                self.assertEqual(result.error_rate, 0.0)
+
+    def test_case_nfkc_and_whitespace_normalization_remain_unchanged(self) -> None:
+        for unit in ("word", "character"):
+            with self.subTest(unit=unit):
+                result = text_error_rate("ＡＰＩ\tReady", "api ready", unit=unit)
+                self.assertEqual(result.errors, 0)
+                self.assertEqual(result.error_rate, 0.0)
+
+    def test_italian_diacritics_remain_scorable(self) -> None:
+        result = text_error_rate("cafe", "cafè", unit="character")
+        self.assertEqual(result.substitutions, 1)
+        self.assertEqual(result.error_rate, 0.25)
+
     def test_wer_counts_substitution_deletion_and_insertion(self) -> None:
         result = text_error_rate("one two three", "one too extra four", unit="word")
         self.assertEqual(result.reference_units, 3)

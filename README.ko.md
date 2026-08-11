@@ -83,13 +83,13 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
-  <img src="docs/assets/benchmarks-light.svg" alt="막대 그래프: 테스트 자료별 CER과 WER(한국어 대화 0.081/0.128, 이탈리아어 2화자 0.033/0.081), glossary 용어 재현율(게이트 0.75 대비 0.95와 0.778), 화자분리 오류율(합성 0.048, VoxConverse 0.152)" width="100%">
+  <img src="docs/assets/benchmarks-light.svg" alt="막대 그래프: 테스트 자료별 CER과 WER(한국어 대화 0.081/0.141, 이탈리아어 2화자 0.033/0.085), glossary 용어 재현율(게이트 0.75 대비 0.95와 0.778), 화자분리 오류율(합성 0.048, VoxConverse 0.152)" width="100%">
 </picture>
 
 | 테스트 자료 | 모델 | CER | WER | 용어 재현율 | 누락 | DER |
 |---|---|---:|---:|---:|---:|---:|
-| 한국어 대화, 20개 용어집 | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
-| 이탈리아어 화자 2명 합성 녹음(10분), 9개 용어집 | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
+| 한국어 대화, 20개 용어집 | VibeVoice | 0.081 | 0.141 | 0.95 | 0 | — |
+| 이탈리아어 화자 2명 합성 녹음(10분), 9개 용어집 | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverse 샘플(78분) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 한국어와 이탈리아어가 첫 두 언어 프로필입니다. 새 언어 fixture를 측정하는 대로 이 표에 추가합니다.

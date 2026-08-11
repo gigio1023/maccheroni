@@ -39,7 +39,7 @@ def normalize_text(text: str, *, remove_spaces: bool = False) -> str:
 
     normalized = unicodedata.normalize("NFKC", text).casefold()
     normalized = "".join(
-        " " if unicodedata.category(character).startswith("P") else character
+        "" if unicodedata.category(character).startswith("P") else character
         for character in normalized
     )
     normalized = " ".join(normalized.split())

@@ -83,13 +83,13 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
-  <img src="docs/assets/benchmarks-light.svg" alt="棒グラフ: フィクスチャ別のCERとWER（韓国語対話 0.081/0.128、イタリア語2話者 0.033/0.081）、glossary用語再現率（ゲート0.75に対して0.95と0.778）、話者分離エラー率（合成 0.048、VoxConverse 0.152）" width="100%">
+  <img src="docs/assets/benchmarks-light.svg" alt="棒グラフ: フィクスチャ別のCERとWER（韓国語対話 0.081/0.141、イタリア語2話者 0.033/0.085）、glossary用語再現率（ゲート0.75に対して0.95と0.778）、話者分離エラー率（合成 0.048、VoxConverse 0.152）" width="100%">
 </picture>
 
 | フィクスチャ | モデル | CER | WER | 用語再現率 | 欠落 | DER |
 |---|---|---:|---:|---:|---:|---:|
-| 韓国語の対話、20語の用語集 | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
-| イタリア語の2話者合成音声（10分）、9語の用語集 | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
+| 韓国語の対話、20語の用語集 | VibeVoice | 0.081 | 0.141 | 0.95 | 0 | — |
+| イタリア語の2話者合成音声（10分）、9語の用語集 | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverseサンプル（78分） | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 韓国語とイタリア語が最初の2つの言語プロファイルです。新しい言語フィクスチャは測定でき次第この表に追加します。

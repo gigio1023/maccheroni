@@ -84,13 +84,13 @@ Tutti i risultati provengono da fixture pubbliche o sintetiche. Gli ID delle val
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
-  <img src="docs/assets/benchmarks-light.svg" alt="Grafici a barre: CER e WER per fixture (dialogo coreano 0.081/0.128, due parlanti italiani 0.033/0.081), recupero dei termini del glossario (0.95 e 0.778 rispetto alla soglia 0.75) e tasso di errore di diarizzazione (0.048 sintetico, 0.152 VoxConverse)" width="100%">
+  <img src="docs/assets/benchmarks-light.svg" alt="Grafici a barre: CER e WER per fixture (dialogo coreano 0.081/0.141, due parlanti italiani 0.033/0.085), recupero dei termini del glossario (0.95 e 0.778 rispetto alla soglia 0.75) e tasso di errore di diarizzazione (0.048 sintetico, 0.152 VoxConverse)" width="100%">
 </picture>
 
 | Fixture | Modello | CER | WER | Recupero dei termini | Omissioni | DER |
 |---|---|---:|---:|---:|---:|---:|
-| Dialogo coreano, glossario di 20 termini | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
-| Conversazione sintetica in italiano con 2 parlanti (10 min), glossario di 9 termini | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
+| Dialogo coreano, glossario di 20 termini | VibeVoice | 0.081 | 0.141 | 0.95 | 0 | — |
+| Conversazione sintetica in italiano con 2 parlanti (10 min), glossario di 9 termini | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | Campione VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 Coreano e italiano sono i primi due profili di lingua; nuove fixture linguistiche entrano in questa tabella man mano che vengono misurate.

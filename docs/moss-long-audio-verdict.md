@@ -44,10 +44,12 @@ every execution record.
 
 | initial leaf | quality | CER | WER | term recall | omissions | EOS/limit | wall | helper peak RSS |
 |---:|---|---:|---:|---:|---:|---:|---:|---:|
-| 120 seconds | pass | 0.030 | 0.048 | 0.778 | 0 | 5/0 | 59.45 seconds | 1.440 GB |
-| 240 seconds | fail | 0.054 | 0.113 | 0.689 | 0 | 3/0 | 62.42 seconds | 1.451 GB |
-| 300 seconds | fail | 0.073 | 0.145 | 0.667 | 0 | 2/0 | 65.15 seconds | 1.456 GB |
-| 240 seconds/1,024 forced | pass | 0.030 | 0.048 | 0.778 | 0 | 5/2 | 73.78 seconds | 1.452 GB |
+| 120 seconds | pass | 0.030 | 0.051 | 0.778 | 0 | 5/0 | 59.45 seconds | 1.440 GB |
+| 240 seconds | fail | 0.054 | 0.132 | 0.689 | 0 | 3/0 | 62.42 seconds | 1.451 GB |
+| 300 seconds | fail | 0.073 | 0.169 | 0.667 | 0 | 2/0 | 65.15 seconds | 1.456 GB |
+| 240 seconds/1,024 forced | pass | 0.030 | 0.051 | 0.778 | 0 | 5/2 | 73.78 seconds | 1.452 GB |
+
+WER values were recalculated on 2026-08-11 after the scorer was corrected to remove punctuation instead of replacing it with whitespace, matching the existing scoring contract; CER is unchanged.
 
 The fixed gates are CER 0.10, WER 0.15, overall term recall 0.75, utterance
 omissions 0, boundary WER 0.20, and speaker-repeat stability 1.0. Only the
@@ -157,10 +159,10 @@ recorded source state.
 
 | case | structural verdict | quality verdict | canonical EOS | CER | WER | term recall | omissions |
 |---|---|---|---:|---:|---:|---:|---:|
-| 120 seconds/5,120 | valid | pass | 5 | 0.0364 | 0.0484 | 0.7778 | 0 |
+| 120 seconds/5,120 | valid | pass | 5 | 0.0364 | 0.0508 | 0.7778 | 0 |
 | 240 seconds/5,120 | `invalid_eos_output` | excluded from comparison | 0 | unavailable | unavailable | unavailable | unavailable |
 | 300 seconds/5,120 | `invalid_eos_output` | excluded from comparison | 0 | unavailable | unavailable | unavailable | unavailable |
-| 240 seconds/1,024 forced | recovered with valid 120-second children | pass | 5 | 0.0364 | 0.0484 | 0.7778 | 0 |
+| 240 seconds/1,024 forced | recovered with valid 120-second children | pass | 5 | 0.0364 | 0.0508 | 0.7778 | 0 |
 
 The 240-second and 300-second helper calls reported an EOS stop but had no
 timestamp markers or verifiable segments. The stable codes in the manifest,

@@ -84,13 +84,13 @@ All from public or synthetic fixtures; evaluation IDs and artifact hashes are re
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
-  <img src="docs/assets/benchmarks-light.svg" alt="Bar charts: CER and WER per fixture (Korean dialogue 0.081/0.128, Italian two-speaker 0.033/0.081), glossary term recall (0.95 and 0.778 against the 0.75 gate), and diarization error rate (0.048 synthetic, 0.152 VoxConverse)" width="100%">
+  <img src="docs/assets/benchmarks-light.svg" alt="Bar charts: CER and WER per fixture (Korean dialogue 0.081/0.141, Italian two-speaker 0.033/0.085), glossary term recall (0.95 and 0.778 against the 0.75 gate), and diarization error rate (0.048 synthetic, 0.152 VoxConverse)" width="100%">
 </picture>
 
 | Fixture | Model | CER | WER | Term recall | Omissions | DER |
 |---|---|---:|---:|---:|---:|---:|
-| Korean dialogue, 20-term glossary | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
-| Italian 2-speaker synthetic (10 min), 9-term glossary | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
+| Korean dialogue, 20-term glossary | VibeVoice | 0.081 | 0.141 | 0.95 | 0 | — |
+| Italian 2-speaker synthetic (10 min), 9-term glossary | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverse sample (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 Korean and Italian are the first two language profiles; new language fixtures join this table as they are measured.

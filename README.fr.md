@@ -84,13 +84,13 @@ Tous les résultats proviennent de jeux de test publics ou synthétiques ; les i
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
-  <img src="docs/assets/benchmarks-light.svg" alt="Diagrammes en barres : CER et WER par jeu de test (dialogue coréen 0.081/0.128, deux locuteurs italiens 0.033/0.081), rappel des termes du glossaire (0.95 et 0.778 par rapport au seuil de 0.75) et taux d'erreur de diarisation (0.048 synthétique, 0.152 VoxConverse)" width="100%">
+  <img src="docs/assets/benchmarks-light.svg" alt="Diagrammes en barres : CER et WER par jeu de test (dialogue coréen 0.081/0.141, deux locuteurs italiens 0.033/0.085), rappel des termes du glossaire (0.95 et 0.778 par rapport au seuil de 0.75) et taux d'erreur de diarisation (0.048 synthétique, 0.152 VoxConverse)" width="100%">
 </picture>
 
 | Jeu de test | Modèle | CER | WER | Rappel des termes | Omissions | DER |
 |---|---|---:|---:|---:|---:|---:|
-| Dialogue coréen, glossaire de 20 termes | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
-| Synthèse italienne à 2 locuteurs (10 min), glossaire de 9 termes | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
+| Dialogue coréen, glossaire de 20 termes | VibeVoice | 0.081 | 0.141 | 0.95 | 0 | — |
+| Synthèse italienne à 2 locuteurs (10 min), glossaire de 9 termes | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | Échantillon VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 Le coréen et l'italien sont les deux premiers profils de langue ; de nouveaux jeux de test linguistiques rejoignent ce tableau au fur et à mesure des mesures.

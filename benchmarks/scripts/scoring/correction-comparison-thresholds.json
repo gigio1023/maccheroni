@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0.0",
+  "status": "placeholder",
+  "maintainer_action": "Set every null threshold and change status to configured.",
+  "comparisons": {
+    "decode_time_injection_gain": {
+      "cer.error_rate": {
+        "better_when": "lower",
+        "minimum_improvement": null
+      },
+      "wer.error_rate": {
+        "better_when": "lower",
+        "minimum_improvement": null
+      },
+      "terms.term_recall": {
+        "better_when": "higher",
+        "minimum_improvement": null
+      },
+      "omissions.omitted_utterances": {
+        "better_when": "lower",
+        "minimum_improvement": null
+      }
+    },
+    "correction_gain": {
+      "cer.error_rate": {
+        "better_when": "lower",
+        "minimum_improvement": null
+      },
+      "wer.error_rate": {
+        "better_when": "lower",
+        "minimum_improvement": null
+      },
+      "terms.term_recall": {
+        "better_when": "higher",
+        "minimum_improvement": null
+      },
+      "omissions.omitted_utterances": {
+        "better_when": "lower",
+        "minimum_improvement": null
+      }
+    },
+    "correction_gain_without_decode_time_injection": {
+      "cer.error_rate": {
+        "better_when": "lower",
+        "minimum_improvement": null
+      },
+      "wer.error_rate": {
+        "better_when": "lower",
+        "minimum_improvement": null
+      },
+      "terms.term_recall": {
+        "better_when": "higher",
+        "minimum_improvement": null
+      },
+      "omissions.omitted_utterances": {
+        "better_when": "lower",
+        "minimum_improvement": null
+      }
+    }
+  },
+  "guardrails": {
+    "decode_glossary_corrected.correct_to_incorrect": {
+      "maximum_count": null
+    },
+    "no_glossary_corrected.correct_to_incorrect": {
+      "maximum_count": null
+    }
+  }
+}

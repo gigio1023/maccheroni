@@ -55,12 +55,12 @@ chunk boundaries and reporting of extra-label conflicts.
 
 ### Korean ASR
 
-VibeVoice 8bit with glossary-on recorded CER 0.081, WER 0.128, reference-term
+VibeVoice 8bit with glossary-on recorded CER 0.081, WER 0.141, reference-term
 recall 0.95, and 0 empty utterances on a mixed Korean-English sample. The
 bf16 variant produced the same transcript but took 5.42 times as long and used
 1.48 times the peak memory. The 8bit variant is the default.
 
-Qwen3-ASR with glossary-on recorded CER 0.366, WER 0.301, and term recall 0.25
+Qwen3-ASR with glossary-on recorded CER 0.366, WER 0.314, and term recall 0.25
 on the same sample. It cannot replace the default quality, but its peak memory
 was 3.74 GiB versus VibeVoice's 17.05 GiB. D23 selected it as the low-memory
 fallback from this benchmark evidence. D37 withdraws that product fallback:
@@ -72,13 +72,13 @@ version exposes all required evidence.
 
 ### Italian ASR
 
-MOSS with glossary-on recorded CER 0.033, WER 0.081, term recall 0.778, and
+MOSS with glossary-on recorded CER 0.033, WER 0.085, term recall 0.778, and
 backchannels 7/7 on a synthetic two-speaker conversation. Processing took 3.04
 seconds and peak memory was 1.98 GiB. On Italian FLEURS with no glossary terms,
-it predicted 0 terms and produced CER 0.007 and WER 0.028, identical to
+it predicted 0 terms and produced CER 0.007 and WER 0.029, identical to
 glossary-off.
 
-VibeVoice 8bit with glossary-on recorded CER 0.089, WER 0.145, term recall
+VibeVoice 8bit with glossary-on recorded CER 0.089, WER 0.153, term recall
 0.778, and backchannels 7/7 on the same conversation. If MOSS fails, the
 VibeVoice adapter implemented for the Korean path can serve as the Italian
 fallback.
@@ -88,6 +88,8 @@ worsened CER from 0.116 to 0.245. Backchannel preservation fell from 7/7 to
 1/7. It inserted glossary terms 12 times in FLEURS audio that contained none.
 The 27 replacement records contain the CTC score and decision reason, proving
 that injection ran. The current replacement rule cannot be the v1 default.
+
+WER values were recalculated on 2026-08-11 after the scorer was corrected to remove punctuation instead of replacing it with whitespace, matching the existing scoring contract; CER is unchanged.
 
 ## Implementation impact
 

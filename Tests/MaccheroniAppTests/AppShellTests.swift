@@ -30,7 +30,7 @@ struct AppShellTests {
         #expect(korean.languageCoverage == ["ko", "en", "it", "multilingual"])
         #expect(korean.metrics == [
             BenchmarkMetric(key: "cer", value: 0.08123249299719888, display: "CER 0.081"),
-            BenchmarkMetric(key: "wer", value: 0.1282051282051282, display: "WER 0.128"),
+            BenchmarkMetric(key: "wer", value: 0.14102564102564102, display: "WER 0.141"),
             BenchmarkMetric(key: "term_recall", value: 0.95, display: "Term recall 0.950"),
         ])
 
@@ -38,7 +38,7 @@ struct AppShellTests {
         #expect(italian.languageCoverage == ["it"])
         #expect(italian.metrics == [
             BenchmarkMetric(key: "cer", value: 0.033112582781456956, display: "CER 0.033"),
-            BenchmarkMetric(key: "wer", value: 0.08064516129032258, display: "WER 0.081"),
+            BenchmarkMetric(key: "wer", value: 0.0847457627118644, display: "WER 0.085"),
             BenchmarkMetric(key: "term_recall", value: 0.7777777777777778, display: "Term recall 0.778"),
             BenchmarkMetric(key: "backchannels", value: 1, display: "Backchannels 7/7"),
         ])
