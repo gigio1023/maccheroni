@@ -62,7 +62,7 @@
   <img src="docs/assets/pipeline-light.drawio.svg" alt="파이프라인 다이어그램: Mac 안에서 캡처가 전체 파일 화자분리와 120초 ASR leaf(leaf마다 glossary 주입)로 이어지고 타임라인이 화자를 결정하는 타임스탬프 병합을 거쳐 선택적 온디바이스 후처리로 연결됩니다. Mac을 떠나는 것은 opt-in 원격 후처리 레인뿐이고 외부 벤더에는 Codex 로그인으로 연결되며 텍스트만 전송됩니다" width="100%">
 </picture>
 
-실패한 leaf는 typed bound 안에서 다시 나눕니다. 최소 길이는 30초이고 최대 깊이는 3입니다. End-of-sequence 출력만 canonical transcript로 승격합니다. 선택 기능인 Codex 경로는 사용자 자신의 ChatGPT/Codex 구독을 사용해 상한이 정해진 전사 텍스트, 활성 용어집, 지침만 전송합니다. 오디오와 파일 경로는 보내지 않습니다.
+실패한 leaf는 typed bound 안에서 다시 나눕니다. 최소 길이는 30초이고 최대 깊이는 3입니다. End-of-sequence 출력만 canonical transcript로 승격합니다. 선택 기능인 Codex 경로는 사용자 자신의 ChatGPT/Codex 구독을 사용해 상한이 정해진 전사 텍스트, 활성 용어집, 지침만 전송합니다. 오디오와 파일 경로는 보내지 않습니다. Correction은 용어집을 보조 문맥으로 다룹니다. segment에 그 용어가 실제로 있었을 법할 때만 치환하고 불확실한 수정은 적용하는 대신 검토 대상으로 표시합니다.
 
 ## 모델
 
@@ -101,6 +101,8 @@
   <img src="docs/assets/leaf-cap-light.svg" alt="막대 그래프: 같은 600초 입력에서 120초 leaf는 정준 EOS leaf 5개를 생성(통과), 240초와 300초 leaf는 유효 leaf 0개(타입이 지정된 invalid_eos_output 실패), 240초 부모의 강제 복구는 유효한 120초 자식 5개를 생성" width="100%">
 </picture>
 
+Correction의 개선 폭은 가정이 아니라 측정으로 확인합니다. 4-state 비교 harness가 완료된 run의 raw 출력과 corrected 출력을 같은 기준 전사와 대조합니다. decode 시점 용어집 주입 유무까지 비교하고 기준에서 멀어진 수정을 하나씩 셉니다. 자신 있게 틀린 수정이 평균 속에 숨지 못합니다.
+
 ## 설치
 
 아직 패키지 release는 없습니다. 소스에서 build하세요.
@@ -136,8 +138,8 @@ build, resource allowlist inventory, strict codesign 검사를 모두 통과하�
 </p>
 
 - 전사, VAD, 화자 분리는 모두 로컬에서 실행합니다. 오디오 byte는 어떤 network path로도 전달하지 않습니다. 정책 선언에 그치지 않고 test로 강제합니다.
-- 선택 기능인 Codex 후처리 경로는 텍스트만 보내며 실행마다 사용자가 선택합니다. 저장된 ChatGPT 구독 로그인을 사용해 한 번의 turn만 처리하는 `codex app-server` 세션을 엽니다. thread는 임시 상태이며 읽기 전용입니다. tool은 끄고 승인 요청은 거절합니다. prompt에는 segment text, 활성 용어집, 지침이 들어갑니다. 이 경로는 API key 인증을 받지 않습니다. 로컬 MLX 모델을 선택하면 텍스트도 기기를 떠나지 않습니다.
-- Failure message는 run manifest에 들어가기 전에 길이를 제한하고 path를 가립니다.
+- 선택 기능인 Codex 후처리 경로는 텍스트만 보내며 실행마다 사용자가 선택합니다. 저장된 ChatGPT 구독 로그인을 사용해 한 번의 turn만 처리하는 `codex app-server` 세션을 엽니다. thread는 임시 상태이며 읽기 전용입니다. MCP server와 부가 tooling은 끄고 승인 요청은 거절합니다. prompt에는 segment text, 활성 용어집, 지침이 들어갑니다. 이 경로는 API key 인증을 받지 않습니다. 로컬 MLX 모델을 선택하면 텍스트도 기기를 떠나지 않습니다.
+- Codex 경로의 failure message는 run manifest에 들어가기 전에 길이를 제한하고 path를 가립니다.
 
 ## 제약
 
@@ -157,7 +159,7 @@ Issue와 범위를 명확히 한 pull request를 환영합니다. Build 및 test
 |---|---|
 | `Sources/` | Swift 패키지: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
 | `Tests/` | 22개 suite에 걸친 fixture 기반 test 241개 |
-| `benchmarks/scripts/` | Derived verdict와 negative test를 포함한 runner 및 scorer |
+| `benchmarks/scripts/` | Derived verdict와 negative test를 포함한 runner, scorer, correction 경로 비교 harness |
 | `docs/` | 조사 digest, source audit, constraint policy, 계약(JSON schema), UI design |
 | `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |
 | [PROJECT.md](PROJECT.md) | 의도 계층: 기둥, 비목표, 판단 규칙, 추가만 가능한 결정 기록 |

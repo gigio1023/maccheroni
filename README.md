@@ -63,7 +63,7 @@ The parts all exist at the library layer. The combination didn't exist at the ap
   <img src="docs/assets/pipeline-light.drawio.svg" alt="Pipeline diagram: on your Mac, capture feeds whole-file diarization and 120-second ASR leaves with per-leaf glossary injection; the timestamp merge, where the timeline owns speakers, feeds optional on-device post-processing; the only thing that leaves the Mac is the opt-in remote post-processing lane, an external vendor reached through your Codex sign-in, text only" width="100%">
 </picture>
 
-Failed leaves are re-split within typed bounds (30 s minimum, depth 3) and only end-of-sequence outputs are ever promoted to the canonical transcript. The optional Codex lane sends bounded transcript text, the active glossary, and instructions — never audio, never file paths — through your own ChatGPT/Codex subscription.
+Failed leaves are re-split within typed bounds (30 s minimum, depth 3) and only end-of-sequence outputs are ever promoted to the canonical transcript. The optional Codex lane sends bounded transcript text, the active glossary, and instructions — never audio, never file paths — through your own ChatGPT/Codex subscription. Correction treats the glossary as supporting context: a term is substituted only where the segment plausibly contains it, and any uncertain repair is flagged for review instead of applied.
 
 ## Models
 
@@ -102,6 +102,8 @@ Chunk-boundary speaker stability on the 78-minute sample: 1.0 for both reference
   <img src="docs/assets/leaf-cap-light.svg" alt="Bar chart: on the same 600-second input, 120-second leaves yield 5 canonical end-of-sequence leaves (pass), 240- and 300-second leaves yield 0 valid leaves (typed invalid_eos_output failures), and forced recovery from 240-second parents yields 5 valid 120-second children" width="100%">
 </picture>
 
+Correction gains are measured, not assumed. A four-state comparison harness scores a completed run's raw and corrected output against one reference — with and without decode-time glossary injection — and counts every applied correction that moved a segment away from the reference, so a confidently wrong repair can never hide inside an average.
+
 ## Install
 
 There are no packaged releases yet — build from source.
@@ -137,8 +139,8 @@ Profiles ship for Korean meetings (`ko-meeting`, VibeVoice) and Italian dialogue
 </p>
 
 - Transcription, VAD, and diarization are fully local. Audio bytes never reach any network path — this is enforced by tests, not policy.
-- The optional Codex post-processing lane is text-only and opt-in per run. It opens a one-turn `codex app-server` session using the cached ChatGPT subscription sign-in. The thread is ephemeral and read-only, tools are disabled, and approval requests are declined; the prompt contains segment text, the active glossary, and instructions. API-key authentication is not accepted for this lane. Choosing the local MLX model instead keeps even text on-device.
-- Failure messages are length-capped and path-redacted before they enter run manifests.
+- The optional Codex post-processing lane is text-only and opt-in per run. It opens a one-turn `codex app-server` session using the cached ChatGPT subscription sign-in. The thread is ephemeral and read-only, MCP servers and optional tooling are disabled, and approval requests are declined; the prompt contains segment text, the active glossary, and instructions. API-key authentication is not accepted for this lane. Choosing the local MLX model instead keeps even text on-device.
+- Codex-lane failure messages are length-capped and path-redacted before they enter run manifests.
 
 ## Limitations
 
@@ -158,7 +160,7 @@ Issues and focused pull requests are welcome. Build and test commands, the verif
 |---|---|
 | `Sources/` | Swift package: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
 | `Tests/` | 241 fixture-based tests across 22 suites |
-| `benchmarks/scripts/` | Runners and scorers with derived verdicts and negative tests |
+| `benchmarks/scripts/` | Runners, scorers, and the correction-path comparison harness, with derived verdicts and negative tests |
 | `docs/` | Research digest, source audits, constraint policy, contracts (JSON schemas), UI design |
 | `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |
 | [PROJECT.md](PROJECT.md) | Intent hierarchy: pillars, non-goals, judgment rules, append-only decision log |

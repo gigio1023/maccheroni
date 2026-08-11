@@ -62,7 +62,7 @@
   <img src="docs/assets/pipeline-light.drawio.svg" alt="パイプライン図: Mac内でキャプチャがファイル全体の話者分離と120秒のASR leaf(leafごとにglossary注入)につながり、タイムラインが話者を決めるタイムスタンプmergeを経て任意のオンデバイス後処理へ続く。Macから出るのはopt-inのリモート後処理レーンのみで、外部ベンダーへはCodexサインインで接続し、テキストだけを送る" width="100%">
 </picture>
 
-失敗したleafはtyped bound内で再分割します。最小30秒、深さは最大3です。End-of-sequence出力だけをcanonical transcriptへ昇格させます。任意のCodex経路は、自分のChatGPT/Codexサブスクリプションを使い、上限を設けた文字起こしテキスト、有効な用語集、指示だけを送信します。音声もファイルパスも送信しません。
+失敗したleafはtyped bound内で再分割します。最小30秒、深さは最大3です。End-of-sequence出力だけをcanonical transcriptへ昇格させます。任意のCodex経路は、自分のChatGPT/Codexサブスクリプションを使い、上限を設けた文字起こしテキスト、有効な用語集、指示だけを送信します。音声もファイルパスも送信しません。Correctionは用語集を補助的な文脈として扱います。segmentにその用語が実際に含まれていたと考えられる場合だけ置換し、不確実な修正は適用せずreview対象として印を付けます。
 
 ## モデル
 
@@ -101,6 +101,8 @@
   <img src="docs/assets/leaf-cap-light.svg" alt="棒グラフ: 同じ600秒の入力で、120秒leafは5つの正準EOS leafを生成（合格）、240秒と300秒のleafは有効leaf 0（型付きinvalid_eos_output失敗）、240秒の親からの強制リカバリは有効な120秒の子を5つ生成" width="100%">
 </picture>
 
+Correctionの改善幅は仮定ではなく測定で確認します。4-state比較harnessが完了したrunのraw出力とcorrected出力を同じ参照文字起こしと照合し、decode時の用語集注入の有無も比較して、参照から遠ざかった修正を一つずつ数えます。自信を持って間違えた修正が平均の中に隠れることはありません。
+
 ## インストール
 
 パッケージreleaseはまだありません。ソースからbuildしてください。
@@ -136,8 +138,8 @@ build、resource allowlist inventory、strict codesignの各チェックに合�
 </p>
 
 - 文字起こし、VAD、話者分離は完全にローカルで実行します。音声byteがnetwork pathへ到達することはありません。ポリシーではなくtestで強制しています。
-- 任意のCodex後処理経路はテキストのみを扱い、runごとに選択します。保存済みのChatGPTサブスクリプション認証を使い、1ターンだけの`codex app-server`セッションを開きます。threadは一時的かつread-onlyで、toolは無効、承認要求は拒否されます。promptに含まれるのはsegment text、有効な用語集、指示です。この経路ではAPI key認証を受け付けません。代わりにローカルMLXモデルを選ぶと、テキストもデバイス内に残ります。
-- Failure messageはrun manifestへ入る前に長さを制限し、pathを秘匿します。
+- 任意のCodex後処理経路はテキストのみを扱い、runごとに選択します。保存済みのChatGPTサブスクリプション認証を使い、1ターンだけの`codex app-server`セッションを開きます。threadは一時的かつread-onlyで、MCP serverと付加的なtoolingは無効、承認要求は拒否されます。promptに含まれるのはsegment text、有効な用語集、指示です。この経路ではAPI key認証を受け付けません。代わりにローカルMLXモデルを選ぶと、テキストもデバイス内に残ります。
+- Codex経路のfailure messageはrun manifestへ入る前に長さを制限し、pathを秘匿します。
 
 ## 制約
 
@@ -157,7 +159,7 @@ Issueと対象を絞ったpull requestを歓迎します。Buildとtestのコマ
 |---|---|
 | `Sources/` | Swiftパッケージ：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
 | `Tests/` | 22 suite、241件のfixtureベースtest |
-| `benchmarks/scripts/` | Derived verdictとnegative testを備えたrunnerとscorer |
+| `benchmarks/scripts/` | Derived verdictとnegative testを備えたrunner、scorer、correction経路比較harness |
 | `docs/` | 調査digest、source audit、constraint policy、契約（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |
 | [PROJECT.md](PROJECT.md) | 意図の階層：柱、対象外、判断規則、追記専用の意思決定記録 |

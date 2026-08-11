@@ -62,7 +62,7 @@
   <img src="docs/assets/pipeline-light.drawio.svg" alt="流水线图:在 Mac 上,采集送入整文件说话人分离和120秒 ASR leaf(每个 leaf 注入词汇表);时间戳合并由时间线决定说话人,再送入可选的设备端后处理;离开 Mac 的只有可选的远程后处理通道,通过 Codex 登录连接外部供应商,且仅传输文本" width="100%">
 </picture>
 
-失败的 leaf 会在 typed bound 内重新分割，最短30秒，最大深度为3。只有 end-of-sequence 输出才能升级为 canonical transcript。可选的 Codex 路径通过你自己的 ChatGPT/Codex 订阅发送有长度上限的转写文本、当前术语表和指令。它绝不发送音频或文件路径。
+失败的 leaf 会在 typed bound 内重新分割，最短30秒，最大深度为3。只有 end-of-sequence 输出才能升级为 canonical transcript。可选的 Codex 路径通过你自己的 ChatGPT/Codex 订阅发送有长度上限的转写文本、当前术语表和指令。它绝不发送音频或文件路径。Correction 把术语表当作辅助上下文：只有当 segment 里确实可能出现某个术语时才会替换，任何不确定的修正都会标记为待审核，而不是直接应用。
 
 ## 模型
 
@@ -101,6 +101,8 @@
   <img src="docs/assets/leaf-cap-light.svg" alt="柱状图：在同一段600秒输入上，120秒 leaf 产生5个规范的 EOS leaf（通过），240秒和300秒 leaf 产生0个有效 leaf（类型化的 invalid_eos_output 失败），从240秒父节点强制恢复产生5个有效的120秒子节点" width="100%">
 </picture>
 
+Correction 的收益靠测量而不是假设。四状态对比 harness 用同一份参照转写评估已完成 run 的原始输出和修正输出，并对比 decode 时是否注入术语表，逐条统计让 segment 偏离参照的修正。一次自信却错误的修正无法藏进平均值。
+
 ## 安装
 
 目前尚无打包release，请从源码build。
@@ -136,8 +138,8 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 </p>
 
 - 转写、VAD 和说话人分离完全在本地执行。音频 byte 绝不会进入任何 network path。这一限制由 test 强制执行，并非只写在政策中。
-- 可选的 Codex 后处理路径只发送文本，并且每次运行都需要主动选择。它使用已保存的 ChatGPT 订阅登录打开单轮 `codex app-server` 会话。thread 是临时且只读的，tool 会被禁用，审批请求会被拒绝。prompt 只包含 segment text、当前术语表和指令。此路径不接受 API key 身份验证。选择本地 MLX 模型后，连文本也会留在设备上。
-- Failure message 在进入 run manifest 前会限制长度并隐去 path。
+- 可选的 Codex 后处理路径只发送文本，并且每次运行都需要主动选择。它使用已保存的 ChatGPT 订阅登录打开单轮 `codex app-server` 会话。thread 是临时且只读的，MCP server 和可选 tooling 会被禁用，审批请求会被拒绝。prompt 只包含 segment text、当前术语表和指令。此路径不接受 API key 身份验证。选择本地 MLX 模型后，连文本也会留在设备上。
+- Codex 路径的 failure message 在进入 run manifest 前会限制长度并隐去 path。
 
 ## 限制
 
@@ -157,7 +159,7 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 |---|---|
 | `Sources/` | Swift 包：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
 | `Tests/` | 分布于22个 suite 的241项 fixture test |
-| `benchmarks/scripts/` | 带有 derived verdict 和 negative test 的 runner 与 scorer |
+| `benchmarks/scripts/` | 带有 derived verdict 和 negative test 的 runner、scorer 与 correction 路径对比 harness |
 | `docs/` | 调研 digest、source audit、constraint policy、契约（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |
 | [PROJECT.md](PROJECT.md) | 意图层级：支柱、非目标、判断规则和只追加不删除的决策日志 |

@@ -63,7 +63,7 @@ Auf Bibliotheksebene sind alle Bausteine vorhanden. Auf App-Ebene fehlte ihre Ko
   <img src="docs/assets/pipeline-light.drawio.svg" alt="Pipeline-Diagramm: Auf dem Mac speist die Aufnahme die Ganzdatei-Diarisierung und 120-Sekunden-ASR-Blätter mit Glossar-Injektion pro Blatt; der Zeitstempel-Merge, in dem die Timeline die Sprecher bestimmt, führt zur optionalen Nachbearbeitung auf dem Gerät; den Mac verlässt nur die Opt-in-Spur für entfernte Nachbearbeitung zu einem externen Anbieter über die Codex-Anmeldung, ausschließlich Text" width="100%">
 </picture>
 
-Fehlgeschlagene Blätter werden innerhalb typisierter Grenzen erneut aufgeteilt (mindestens 30 s, Tiefe 3). Nur Ausgaben mit einem Ende-der-Sequenz-Marker werden in das kanonische Transkript übernommen. Der optionale Codex-Pfad sendet begrenzte Transkriptabschnitte, das aktive Glossar und Anweisungen über dein eigenes ChatGPT/Codex-Abonnement. Audio und Dateipfade werden niemals gesendet.
+Fehlgeschlagene Blätter werden innerhalb typisierter Grenzen erneut aufgeteilt (mindestens 30 s, Tiefe 3). Nur Ausgaben mit einem Ende-der-Sequenz-Marker werden in das kanonische Transkript übernommen. Der optionale Codex-Pfad sendet begrenzte Transkriptabschnitte, das aktive Glossar und Anweisungen über dein eigenes ChatGPT/Codex-Abonnement. Audio und Dateipfade werden niemals gesendet. Die Korrektur behandelt das Glossar als unterstützenden Kontext: Ein Begriff wird nur dort ersetzt, wo das Segment ihn plausibel enthält, und jede unsichere Korrektur wird zur Prüfung markiert statt angewendet.
 
 ## Modelle
 
@@ -102,6 +102,8 @@ Stabilität der Sprecher an Abschnittsgrenzen im 78-Minuten-Beispiel: 1.0 für b
   <img src="docs/assets/leaf-cap-light.svg" alt="Balkendiagramm: Auf demselben 600-Sekunden-Input liefern 120-Sekunden-Blätter 5 kanonische End-of-Sequence-Blätter (bestanden), 240- und 300-Sekunden-Blätter 0 gültige Blätter (typisierte invalid_eos_output-Fehler), und die erzwungene Wiederherstellung aus 240-Sekunden-Eltern liefert 5 gültige 120-Sekunden-Kinder" width="100%">
 </picture>
 
+Korrekturgewinne werden gemessen, nicht angenommen. Ein Vergleichs-Harness mit vier Zuständen bewertet die rohe und die korrigierte Ausgabe eines abgeschlossenen Laufs gegen dieselbe Referenz, mit und ohne Glossar-Injektion zur Dekodierzeit, und zählt jede angewendete Korrektur, die ein Segment von der Referenz entfernt hat. Eine selbstbewusst falsche Korrektur kann sich nicht in einem Durchschnitt verstecken.
+
 ## Installation
 
 Es gibt noch keine paketierten Releases. Baue das Projekt aus dem Quellcode.
@@ -137,8 +139,8 @@ Mitgeliefert werden Profile für koreanische Meetings (`ko-meeting`, VibeVoice) 
 </p>
 
 - Transkription, VAD und Diarisierung laufen vollständig lokal. Audiobytes gelangen auf keinen Netzwerkpfad. Tests erzwingen dies, nicht bloß eine Richtlinie.
-- Der optionale Codex-Nachbearbeitungspfad arbeitet ausschließlich mit Text und muss für jeden Lauf aktiviert werden. Er öffnet mit der gespeicherten ChatGPT-Abonnementanmeldung eine einmalige `codex app-server`-Sitzung. Der Thread ist temporär und schreibgeschützt, Werkzeuge sind deaktiviert und Genehmigungsanfragen werden abgelehnt. Der Prompt enthält Segmenttext, das aktive Glossar und Anweisungen. Eine API-Key-Anmeldung wird für diesen Pfad nicht akzeptiert. Wer stattdessen das lokale MLX-Modell wählt, behält auch den Text auf dem Gerät.
-- Fehlermeldungen werden in ihrer Länge begrenzt und Pfade daraus entfernt, bevor sie in Ausführungsmanifeste gelangen.
+- Der optionale Codex-Nachbearbeitungspfad arbeitet ausschließlich mit Text und muss für jeden Lauf aktiviert werden. Er öffnet mit der gespeicherten ChatGPT-Abonnementanmeldung eine einmalige `codex app-server`-Sitzung. Der Thread ist temporär und schreibgeschützt, MCP-Server und optionale Werkzeuge sind deaktiviert und Genehmigungsanfragen werden abgelehnt. Der Prompt enthält Segmenttext, das aktive Glossar und Anweisungen. Eine API-Key-Anmeldung wird für diesen Pfad nicht akzeptiert. Wer stattdessen das lokale MLX-Modell wählt, behält auch den Text auf dem Gerät.
+- Fehlermeldungen des Codex-Pfads werden in ihrer Länge begrenzt und Pfade daraus entfernt, bevor sie in Ausführungsmanifeste gelangen.
 
 ## Einschränkungen
 
@@ -158,7 +160,7 @@ Issues und gezielte Pull Requests sind willkommen. Build- und Testbefehle, der V
 |---|---|
 | `Sources/` | Swift-Paket: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
 | `Tests/` | 241 fixturebasierte Tests in 22 Suites |
-| `benchmarks/scripts/` | Runner und Scorer mit abgeleiteten Urteilen und Negativtests |
+| `benchmarks/scripts/` | Runner, Scorer und der Vergleichs-Harness für Korrekturpfade, mit abgeleiteten Urteilen und Negativtests |
 | `docs/` | Forschungsübersicht, Quellcodeprüfungen, Richtlinie für Beschränkungen, Verträge (JSON-Schemas), UI-Design |
 | `scripts/` | App-Bundle-Build, MOSS-Harness-Build, Einrichtung der Nachbearbeitungslaufzeit |
 | [PROJECT.md](PROJECT.md) | Absichtshierarchie: Grundsätze, Nicht-Ziele, Entscheidungsregeln, ausschließlich ergänztes Entscheidungsprotokoll |
