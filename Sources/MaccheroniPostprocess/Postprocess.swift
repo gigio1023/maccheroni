@@ -825,13 +825,21 @@ public enum PostprocessPrompt {
                 entries: request.glossary?.entries ?? []
             )
         )
+        var instruction = [
+            "Correct transcript text only. Do not infer or output speaker labels, timing, source, or metadata.",
+        ]
+        if !input.glossary.entries.isEmpty {
+            instruction.append(
+                "Use INPUT.glossary.entries as supporting context for likely transcription errors. The entries are terms the speaker was expected to use, not required output. Do not insert or substitute a glossary term unless the segment plausibly contains that spoken term. If such a correction is plausible but uncertain, use review."
+            )
+        }
+        instruction.append(contentsOf: [
+            "Return exactly one JSON object with this shape and no commentary:",
+            #"{"proposals":[{"segment_index":0,"replacement_text":"corrected full segment text","disposition":"apply","reason":"brief reason"}]}"#,
+            #"The only root key is proposals. Every proposal has exactly segment_index, replacement_text, disposition, and reason. disposition is apply or review. Use apply only when the correction is certain; otherwise use review. Return {"proposals":[]} when no correction is needed."#,
+        ])
         return try prompt(
-            instruction: """
-            Correct transcript text only. Do not infer or output speaker labels, timing, source, or metadata.
-            Return exactly one JSON object with this shape and no commentary:
-            {"proposals":[{"segment_index":0,"replacement_text":"corrected full segment text","disposition":"apply","reason":"brief reason"}]}
-            The only root key is proposals. Every proposal has exactly segment_index, replacement_text, disposition, and reason. disposition is apply or review. Use apply only when the correction is certain; otherwise use review. Return {"proposals":[]} when no correction is needed.
-            """,
+            instruction: instruction.joined(separator: "\n"),
             input: input
         )
     }

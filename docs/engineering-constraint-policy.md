@@ -323,6 +323,55 @@ it. Store estimates in fields separate from observations.
 Reviewers ask whether all constraints that make up the product promise meet in
 the same formula and tests, rather than whether a constant was increased.
 
+## 2026-08-10 Glossary-Aware Correction Prompt Constraint
+
+Correction uses glossary entries as supporting context only when the supplied
+entry list is nonempty. The instruction identifies the encoded input path as
+`INPUT.glossary.entries`, treats entries as expected terms rather than required
+output, prohibits insertion without a plausible occurrence in the segment, and
+routes uncertain glossary-based corrections to review. An absent or empty entry
+list retains the previous instruction.
+
+| Field | Value |
+|---|---|
+| `name` | `postprocess_correction_glossary_instruction_bytes` |
+| `variable` | rendered correction prompt size |
+| `unit` | UTF-8 bytes |
+| `scope` | Codex and local correction batches with nonempty glossaries |
+| `kind` | hard backend prompt limits with fixed instruction overhead |
+| `source` | D30 backend limits and `PostprocessPrompt` rendered-byte accounting |
+| `formula` | `rendered_prompt = instruction + "\nINPUT:\n" + sorted_input_json`; the conditional instruction adds `318 + 1 = 319` bytes |
+| `headroom` | fixture: 928 bytes local and 15,264 bytes Codex; output-budget-saturating one-segment ASCII input: 665 bytes local and 13,337 bytes Codex |
+| `observed_range` | one- and two-segment synthetic requests, absent, empty, and two-entry glossaries, 2026-08-10 |
+| `failure_mode` | split a multi-segment candidate or reject an oversized single segment with `batchPromptTooLarge` |
+| `telemetry` | `prompt_utf8_bytes` and manifest batching maxima |
+| `review_trigger` | instruction, payload shape, prompt limit, segment limit, or output-budget formula changes |
+
+The existing two-entry, two-segment correction fixture grew from 801 to 1,120
+bytes. The local limit remains 2,048 bytes, leaving 928 bytes. The Codex limit
+remains 16,384 bytes, leaving 15,264 bytes. The fixture contains 27 input text
+bytes, so its output estimate is unchanged:
+
+```text
+32 + ceil(27 * 2000 / 1000) + 2 * 96 = 278 tokens
+768 - 278 = 490 tokens of local planning margin
+```
+
+At the output-planning limit, a one-segment local batch with 320 ordinary ASCII
+input bytes renders a 1,383-byte prompt and leaves 665 bytes. A one-segment
+Codex batch with 1,984 input bytes renders a 3,047-byte prompt and leaves 13,337
+bytes. Instruction bytes do not enter the output estimate directly. The planner
+checks rendered prompt bytes and estimated output tokens independently, then
+recalculates both after a split.
+
+There is no fixed positive margin for arbitrary glossary contents or JSON
+escaping. The planner measures the final encoded prompt for every candidate.
+`correctionPromptBoundaryIsAcceptedBelowAndAtLimitThenRejectedAbove` exercises
+the nonempty-glossary correction path at one byte below, exactly at, and one byte
+above a configured prompt limit. The prompt contract tests separately cover
+nonempty, absent, and empty glossary inputs and require both correction backends
+to receive the same guidance and payload.
+
 ## MOSS Application Example
 
 The MOSS long-file fix was the first application of this policy.
