@@ -110,7 +110,7 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 198 tests
+swift build && swift test          # 241 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -156,7 +156,7 @@ Issueと対象を絞ったpull requestを歓迎します。Buildとtestのコマ
 | パス | 内容 |
 |---|---|
 | `Sources/` | Swiftパッケージ：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
-| `Tests/` | 19 suite、198件のfixtureベースtest |
+| `Tests/` | 22 suite、241件のfixtureベースtest |
 | `benchmarks/scripts/` | Derived verdictとnegative testを備えたrunnerとscorer |
 | `docs/` | 調査digest、source audit、constraint policy、契約（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |
