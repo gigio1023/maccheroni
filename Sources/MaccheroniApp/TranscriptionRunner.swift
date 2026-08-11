@@ -2,6 +2,12 @@ import CryptoKit
 import Foundation
 import MaccheroniCore
 
+private struct TranscriptionInputIdentity {
+    let fileName: String
+    let sizeBytes: Int
+    let sha256: String
+}
+
 enum TranscriptionRunnerError: Error, LocalizedError {
     case executableMissing
     case launchFailed(String)
@@ -54,6 +60,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
         guard process == nil else {
             throw TranscriptionRunnerError.launchFailed("another run is active")
         }
+        let launchInput = try inputIdentity(at: request.sourceURL)
         cancelRequested = false
         let requestDirectory = try createRequestDirectory()
         let profileURL = requestDirectory.appendingPathComponent("profiles.json")
@@ -115,7 +122,11 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
             // is running; directory discovery is a post-exit fallback.
             if runURL == nil,
                let reported = try? reportedRunURL(from: stdoutURL),
-               let validated = try? validate(reported, for: request) {
+               let validated = try? validate(
+                   reported,
+                   for: request,
+                   launchInput: launchInput
+               ) {
                 runURL = validated
             }
             if let runURL, let manifest = try? readManifest(at: runURL) {
@@ -144,6 +155,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
         do {
             runURL = try resolveRunURL(
                 for: request,
+                launchInput: launchInput,
                 stdoutURL: stdoutURL,
                 directoriesBefore: directoriesBefore
             )
@@ -306,11 +318,12 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
 
     private func resolveRunURL(
         for request: TranscriptionRequest,
+        launchInput: TranscriptionInputIdentity,
         stdoutURL: URL,
         directoriesBefore: Set<URL>
     ) throws -> URL {
         if let reported = try reportedRunURL(from: stdoutURL) {
-            return try validate(reported, for: request)
+            return try validate(reported, for: request, launchInput: launchInput)
         }
 
         let current = try childDirectories(of: request.outputRoot)
@@ -321,7 +334,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
         guard candidates.count == 1, let candidate = candidates.first else {
             throw TranscriptionRunnerError.resultAmbiguous
         }
-        return try validate(candidate, for: request)
+        return try validate(candidate, for: request, launchInput: launchInput)
     }
 
     private func reportedRunURL(from stdoutURL: URL) throws -> URL? {
@@ -340,7 +353,8 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
     @discardableResult
     private func validate(
         _ candidate: URL,
-        for request: TranscriptionRequest
+        for request: TranscriptionRequest,
+        launchInput: TranscriptionInputIdentity
     ) throws -> URL {
         let root = request.outputRoot.standardizedFileURL.resolvingSymlinksInPath()
         let runURL = candidate.standardizedFileURL.resolvingSymlinksInPath()
@@ -355,27 +369,32 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
         } catch {
             throw TranscriptionRunnerError.resultInvalid
         }
-        let sourceValues = try request.sourceURL.resourceValues(forKeys: [.fileSizeKey])
-        guard manifest.input.fileName == request.sourceURL.lastPathComponent,
+        guard manifest.input.fileName == launchInput.fileName,
               manifest.runID == runURL.lastPathComponent,
-              manifest.input.sizeBytes == sourceValues.fileSize,
-              manifest.input.sha256 == (try sha256(of: request.sourceURL))
+              manifest.input.sizeBytes == launchInput.sizeBytes,
+              manifest.input.sha256 == launchInput.sha256
         else {
             throw TranscriptionRunnerError.resultInvalid
         }
         return runURL
     }
 
-    private func sha256(of url: URL) throws -> String {
+    private func inputIdentity(at url: URL) throws -> TranscriptionInputIdentity {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var digest = SHA256()
+        var sizeBytes = 0
         while true {
             let data = try handle.read(upToCount: 1_048_576) ?? Data()
             guard !data.isEmpty else { break }
+            sizeBytes += data.count
             digest.update(data: data)
         }
-        return digest.finalize().map { String(format: "%02x", $0) }.joined()
+        return TranscriptionInputIdentity(
+            fileName: url.lastPathComponent,
+            sizeBytes: sizeBytes,
+            sha256: digest.finalize().map { String(format: "%02x", $0) }.joined()
+        )
     }
 
     private func snapshot(

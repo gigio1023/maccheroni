@@ -95,6 +95,43 @@ struct RunnerCaptureRecoveryTests {
     }
 
     @Test @MainActor
+    func inputMutationFailureRunUsesThePrelaunchIdentityAndRemainsAttached() async throws {
+        let fixture = try RunnerRecoveryFixture()
+        defer { fixture.remove() }
+        let runID = "input-mutated"
+        let manifest = try fixture.manifestPayload(
+            runID: runID,
+            status: .failed,
+            failure: Failure(
+                code: "INPUT_MUTATED",
+                message: "The input changed after launch."
+            )
+        )
+        let mutatedData = Data("mutated after manifest creation".utf8)
+        let expectedRunURL = fixture.outputRoot.appendingPathComponent(runID)
+        let script = try fixture.script(
+            creating: [(runID, manifest)],
+            printing: expectedRunURL.path,
+            replacingSourceWith: mutatedData
+        )
+        let runner = try fixture.runner(executableURL: script)
+        var attachedRunURL: URL?
+
+        let error = await #expect(throws: TranscriptionRunnerError.self) {
+            _ = try await runner.run(fixture.request) { snapshot in
+                attachedRunURL = snapshot.runURL ?? attachedRunURL
+            }
+        }
+
+        guard case .pipelineFailed = error else {
+            Issue.record("Expected the preserved INPUT_MUTATED run to surface its failure")
+            return
+        }
+        #expect(attachedRunURL?.standardizedFileURL == expectedRunURL.standardizedFileURL)
+        #expect(try Data(contentsOf: fixture.sourceURL) == mutatedData)
+    }
+
+    @Test @MainActor
     func directoryFallbackRejectsAmbiguousNewRuns() async throws {
         let fixture = try RunnerRecoveryFixture()
         defer { fixture.remove() }
@@ -190,11 +227,16 @@ private struct RunnerRecoveryFixture {
         )
     }
 
-    func manifestPayload(runID: String, inputData: Data? = nil) throws -> Data {
+    func manifestPayload(
+        runID: String,
+        inputData: Data? = nil,
+        status: RunStatus = .succeeded,
+        failure: Failure? = nil
+    ) throws -> Data {
         let data = inputData ?? sourceData
         return try JSONEncoder().encode(Manifest(
             runID: runID,
-            status: .succeeded,
+            status: status,
             input: InputAudio(
                 fileName: inputData == nil ? sourceURL.lastPathComponent : "other.wav",
                 sha256: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined(),
@@ -225,11 +267,15 @@ private struct RunnerRecoveryFixture {
                 wallTimeS: 1
             ),
             artifacts: [],
-            failure: nil
+            failure: failure
         ))
     }
 
-    func script(creating runs: [(String, Data)], printing path: String?) throws -> URL {
+    func script(
+        creating runs: [(String, Data)],
+        printing path: String?,
+        replacingSourceWith replacement: Data? = nil
+    ) throws -> URL {
         let payloadRoot = root.appendingPathComponent("payloads", isDirectory: true)
         try FileManager.default.createDirectory(
             at: payloadRoot,
@@ -249,6 +295,11 @@ private struct RunnerRecoveryFixture {
             try run.1.write(to: payload)
             commands.append("mkdir -p \"$output_root/\(run.0)\"")
             commands.append("cp \"\(payload.path)\" \"$output_root/\(run.0)/manifest.json\"")
+        }
+        if let replacement {
+            let mutation = payloadRoot.appendingPathComponent("mutated-input.bin")
+            try replacement.write(to: mutation)
+            commands.append("cp \"\(mutation.path)\" \"\(sourceURL.path)\"")
         }
         if let path {
             commands.append("printf '%s\\n' \"\(path)\"")

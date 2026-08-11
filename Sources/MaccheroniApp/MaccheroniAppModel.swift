@@ -143,7 +143,7 @@ final class MaccheroniAppModel {
         var reconciledInterruptedRun = false
         for index in loadedRecords.indices where loadedRecords[index].state == .transcribing {
             loadedRecords[index].state = .interrupted
-            loadedRecords[index].failureMessage = appString("Transcription Cancelled")
+            loadedRecords[index].failureMessage = appString("Interrupted")
             reconciledInterruptedRun = true
         }
         records = loadedRecords
@@ -357,7 +357,7 @@ final class MaccheroniAppModel {
                     state: .interrupted,
                     speakerNames: [:],
                     conflictResolutions: [:],
-                    failureMessage: appString("Transcription Cancelled")
+                    failureMessage: appString("Interrupted")
                 )
                 try persist(record)
                 activeRecordingRecordID = record.id
@@ -469,6 +469,7 @@ final class MaccheroniAppModel {
         }
         guard canRetryTranscription(record) else { return }
         errorMessage = nil
+        runFailures.removeValue(forKey: record.id)
         activeTask = Task { [weak self] in
             guard let self else { return }
             defer { finishActiveTranscription() }
@@ -811,7 +812,6 @@ final class MaccheroniAppModel {
         guard let index = records.firstIndex(where: { $0.id == recordID }) else { return }
         records[index].state = .failed
         records[index].failureMessage = message
-        runFailures.removeValue(forKey: recordID)
         try recordSaver(records)
     }
 
@@ -920,11 +920,11 @@ final class MaccheroniAppModel {
                   !indexedURLs.contains(microphoneURL),
                   !indexedURLs.contains(systemAudioURL)
             else { return nil }
+            guard let duration = recoverableCaptureDuration(
+                microphoneURL: microphoneURL,
+                systemAudioURL: systemAudioURL
+            ) else { return nil }
             let startedAt = values?.creationDate ?? Date()
-            let duration = max(
-                (try? readableAudioDuration(at: microphoneURL)) ?? 0,
-                (try? readableAudioDuration(at: systemAudioURL)) ?? 0
-            )
             return LibraryRecord(
                 id: UUID(),
                 createdAt: startedAt,
@@ -947,9 +947,30 @@ final class MaccheroniAppModel {
                 state: .interrupted,
                 speakerNames: [:],
                 conflictResolutions: [:],
-                failureMessage: appString("Transcription Cancelled")
+                failureMessage: appString("Interrupted")
             )
         }
+    }
+
+    private static func recoverableCaptureDuration(
+        microphoneURL: URL,
+        systemAudioURL: URL
+    ) -> Double? {
+        guard let microphone = try? AVAudioFile(forReading: microphoneURL),
+              let systemAudio = try? AVAudioFile(forReading: systemAudioURL),
+              isCanonicalRecordingFile(microphone),
+              isCanonicalRecordingFile(systemAudio)
+        else { return nil }
+        let frames = max(microphone.length, systemAudio.length)
+        guard frames > 0 else { return nil }
+        return Double(frames) / RecordingStorage.sampleRate
+    }
+
+    private static func isCanonicalRecordingFile(_ file: AVAudioFile) -> Bool {
+        let format = file.processingFormat
+        return format.sampleRate == RecordingStorage.sampleRate
+            && format.channelCount == RecordingStorage.channelCount
+            && format.commonFormat == .pcmFormatFloat32
     }
 
     private static func combinedFailureMessage(

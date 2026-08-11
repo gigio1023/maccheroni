@@ -969,6 +969,44 @@ struct AppShellTests {
     }
 
     @Test @MainActor
+    func freshMossLimitFailureBlocksIdenticalRetryWithoutRelaunch() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let limit = try appShellFailedRunFixture(
+            in: root,
+            runID: "fresh-moss-limit",
+            code: "MOSS_LIMIT_EXHAUSTED",
+            message: "MOSS maximumTokens persisted after bounded splitting"
+        )
+        var record = appShellRecord(sourceURL: limit.inputURL)
+        record.profileID = .italianDialogue
+        record.state = .recorded
+        let repository = LibraryRepository(root: root)
+        try repository.saveRecords([record])
+        let runner = AppShellManifestFailureRunner(runURL: limit.runURL)
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(AppProfileID.italianDialogue.rawValue, forKey: "selectedProfile")
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: runner,
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+
+        model.select(.record(record.id))
+        model.retrySelectedTranscription()
+        await appShellWait { runner.didRun && !model.isTranscribing }
+
+        let failed = try #require(model.records.first(where: { $0.id == record.id }))
+        #expect(failed.runURL == limit.runURL)
+        #expect(model.failure(for: failed)?.code == "MOSS_LIMIT_EXHAUSTED")
+        #expect(model.isMOSSLimitExhausted(failed))
+        #expect(!model.canRetryTranscription(failed))
+    }
+
+    @Test @MainActor
     func multiFileImportIndexesLaterReadableFilesAndAggregatesFailures() async throws {
         let root = try appShellTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -1180,6 +1218,7 @@ struct AppShellTests {
         let record = try #require(model.records.first)
         #expect(model.records.count == 1)
         #expect(record.state == .interrupted)
+        #expect(record.failureMessage == appString("Interrupted"))
         #expect(record.microphoneURL == microphoneURL)
         #expect(record.systemAudioURL == systemURL)
         #expect(try repository.loadRecords() == model.records)
@@ -1197,6 +1236,22 @@ struct AppShellTests {
             isDirectory: true
         )
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        let emptyDirectory = repository.recordingsRoot.appendingPathComponent(
+            "failed-startup",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: emptyDirectory,
+            withIntermediateDirectories: false
+        )
+        let emptyMicrophoneURL = try appShellEmptyCAF(
+            in: emptyDirectory,
+            name: "microphone.caf"
+        )
+        let emptySystemURL = try appShellEmptyCAF(
+            in: emptyDirectory,
+            name: "system-audio.caf"
+        )
         let microphoneURL = try appShellSyntheticCAF(
             in: directory,
             name: "microphone.caf",
@@ -1218,8 +1273,10 @@ struct AppShellTests {
             defaults: defaults
         )
 
+        #expect(model.records.count == 1)
         let recovered = try #require(model.records.first)
         #expect(recovered.state == .interrupted)
+        #expect(recovered.failureMessage == appString("Interrupted"))
         #expect(recovered.microphoneURL == microphoneURL)
         #expect(recovered.systemAudioURL == systemURL)
         #expect(model.canRetryTranscription(recovered))
@@ -1228,6 +1285,9 @@ struct AppShellTests {
         #expect(saved.state == .interrupted)
         #expect(saved.microphoneURL == microphoneURL)
         #expect(saved.systemAudioURL == systemURL)
+        #expect(FileManager.default.fileExists(atPath: emptyDirectory.path))
+        #expect(FileManager.default.fileExists(atPath: emptyMicrophoneURL.path))
+        #expect(FileManager.default.fileExists(atPath: emptySystemURL.path))
     }
 
     @Test @MainActor
@@ -1252,7 +1312,7 @@ struct AppShellTests {
 
         let recovered = try #require(model.records.first)
         #expect(recovered.state == .interrupted)
-        #expect(recovered.failureMessage != nil)
+        #expect(recovered.failureMessage == appString("Interrupted"))
         #expect(model.canRetryTranscription(recovered))
         #expect(try repository.loadRecords().first?.state == .interrupted)
     }
@@ -1710,6 +1770,18 @@ private func appShellSyntheticCAF(
     return url
 }
 
+private func appShellEmptyCAF(in directory: URL, name: String) throws -> URL {
+    let url = directory.appendingPathComponent(name)
+    let file = try AVAudioFile(
+        forWriting: url,
+        settings: RecordingStorage.canonicalFormat.settings,
+        commonFormat: .pcmFormatFloat32,
+        interleaved: false
+    )
+    file.close()
+    return url
+}
+
 @MainActor
 private final class AppShellFakeRunner: TranscriptionRunning {
     func run(
@@ -1779,6 +1851,37 @@ private final class AppShellImmediateFailRunner: TranscriptionRunning {
         beforeRun?()
         requests.append(request)
         throw AppShellFakeError.notImplemented
+    }
+
+    func cancel() {}
+}
+
+@MainActor
+private final class AppShellManifestFailureRunner: TranscriptionRunning {
+    private let runURL: URL
+    private(set) var didRun = false
+
+    init(runURL: URL) {
+        self.runURL = runURL
+    }
+
+    func run(
+        _: TranscriptionRequest,
+        progress: @escaping @MainActor (RunProgressSnapshot) -> Void
+    ) async throws -> URL {
+        didRun = true
+        progress(RunProgressSnapshot(
+            stage: .failed,
+            completedChunks: 0,
+            plannedChunks: 1,
+            elapsedS: 1,
+            modelID: nil,
+            message: "MOSS maximumTokens persisted after bounded splitting",
+            runURL: runURL
+        ))
+        throw TranscriptionRunnerError.pipelineFailed(
+            "MOSS maximumTokens persisted after bounded splitting"
+        )
     }
 
     func cancel() {}
