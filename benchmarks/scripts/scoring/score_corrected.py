@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
+from check_run import validate_completed_run_manifest, validate_segments_document
 from metrics import term_recall, text_error_rate, utterance_omissions
 
 
@@ -219,6 +220,46 @@ def _validate_conflicts(
                 f"review flags: {sorted(missing_flags)}"
             )
         validated.append(conflict)
+
+    review_flags = {"uncertain", "conflict"}
+    reviewed_segments: set[int] = set()
+    for segment_index, (original, candidate) in enumerate(
+        zip(raw_segments, corrected_segments, strict=True)
+    ):
+        flags = candidate.get("flags", [])
+        if not isinstance(flags, list):
+            raise ValueError(
+                f"postprocess segment {segment_index} flags must be an array"
+            )
+        present = review_flags.intersection(flags)
+        if not present:
+            continue
+        missing = review_flags - set(flags)
+        if missing:
+            raise ValueError(
+                f"postprocess segment {segment_index} has incomplete review flags: "
+                f"missing={sorted(missing)}"
+            )
+        reviewed_segments.add(segment_index)
+        if candidate.get("text") != original.get("text"):
+            raise ValueError(
+                f"postprocess segment {segment_index} is flagged for review but "
+                "changed the source text"
+            )
+
+    missing_conflicts = reviewed_segments - seen
+    if missing_conflicts:
+        segment_index = min(missing_conflicts)
+        raise ValueError(
+            f"postprocess segment {segment_index} has review flags but no "
+            "conflict record"
+        )
+    unexpected_conflicts = seen - reviewed_segments
+    if unexpected_conflicts:
+        segment_index = min(unexpected_conflicts)
+        raise ValueError(
+            f"conflict record targets segment {segment_index} without review flags"
+        )
     return validated
 
 
@@ -417,12 +458,19 @@ def score_corrected_run(
     run_root = Path(run_root)
     reference_path = Path(reference_path)
     terms_path = Path(terms_path)
-    manifest_path = run_root / "manifest.json"
     raw_path = run_root / "merged" / "segments.json"
     corrected_path = run_root / "postprocess" / "segments.json"
     conflicts_path = run_root / "postprocess" / "conflicts.json"
 
-    manifest = _validate_manifest(_load_json(manifest_path, label="manifest"))
+    manifest, artifact_paths = validate_completed_run_manifest(run_root)
+    manifest = _validate_manifest(manifest)
+    for relative in (
+        "merged/segments.json",
+        "postprocess/segments.json",
+        "postprocess/conflicts.json",
+    ):
+        if relative not in artifact_paths:
+            raise ValueError(f"scored artifact is unlisted in manifest: {relative}")
     raw = _load_json(raw_path, label="merged segments")
     corrected = _load_json(corrected_path, label="postprocess segments")
     reference = _load_json(reference_path, label="reference segments")
@@ -435,7 +483,15 @@ def score_corrected_run(
     if not isinstance(terms, list):
         raise ValueError("terms must be a JSON array")
 
+    raw = validate_segments_document(raw, label="merged transcript")
+    corrected = validate_segments_document(
+        corrected,
+        label="postprocess transcript",
+        validate_semantics=False,
+    )
+
     raw_segments, corrected_segments = _validate_correction_structure(raw, corrected)
+    validate_segments_document(corrected, label="postprocess transcript")
     validated_conflicts = _validate_conflicts(
         conflicts, raw_segments, corrected_segments
     )

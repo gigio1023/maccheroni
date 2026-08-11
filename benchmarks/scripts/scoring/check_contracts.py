@@ -49,6 +49,11 @@ def _validate_manifest_semantics(document: dict[str, object]) -> None:
         coverage["processed_duration_s"] - coverage["input_duration_s"]
     ) > 0.01:
         raise ValueError("successful run does not cover the full input")
+    if (
+        document["status"] == "succeeded"
+        and coverage["chunks_completed"] != coverage["chunks_planned"]
+    ):
+        raise ValueError("successful run has incomplete chunks_completed coverage")
 
     expected_index = 0
     for chunk in document["chunk_boundaries"]:
@@ -339,6 +344,13 @@ def main() -> int:
         invalid,
         "a succeeded but truncated manifest passed validation",
     )
+    incomplete = deepcopy(manifest)
+    incomplete["coverage"]["chunks_completed"] = 0
+    manifest_validator.validate(incomplete)
+    _expect_semantic_failure(
+        lambda: _validate_manifest_semantics(incomplete),
+        "a succeeded manifest with incomplete chunks passed semantic validation",
+    )
     structurally_unsafe = deepcopy(translation)
     structurally_unsafe["translations"][0]["speaker"] = "SPEAKER_00"
     _expect_schema_failure(
@@ -402,7 +414,7 @@ def main() -> int:
     print("PASS segments.schema.json: schema + example + semantic checks")
     print(
         "PASS manifest.schema.json: base + legacy correction + bounded translation "
-        "examples + truncation guard + semantic checks"
+        "examples + truncation and incomplete-coverage guards + semantic checks"
     )
     print(
         "PASS translation.schema.json: two bounded batches + exact coverage + "

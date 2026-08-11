@@ -302,6 +302,21 @@ def write_placeholder_thresholds(path: Path) -> None:
     )
 
 
+def configure_permissive_thresholds(path: Path) -> None:
+    thresholds = load_json(path)
+    thresholds["status"] = "configured"
+    for metrics in thresholds["comparisons"].values():
+        for specification in metrics.values():
+            specification["minimum_improvement"] = -1_000.0
+    thresholds["guardrails"][
+        "decode_glossary_corrected.correct_to_incorrect"
+    ]["maximum_count"] = 1
+    thresholds["guardrails"][
+        "no_glossary_corrected.correct_to_incorrect"
+    ]["maximum_count"] = 0
+    write_json(path, thresholds)
+
+
 class FourStateFixture:
     def __init__(self, root: Path) -> None:
         self.reference = root / "reference.segments.json"
@@ -732,6 +747,95 @@ class CompareCorrectionPathsTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "translation"):
                 fixture.compare()
+
+    def test_rejects_succeeded_truncated_and_incomplete_runs(self) -> None:
+        hostile_coverages = {
+            "truncated": {
+                "input_duration_s": 10.0,
+                "processed_duration_s": 1.0,
+                "truncated": True,
+                "strategy": "backend_truncated",
+                "chunks_planned": 1,
+                "chunks_completed": 0,
+                "message": "hostile truncated run",
+            },
+            "incomplete": {
+                "input_duration_s": 10.0,
+                "processed_duration_s": 1.0,
+                "truncated": False,
+                "strategy": "full",
+                "chunks_planned": 1,
+                "chunks_completed": 0,
+            },
+        }
+        for name, coverage in hostile_coverages.items():
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as temporary:
+                    fixture = FourStateFixture(Path(temporary))
+                    for run in (
+                        fixture.no_glossary,
+                        fixture.decode_glossary,
+                        fixture.decode_glossary_corrected,
+                        fixture.no_glossary_corrected,
+                    ):
+                        rewrite_manifest(
+                            run,
+                            lambda manifest, value=coverage: manifest.update(
+                                {"coverage": deepcopy(value)}
+                            ),
+                        )
+
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        r"truncated|successful run|full input|chunks_completed|False",
+                    ):
+                        fixture.compare()
+
+    def test_accepts_legacy_correction_manifests_without_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = FourStateFixture(Path(temporary))
+            for run in (
+                fixture.decode_glossary_corrected,
+                fixture.no_glossary_corrected,
+            ):
+                rewrite_manifest(
+                    run,
+                    lambda manifest: manifest["postprocess"].pop("mode"),
+                )
+
+            verdict = fixture.compare()
+
+            self.assertEqual(verdict["status"], "not_configured")
+            self.assertIsNone(verdict["passed"])
+
+    def test_safety_guardrail_fails_closed_when_an_applied_change_is_unscorable(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = FourStateFixture(Path(temporary))
+            reference = load_json(fixture.reference)
+            reference["segments"][0]["start_s"] = 0.01
+            write_json(fixture.reference, reference)
+            configure_permissive_thresholds(fixture.thresholds)
+
+            verdict = fixture.compare()
+
+            self.assertEqual(verdict["status"], "failed")
+            self.assertIs(verdict["passed"], False)
+            effects = verdict["states"]["no_glossary_corrected"][
+                "correction_effects"
+            ]
+            self.assertEqual(effects["unscorable"], 1)
+            self.assertIsNone(effects["correction_made_worse_count"])
+            check = next(
+                check
+                for check in verdict["threshold_evaluation"]["checks"]
+                if check.get("guardrail")
+                == "no_glossary_corrected.correct_to_incorrect"
+            )
+            self.assertIs(check["passed"], False)
+            self.assertEqual(check["reason"], "unscorable > 0")
+            self.assertEqual(check["unscorable"], 1)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from hashlib import sha256
 import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
 
@@ -15,6 +17,10 @@ def write_json(path: Path, value: object) -> None:
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def file_sha256(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
 
 
 def segment(
@@ -70,18 +76,90 @@ class CorrectedScorerTests(unittest.TestCase):
             {"term": "delta", "reference_count": 1},
         ]
 
+        write_json(run_root / "merged" / "segments.json", raw)
+        write_json(run_root / "postprocess" / "segments.json", corrected)
+        write_json(run_root / "postprocess" / "conflicts.json", conflicts)
+        artifact_paths = (
+            "merged/segments.json",
+            "postprocess/segments.json",
+            "postprocess/conflicts.json",
+        )
         write_json(
             run_root / "manifest.json",
             {
                 "schema_version": "1.0.0",
                 "run_id": "synthetic-correction-run",
                 "status": "succeeded",
-                "postprocess": {"mode": "correction"},
+                "input": {
+                    "file_name": "synthetic.wav",
+                    "sha256": "0" * 64,
+                    "size_bytes": 0,
+                },
+                "backend": {"name": "synthetic-asr", "version": "1.0.0"},
+                "models": [
+                    {
+                        "role": "asr",
+                        "hf_model_id": "example/asr-model",
+                        "revision": "a" * 40,
+                        "quantization": "int8",
+                    }
+                ],
+                "glossary": {
+                    "provided": False,
+                    "sha256": None,
+                    "item_count": 0,
+                    "injection_mode": "none",
+                    "applied": False,
+                },
+                "preprocessing": {
+                    "sample_rate_hz": 16_000,
+                    "channels": 1,
+                    "peak_normalization": False,
+                    "vad": {"enabled": False, "backend": None},
+                    "enhancement": {"enabled": False, "backend": None},
+                },
+                "coverage": {
+                    "input_duration_s": 4.0,
+                    "processed_duration_s": 4.0,
+                    "truncated": False,
+                    "strategy": "full",
+                    "chunks_planned": 1,
+                    "chunks_completed": 1,
+                },
+                "chunk_boundaries": [
+                    {
+                        "index": 0,
+                        "start_s": 0.0,
+                        "end_s": 4.0,
+                        "status": "succeeded",
+                    }
+                ],
+                "timing": {
+                    "started_at": "2026-08-11T00:00:00Z",
+                    "finished_at": "2026-08-11T00:00:01Z",
+                    "wall_time_s": 1.0,
+                },
+                "peak_memory_bytes": 1,
+                "artifacts": [
+                    {
+                        "kind": relative.replace("/", "_").replace(".", "_"),
+                        "path": relative,
+                        "sha256": file_sha256(run_root / relative),
+                    }
+                    for relative in artifact_paths
+                ],
+                "failure": None,
+                "postprocess": {
+                    "backend": {"name": "codex-app-server", "version": "0.146.0"},
+                    "model_id": "gpt-5.6-sol",
+                    "model_revision": None,
+                    "quantization": None,
+                    "input_mode": "text-only",
+                    "glossary_sha256": None,
+                    "mode": "correction",
+                },
             },
         )
-        write_json(run_root / "merged" / "segments.json", raw)
-        write_json(run_root / "postprocess" / "segments.json", corrected)
-        write_json(run_root / "postprocess" / "conflicts.json", conflicts)
         reference_path = root / "reference.segments.json"
         terms_path = root / "terms.json"
         write_json(reference_path, reference)
@@ -93,6 +171,105 @@ class CorrectedScorerTests(unittest.TestCase):
 
     def write_run_document(self, run_root: Path, relative: str, value: object) -> None:
         write_json(run_root / relative, value)
+        manifest_path = run_root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for artifact in manifest["artifacts"]:
+            if artifact["path"] == relative:
+                artifact["sha256"] = file_sha256(run_root / relative)
+                write_json(manifest_path, manifest)
+                return
+        self.fail(f"fixture manifest does not declare {relative}")
+
+    def test_rejects_schema_invalid_review_artifact_from_hostile_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_root, reference_path, terms_path = self.make_run(
+                Path(temporary_directory)
+            )
+            corrected = self.load_run_document(
+                run_root, "postprocess/segments.json"
+            )
+            corrected["segments"][2]["text"] = ""
+            corrected["segments"][2]["flags"] = ["uncertain", "conflict"]
+            self.write_run_document(
+                run_root, "postprocess/segments.json", corrected
+            )
+            self.write_run_document(run_root, "postprocess/conflicts.json", [])
+
+            with self.assertRaisesRegex(ValueError, r"postprocess.*schema|segment 2"):
+                score_corrected_run(run_root, reference_path, terms_path)
+
+    def test_requires_review_flags_and_conflicts_in_both_directions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_root, reference_path, terms_path = self.make_run(
+                Path(temporary_directory)
+            )
+            self.write_run_document(run_root, "postprocess/conflicts.json", [])
+
+            with self.assertRaisesRegex(ValueError, r"segment 2.*conflict"):
+                score_corrected_run(run_root, reference_path, terms_path)
+
+    def test_review_conflict_requires_flags_and_preserved_source_text(self) -> None:
+        for mutation, message in (
+            ("missing_flags", r"segment 2.*review flags"),
+            ("changed_text", r"segment 2.*flagged.*changed"),
+        ):
+            with self.subTest(mutation=mutation):
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    run_root, reference_path, terms_path = self.make_run(
+                        Path(temporary_directory)
+                    )
+                    corrected = self.load_run_document(
+                        run_root, "postprocess/segments.json"
+                    )
+                    if mutation == "missing_flags":
+                        corrected["segments"][2]["flags"] = []
+                    else:
+                        corrected["segments"][2]["text"] = "della"
+                    self.write_run_document(
+                        run_root, "postprocess/segments.json", corrected
+                    )
+
+                    with self.assertRaisesRegex(ValueError, message):
+                        score_corrected_run(
+                            run_root, reference_path, terms_path
+                        )
+
+    def test_rejects_schema_invalid_raw_transcript(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_root, reference_path, terms_path = self.make_run(
+                Path(temporary_directory)
+            )
+            raw = self.load_run_document(run_root, "merged/segments.json")
+            raw["segments"][0]["text"] = ""
+            self.write_run_document(run_root, "merged/segments.json", raw)
+
+            with self.assertRaisesRegex(ValueError, r"merged.*schema|segment 0"):
+                score_corrected_run(run_root, reference_path, terms_path)
+
+    def test_rejects_wrong_manifest_hash_for_each_scored_artifact(self) -> None:
+        for relative in (
+            "merged/segments.json",
+            "postprocess/segments.json",
+            "postprocess/conflicts.json",
+        ):
+            with self.subTest(relative=relative):
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    run_root, reference_path, terms_path = self.make_run(
+                        Path(temporary_directory)
+                    )
+                    manifest_path = run_root / "manifest.json"
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    for artifact in manifest["artifacts"]:
+                        if artifact["path"] == relative:
+                            artifact["sha256"] = "f" * 64
+                            break
+                    write_json(manifest_path, manifest)
+
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        rf"artifact hash mismatch: {re.escape(relative)}",
+                    ):
+                        score_corrected_run(run_root, reference_path, terms_path)
 
     def test_scores_raw_and_corrected_and_reports_explicit_directional_deltas(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

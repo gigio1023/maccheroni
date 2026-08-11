@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 from typing import Any, Sequence
 
+from check_run import validate_completed_run_manifest, validate_segments_document
 from metrics import term_recall, text_error_rate, utterance_omissions
 from score_corrected import score_corrected_run
 
@@ -111,17 +112,17 @@ def _artifact_hash(run: Path, relative: str) -> str:
 
 
 def _load_state(run: Path, name: str) -> dict[str, Any]:
+    run = Path(run)
     manifest_path = run / "manifest.json"
-    manifest = _load_json(manifest_path, label=f"{name} manifest")
-    if not isinstance(manifest, dict):
-        raise ValueError(f"{name} manifest must be an object")
-    if manifest.get("status") != "succeeded":
-        raise ValueError(f"{name} run did not succeed")
+    manifest, artifact_paths = validate_completed_run_manifest(run)
+    if "merged/segments.json" not in artifact_paths:
+        raise ValueError(f"{name} merged transcript is unlisted in manifest")
 
     merged_path = run / "merged/segments.json"
     merged = _load_json(merged_path, label=f"{name} merged transcript")
-    if not isinstance(merged, dict) or not isinstance(merged.get("segments"), list):
-        raise ValueError(f"{name} merged transcript must contain segments")
+    merged = validate_segments_document(
+        merged, label=f"{name} merged transcript"
+    )
     source = merged.get("source")
     if not isinstance(source, dict):
         raise ValueError(f"{name} merged transcript has no source identity")
@@ -149,7 +150,7 @@ def _load_state(run: Path, name: str) -> dict[str, Any]:
     if requirement["corrected"]:
         if not isinstance(postprocess, dict):
             raise ValueError(f"{name} has no correction metadata")
-        mode = postprocess.get("mode")
+        mode = postprocess.get("mode", "correction")
         if mode == "translation":
             raise ValueError(f"translation run cannot occupy corrected state {name}")
         if mode != "correction":
@@ -252,7 +253,12 @@ def _corrected_state_result(
         "worse": direction["further"],
         "mixed": direction["mixed"],
         "unchanged": direction["unchanged"],
-        "correct_to_incorrect": _correct_to_incorrect(direction),
+        "correct_to_incorrect": (
+            None
+            if direction["unevaluated_applied_text_changes"]
+            else _correct_to_incorrect(direction)
+        ),
+        "observed_correct_to_incorrect": _correct_to_incorrect(direction),
         "correction_made_worse_count": direction[
             "correction_made_worse_count"
         ],
@@ -454,17 +460,28 @@ def _evaluate_thresholds(
             )
     for path, specification in thresholds["guardrails"].items():
         state_name, _ = path.split(".", 1)
-        observed = states[state_name]["correction_effects"][
-            "correct_to_incorrect"
-        ]
+        effects = states[state_name]["correction_effects"]
+        observed = effects["correct_to_incorrect"]
+        unscorable = effects["unscorable"]
         maximum = specification["maximum_count"]
+        if unscorable > 0:
+            check_passed = False
+            reason = "unscorable > 0"
+        elif observed is None:
+            check_passed = False
+            reason = "safety count unavailable"
+        else:
+            check_passed = observed <= maximum
+            reason = None
         checks.append(
             {
                 "kind": "maximum_count",
                 "guardrail": path,
                 "observed": observed,
+                "unscorable": unscorable,
                 "threshold": maximum,
-                "passed": observed <= maximum,
+                "passed": check_passed,
+                "reason": reason,
             }
         )
     passed = all(check["passed"] for check in checks)

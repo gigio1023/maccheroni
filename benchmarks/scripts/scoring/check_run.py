@@ -11,7 +11,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 
 from check_contracts import _validate_manifest_semantics, _validate_segments_semantics
 from rttm import read_rttm
@@ -88,8 +88,11 @@ def validate_segments(
     duration: float,
 ) -> dict[str, Any]:
     document = load_json(path)
-    schema_validator.validate(document)
-    _validate_segments_semantics(document)
+    validate_segments_document(
+        document,
+        label=str(path),
+        schema_validator=schema_validator,
+    )
     source = document["source"]
     if source["file_name"] != input_path.name:
         raise ValueError(f"{path}: source file name does not match input")
@@ -97,6 +100,36 @@ def validate_segments(
         raise ValueError(f"{path}: source hash does not match input")
     if abs(float(source["duration_s"]) - duration) > 0.01:
         raise ValueError(f"{path}: source duration does not match manifest")
+    return document
+
+
+def validate_segments_document(
+    document: object,
+    *,
+    label: str,
+    schema_validator: Draft202012Validator | None = None,
+    validate_semantics: bool = True,
+) -> dict[str, Any]:
+    """Validate one in-memory segment document with the canonical contract."""
+
+    validator = schema_validator
+    if validator is None:
+        schema = load_json(REPOSITORY_ROOT / "docs/contracts/segments.schema.json")
+        Draft202012Validator.check_schema(schema)
+        validator = Draft202012Validator(schema, format_checker=FormatChecker())
+    try:
+        validator.validate(document)
+    except ValidationError as error:
+        location = ".".join(str(component) for component in error.absolute_path)
+        suffix = f" at {location}" if location else ""
+        raise ValueError(
+            f"{label} failed segments schema{suffix}: {error.message}"
+        ) from error
+    if validate_semantics:
+        try:
+            _validate_segments_semantics(document)
+        except ValueError as error:
+            raise ValueError(f"{label} failed segments semantics: {error}") from error
     return document
 
 
@@ -178,21 +211,42 @@ def validate_artifacts(run_root: Path, manifest: dict[str, Any]) -> set[str]:
     return paths
 
 
-def validate_run(run_root: Path, input_path: Path, kind: str) -> dict[str, Any]:
+def validate_completed_run_manifest(
+    run_root: Path,
+) -> tuple[dict[str, Any], set[str]]:
+    """Validate canonical completion semantics and every declared artifact seal."""
+
     run_root = run_root.resolve()
-    input_path = input_path.resolve()
     manifest_path = run_root / "manifest.json"
     manifest = load_json(manifest_path)
-
-    checker = FormatChecker()
-    manifest_schema = load_json(REPOSITORY_ROOT / "docs/contracts/manifest.schema.json")
-    segments_schema = load_json(REPOSITORY_ROOT / "docs/contracts/segments.schema.json")
-    Draft202012Validator.check_schema(manifest_schema)
-    Draft202012Validator.check_schema(segments_schema)
-    Draft202012Validator(manifest_schema, format_checker=checker).validate(manifest)
+    schema = load_json(REPOSITORY_ROOT / "docs/contracts/manifest.schema.json")
+    Draft202012Validator.check_schema(schema)
+    try:
+        Draft202012Validator(schema, format_checker=FormatChecker()).validate(
+            manifest
+        )
+    except ValidationError as error:
+        location = ".".join(str(component) for component in error.absolute_path)
+        suffix = f" at {location}" if location else ""
+        raise ValueError(
+            f"manifest schema violation{suffix}: {error.message}"
+        ) from error
     _validate_manifest_semantics(manifest)
     validate_timing(manifest)
     validate_chunks(manifest)
+    if manifest["status"] != "succeeded":
+        raise ValueError(f"run is not succeeded: {manifest['status']}")
+    return manifest, validate_artifacts(run_root, manifest)
+
+
+def validate_run(run_root: Path, input_path: Path, kind: str) -> dict[str, Any]:
+    run_root = run_root.resolve()
+    input_path = input_path.resolve()
+    manifest, artifact_paths = validate_completed_run_manifest(run_root)
+
+    checker = FormatChecker()
+    segments_schema = load_json(REPOSITORY_ROOT / "docs/contracts/segments.schema.json")
+    Draft202012Validator.check_schema(segments_schema)
 
     if not input_path.is_file():
         raise ValueError(f"input is missing: {input_path}")
@@ -212,9 +266,6 @@ def validate_run(run_root: Path, input_path: Path, kind: str) -> dict[str, Any]:
     if len(identities) != len(manifest["models"]):
         raise ValueError("manifest contains a duplicate model identity")
 
-    artifact_paths = validate_artifacts(run_root, manifest)
-    if manifest["status"] != "succeeded":
-        raise ValueError(f"run is not succeeded: {manifest['status']}")
     for relative in REQUIRED_SUCCESS_ARTIFACTS:
         if relative not in artifact_paths:
             raise ValueError(f"required successful artifact is unlisted: {relative}")
