@@ -358,6 +358,15 @@ not deleted.
   alternative. Reversing this choice means changing that metric's source in the
   declaration, after which its exact value and provenance resolve together and the
   renderer and ten-README consistency check identify every publication update.
+- D36 [maintainer] Republish text metrics under the declared punctuation-removal
+  normalization (decided 2026-08-11). The scorer replaced Unicode punctuation with
+  spaces, contradicting `docs/contracts/scoring.md` and splitting contractions and
+  hyphenated forms into extra word tokens. It now deletes punctuation after NFKC and
+  casefold. Published Korean VibeVoice WER changes from `0.1282051282051282` to
+  `0.14102564102564102`, and Italian MOSS WER changes from `0.08064516129032258` to
+  `0.0847457627118644`. CER is invariant because character scoring removes all
+  whitespace after common normalization. The declaration, ten READMEs, generated
+  figures, profile resource, and historical verdict summaries are republished together.
 - D37 [inference] Supersedes D23's fallback clause (decided 2026-08-11). Qwen3-ASR is
   withdrawn as a product fallback because the pinned `speech` 0.0.23 backend exposes no
   enforceable token cap, decoder terminal reason, token counts, or intra-chunk

@@ -84,13 +84,13 @@ Tous les résultats proviennent de jeux de test publics ou synthétiques ; les i
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
-  <img src="docs/assets/benchmarks-light.svg" alt="Diagrammes en barres : CER et WER par jeu de test (dialogue coréen 0.081/0.128, deux locuteurs italiens 0.033/0.081), rappel des termes du glossaire (0.95 et 0.778 par rapport au seuil de 0.75) et taux d'erreur de diarisation (0.048 synthétique, 0.152 VoxConverse)" width="100%">
+  <img src="docs/assets/benchmarks-light.svg" alt="Diagrammes en barres : CER et WER par jeu de test (dialogue coréen 0.081/0.141, deux locuteurs italiens 0.033/0.085), rappel des termes du glossaire (0.95 et 0.778 par rapport au seuil de 0.75) et taux d'erreur de diarisation (0.048 synthétique, 0.152 VoxConverse)" width="100%">
 </picture>
 
 | Jeu de test | Modèle | CER | WER | Rappel des termes | Omissions | DER |
 |---|---|---:|---:|---:|---:|---:|
-| Dialogue coréen, glossaire de 20 termes | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
-| Synthèse italienne à 2 locuteurs (10 min), glossaire de 9 termes | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
+| Dialogue coréen, glossaire de 20 termes | VibeVoice | 0.081 | 0.141 | 0.95 | 0 | — |
+| Synthèse italienne à 2 locuteurs (10 min), glossaire de 9 termes | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | Échantillon VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 Le coréen et l'italien sont les deux premiers profils de langue ; de nouveaux jeux de test linguistiques rejoignent ce tableau au fur et à mesure des mesures.
@@ -111,7 +111,7 @@ Prérequis : Mac Apple Silicon, macOS 26, Xcode 26, [uv](https://docs.astral.sh/
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 198 tests
+swift build && swift test          # 241 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -157,7 +157,7 @@ Les signalements de problèmes et les pull requests ciblées sont les bienvenus.
 | Chemin | Contenu |
 |---|---|
 | `Sources/` | Package Swift : Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 198 tests fondés sur des fixtures, répartis en 19 suites |
+| `Tests/` | 241 tests fondés sur des fixtures, répartis en 22 suites |
 | `benchmarks/scripts/` | Outils d’exécution et de notation avec verdicts dérivés et tests négatifs |
 | `docs/` | Synthèse de recherche, audits des sources, politique de contraintes, contrats (schémas JSON), conception de l’interface |
 | `scripts/` | Compilation du bundle de l’application, compilation du harness MOSS, configuration de l’environnement de post-traitement |

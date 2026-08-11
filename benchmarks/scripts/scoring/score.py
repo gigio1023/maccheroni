@@ -59,10 +59,10 @@ def main() -> int:
         )
 
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
-    arguments.output.write_text(
-        json.dumps(scores, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    with arguments.output.open("x", encoding="utf-8") as output:
+        output.write(
+            json.dumps(scores, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        )
     return 0
 
 

@@ -84,13 +84,13 @@ Tutti i risultati provengono da fixture pubbliche o sintetiche. Gli ID delle val
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
-  <img src="docs/assets/benchmarks-light.svg" alt="Grafici a barre: CER e WER per fixture (dialogo coreano 0.081/0.128, due parlanti italiani 0.033/0.081), recupero dei termini del glossario (0.95 e 0.778 rispetto alla soglia 0.75) e tasso di errore di diarizzazione (0.048 sintetico, 0.152 VoxConverse)" width="100%">
+  <img src="docs/assets/benchmarks-light.svg" alt="Grafici a barre: CER e WER per fixture (dialogo coreano 0.081/0.141, due parlanti italiani 0.033/0.085), recupero dei termini del glossario (0.95 e 0.778 rispetto alla soglia 0.75) e tasso di errore di diarizzazione (0.048 sintetico, 0.152 VoxConverse)" width="100%">
 </picture>
 
 | Fixture | Modello | CER | WER | Recupero dei termini | Omissioni | DER |
 |---|---|---:|---:|---:|---:|---:|
-| Dialogo coreano, glossario di 20 termini | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
-| Conversazione sintetica in italiano con 2 parlanti (10 min), glossario di 9 termini | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
+| Dialogo coreano, glossario di 20 termini | VibeVoice | 0.081 | 0.141 | 0.95 | 0 | — |
+| Conversazione sintetica in italiano con 2 parlanti (10 min), glossario di 9 termini | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | Campione VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 Coreano e italiano sono i primi due profili di lingua; nuove fixture linguistiche entrano in questa tabella man mano che vengono misurate.
@@ -111,7 +111,7 @@ Requisiti: Mac con Apple Silicon, macOS 26, Xcode 26, [uv](https://docs.astral.s
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 198 tests
+swift build && swift test          # 241 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -157,7 +157,7 @@ Issue e pull request mirate sono benvenute. I comandi di build e test, lo standa
 | Percorso | Contenuto |
 |---|---|
 | `Sources/` | Pacchetto Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 198 test basati su fixture in 19 suite |
+| `Tests/` | 241 test basati su fixture in 22 suite |
 | `benchmarks/scripts/` | Runner e script di valutazione con verdetti derivati e test negativi |
 | `docs/` | Sintesi della ricerca, analisi del codice sorgente, regole sui vincoli, contratti (schemi JSON), progettazione dell’interfaccia |
 | `scripts/` | Compilazione del bundle dell’app, compilazione dell’harness MOSS, configurazione del runtime di post-elaborazione |

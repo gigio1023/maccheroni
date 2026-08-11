@@ -25,7 +25,7 @@
       "benchmarkSource": "docs/benchmark-verdict.md",
       "metrics": [
         { "key": "cer", "value": 0.08123249299719888, "display": "CER 0.081" },
-        { "key": "wer", "value": 0.1282051282051282, "display": "WER 0.128" },
+        { "key": "wer", "value": 0.14102564102564102, "display": "WER 0.141" },
         { "key": "term_recall", "value": 0.95, "display": "Term recall 0.950" }
       ]
     },
@@ -53,7 +53,7 @@
       "benchmarkSource": "docs/benchmark-verdict.md",
       "metrics": [
         { "key": "cer", "value": 0.033112582781456956, "display": "CER 0.033" },
-        { "key": "wer", "value": 0.08064516129032258, "display": "WER 0.081" },
+        { "key": "wer", "value": 0.0847457627118644, "display": "WER 0.085" },
         { "key": "term_recall", "value": 0.7777777777777778, "display": "Term recall 0.778" },
         { "key": "backchannels", "value": 1, "display": "Backchannels 7/7" }
       ]

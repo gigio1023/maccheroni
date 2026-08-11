@@ -84,13 +84,13 @@ Todos proceden de fixtures públicas o sintéticas. Los ID de evaluación y los 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
-  <img src="docs/assets/benchmarks-light.svg" alt="Gráficos de barras: CER y WER por fixture (diálogo coreano 0.081/0.128, dos hablantes en italiano 0.033/0.081), recuperación de términos del glosario (0.95 y 0.778 frente al umbral de 0.75) y tasa de error de diarización (0.048 sintético, 0.152 VoxConverse)" width="100%">
+  <img src="docs/assets/benchmarks-light.svg" alt="Gráficos de barras: CER y WER por fixture (diálogo coreano 0.081/0.141, dos hablantes en italiano 0.033/0.085), recuperación de términos del glosario (0.95 y 0.778 frente al umbral de 0.75) y tasa de error de diarización (0.048 sintético, 0.152 VoxConverse)" width="100%">
 </picture>
 
 | Fixture | Modelo | CER | WER | Recuperación de términos | Omisiones | DER |
 |---|---|---:|---:|---:|---:|---:|
-| Diálogo en coreano, glosario de 20 términos | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
-| Conversación sintética en italiano con 2 hablantes (10 min), glosario de 9 términos | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
+| Diálogo en coreano, glosario de 20 términos | VibeVoice | 0.081 | 0.141 | 0.95 | 0 | — |
+| Conversación sintética en italiano con 2 hablantes (10 min), glosario de 9 términos | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | Muestra de VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 El coreano y el italiano son los dos primeros perfiles de idioma; nuevos fixtures de idiomas se añaden a esta tabla a medida que se miden.
@@ -111,7 +111,7 @@ Requisitos: Mac con Apple Silicon, macOS 26, Xcode 26 y [uv](https://docs.astral
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 198 tests
+swift build && swift test          # 241 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -157,7 +157,7 @@ Se aceptan issues y pull requests específicos. Los comandos de compilación y p
 | Ruta | Contenido |
 |---|---|
 | `Sources/` | Paquete Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 198 pruebas basadas en fixtures en 19 suites |
+| `Tests/` | 241 pruebas basadas en fixtures en 22 suites |
 | `benchmarks/scripts/` | Ejecutores y evaluadores con veredictos derivados y pruebas negativas |
 | `docs/` | Resumen de investigación, auditorías de código fuente, política de restricciones, contratos (esquemas JSON), diseño de interfaz |
 | `scripts/` | Compilación del paquete de la aplicación, compilación del harness MOSS, configuración del entorno de posprocesamiento |

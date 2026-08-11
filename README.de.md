@@ -84,13 +84,13 @@ Alle Ergebnisse stammen aus öffentlichen oder synthetischen Fixtures. Auswertun
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
-  <img src="docs/assets/benchmarks-light.svg" alt="Balkendiagramme: CER und WER je Fixture (koreanischer Dialog 0.081/0.128, italienisches Zwei-Sprecher-Beispiel 0.033/0.081), Begriffstrefferquote des Glossars (0.95 und 0.778 gegenüber der Schwelle 0.75) und Diarisierungsfehlerrate (0.048 synthetisch, 0.152 VoxConverse)" width="100%">
+  <img src="docs/assets/benchmarks-light.svg" alt="Balkendiagramme: CER und WER je Fixture (koreanischer Dialog 0.081/0.141, italienisches Zwei-Sprecher-Beispiel 0.033/0.085), Begriffstrefferquote des Glossars (0.95 und 0.778 gegenüber der Schwelle 0.75) und Diarisierungsfehlerrate (0.048 synthetisch, 0.152 VoxConverse)" width="100%">
 </picture>
 
 | Fixture | Modell | CER | WER | Begriffstrefferquote | Auslassungen | DER |
 |---|---|---:|---:|---:|---:|---:|
-| Koreanischer Dialog, Glossar mit 20 Begriffen | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
-| Italienischer synthetischer Dialog mit 2 Sprechern (10 min), Glossar mit 9 Begriffen | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
+| Koreanischer Dialog, Glossar mit 20 Begriffen | VibeVoice | 0.081 | 0.141 | 0.95 | 0 | — |
+| Italienischer synthetischer Dialog mit 2 Sprechern (10 min), Glossar mit 9 Begriffen | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverse-Beispiel (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 Koreanisch und Italienisch sind die ersten beiden Sprachprofile; neue Sprach-Fixtures kommen in diese Tabelle, sobald sie gemessen sind.
@@ -111,7 +111,7 @@ Voraussetzungen: Apple-Silicon-Mac, macOS 26, Xcode 26, [uv](https://docs.astral
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 198 tests
+swift build && swift test          # 241 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -157,7 +157,7 @@ Issues und gezielte Pull Requests sind willkommen. Build- und Testbefehle, der V
 | Pfad | Inhalt |
 |---|---|
 | `Sources/` | Swift-Paket: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 198 fixturebasierte Tests in 19 Suites |
+| `Tests/` | 241 fixturebasierte Tests in 22 Suites |
 | `benchmarks/scripts/` | Runner und Scorer mit abgeleiteten Urteilen und Negativtests |
 | `docs/` | Forschungsübersicht, Quellcodeprüfungen, Richtlinie für Beschränkungen, Verträge (JSON-Schemas), UI-Design |
 | `scripts/` | App-Bundle-Build, MOSS-Harness-Build, Einrichtung der Nachbearbeitungslaufzeit |

@@ -83,13 +83,13 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
-  <img src="docs/assets/benchmarks-light.svg" alt="柱状图：各测试样本的 CER 和 WER（韩语对话 0.081/0.128，意大利语双说话人 0.033/0.081）、词汇表术语召回率（0.95 和 0.778，门限 0.75）以及说话人分离错误率（合成 0.048，VoxConverse 0.152）" width="100%">
+  <img src="docs/assets/benchmarks-light.svg" alt="柱状图：各测试样本的 CER 和 WER（韩语对话 0.081/0.141，意大利语双说话人 0.033/0.085）、词汇表术语召回率（0.95 和 0.778，门限 0.75）以及说话人分离错误率（合成 0.048，VoxConverse 0.152）" width="100%">
 </picture>
 
 | 测试样本 | 模型 | CER | WER | 术语召回率 | 遗漏数 | DER |
 |---|---|---:|---:|---:|---:|---:|
-| 韩语对话，20个术语 | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
-| 意大利语双人合成音频（10分钟），9个术语 | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
+| 韩语对话，20个术语 | VibeVoice | 0.081 | 0.141 | 0.95 | 0 | — |
+| 意大利语双人合成音频（10分钟），9个术语 | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverse 样本（78分钟） | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 韩语和意大利语是最早的两个语言配置;新的语言测试样本在完成测量后会加入此表。
@@ -110,7 +110,7 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 198 tests
+swift build && swift test          # 241 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -156,7 +156,7 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 | 路径 | 内容 |
 |---|---|
 | `Sources/` | Swift 包：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
-| `Tests/` | 分布于19个 suite 的198项 fixture test |
+| `Tests/` | 分布于22个 suite 的241项 fixture test |
 | `benchmarks/scripts/` | 带有 derived verdict 和 negative test 的 runner 与 scorer |
 | `docs/` | 调研 digest、source audit、constraint policy、契约（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |

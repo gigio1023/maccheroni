@@ -83,13 +83,13 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks-dark.svg">
-  <img src="docs/assets/benchmarks-light.svg" alt="막대 그래프: 테스트 자료별 CER과 WER(한국어 대화 0.081/0.128, 이탈리아어 2화자 0.033/0.081), glossary 용어 재현율(게이트 0.75 대비 0.95와 0.778), 화자분리 오류율(합성 0.048, VoxConverse 0.152)" width="100%">
+  <img src="docs/assets/benchmarks-light.svg" alt="막대 그래프: 테스트 자료별 CER과 WER(한국어 대화 0.081/0.141, 이탈리아어 2화자 0.033/0.085), glossary 용어 재현율(게이트 0.75 대비 0.95와 0.778), 화자분리 오류율(합성 0.048, VoxConverse 0.152)" width="100%">
 </picture>
 
 | 테스트 자료 | 모델 | CER | WER | 용어 재현율 | 누락 | DER |
 |---|---|---:|---:|---:|---:|---:|
-| 한국어 대화, 20개 용어집 | VibeVoice | 0.081 | 0.128 | 0.95 | 0 | — |
-| 이탈리아어 화자 2명 합성 녹음(10분), 9개 용어집 | MOSS | 0.033 | 0.081 | 0.78 | 0 | 0.048 |
+| 한국어 대화, 20개 용어집 | VibeVoice | 0.081 | 0.141 | 0.95 | 0 | — |
+| 이탈리아어 화자 2명 합성 녹음(10분), 9개 용어집 | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverse 샘플(78분) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
 한국어와 이탈리아어가 첫 두 언어 프로필입니다. 새 언어 fixture를 측정하는 대로 이 표에 추가합니다.
@@ -110,7 +110,7 @@
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 198 tests
+swift build && swift test          # 241 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
@@ -156,7 +156,7 @@ Issue와 범위를 명확히 한 pull request를 환영합니다. Build 및 test
 | 경로 | 내용 |
 |---|---|
 | `Sources/` | Swift 패키지: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 19개 suite에 걸친 fixture 기반 test 198개 |
+| `Tests/` | 22개 suite에 걸친 fixture 기반 test 241개 |
 | `benchmarks/scripts/` | Derived verdict와 negative test를 포함한 runner 및 scorer |
 | `docs/` | 조사 digest, source audit, constraint policy, 계약(JSON schema), UI design |
 | `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |
