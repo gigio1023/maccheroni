@@ -469,3 +469,52 @@ in a leaf of 120 seconds or less also triggers review. Do not silently raise the
 limit or let the parser salvage text without timestamps. Preserve causal
 evidence and evaluate bounded splitting or model replacement under a separate
 contract.
+
+## 2026-08-10 VibeVoice and Qwen Evidence Constraints
+
+This change makes the existing 5,120-token product request effective for
+VibeVoice. It does not select or raise a token limit. The same requested value
+reaches Qwen evidence records, but the pinned `speech` 0.0.23 command cannot
+accept it as an inference limit.
+
+| name | variable and unit | scope and kind | source and formula | headroom and observed range | failure mode and telemetry | review trigger |
+|---|---|---|---|---|---|---|
+| `vibevoice_requested_output_cap` | generated output, tokens | VibeVoice, operator choice made effective | `CLIASRInferencePolicy.maximumTokens`, passed unchanged to `mlx-audio` `max_tokens` | no new headroom; the production value remains 5,120; injectable contract tests cover one token below, exactly at, and one token above a test cap | below cap records observed EOS; at cap records typed `maximumTokens`; an impossible count above cap is malformed; record requested cap, effective cap, prompt tokens, generated tokens, and aggregate generation time | `mlx-audio` version, VibeVoice generator loop, tokenizer, or cap policy changes |
+| `vibevoice_context_hard_cap` | context capacity, tokens | VibeVoice, unavailable observation | `mlx-audio` 0.4.6 exposes no context hard-cap value through this backend | unavailable; never substitute the requested output cap | record `null` plus an unavailable reason; a runtime error cannot be promoted | upstream begins exposing a context cap or a context-limit stop |
+| `qwen_effective_output_cap` | generated output, tokens | Qwen through `speech` 0.0.23, unavailable enforcement | the command has no max-token option and emits no generated-token count or terminal reason | unavailable; the requested 5,120 tokens are recorded separately and are not claimed as effective | preserve stdout as diagnostic evidence, record `null` plus reasons, and fail with `asr_evidence_unavailable` | `speech` adds an enforceable cap, token counts, and a typed terminal reason |
+| `qwen_intra_chunk_timing` | segment boundaries, seconds | Qwen through `speech` 0.0.23, unavailable observation | the command emits one transcript string and no timestamped segments | unavailable; a synthetic `[0, duration]` range is forbidden | record chunk-only granularity, no normalized segments, zero promotable coverage, and fail before speaker attribution | `speech` adds validated segment or word timestamps |
+
+The supported-range calculation for the pinned VibeVoice path is:
+
+```text
+input_duration_supported = min(product_leaf_maximum_1,200_s,
+                               backend_duration_maximum_3,540_s)
+                         = 1,200_s
+
+verified_complete =
+  terminal_evidence == observed
+  and generated_tokens < effective_max_tokens
+  and stop_reason == endOfSequence
+  and timing_granularity == segment
+  and validated_segment_count > 0
+```
+
+Equality with the effective output cap is a limit outcome with zero promotable
+coverage. The backend's partial text and segments remain diagnostic artifacts.
+The runner rejects a generated-token count above the effective cap as a
+contract mismatch.
+
+For the pinned Qwen path, no verified-complete range exists:
+
+```text
+verified_complete_supported = false
+  because effective_max_tokens is unavailable
+  or terminal_evidence is unavailable
+  or intra_chunk_timing is unavailable
+```
+
+The Qwen command may still run to preserve diagnostic text and proof of context
+transport. Neither status zero nor a `Result:` line can promote that text to a
+complete or speaker-attributed transcript. Recalculate this range and add the
+same below, at, and above boundary tests before enabling promotion for a newer
+backend.

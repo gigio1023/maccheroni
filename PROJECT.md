@@ -358,6 +358,14 @@ not deleted.
   alternative. Reversing this choice means changing that metric's source in the
   declaration, after which its exact value and provenance resolve together and the
   renderer and ten-README consistency check identify every publication update.
+- D37 [inference] Supersedes D23's fallback clause (decided 2026-08-11). Qwen3-ASR is
+  withdrawn as a product fallback because the pinned `speech` 0.0.23 backend exposes no
+  enforceable token cap, decoder terminal reason, token counts, or intra-chunk
+  timestamps, so its output cannot carry the evidence required for promotion. The
+  adapter fails this path with typed `asr_evidence_unavailable` while retaining
+  diagnostic evidence. Qwen3-ASR may return as a fallback when a backend version
+  exposes all missing terminal, token, and timestamp evidence. D23's VibeVoice Korean
+  default remains in force.
 
 ## Project-wide Done Criteria
 

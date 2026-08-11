@@ -57,7 +57,7 @@ public enum SelectedASRBackend: String, CaseIterable, Sendable {
     }
 
     public static let koreanDefault = SelectedASRBackend.vibeVoice
-    public static let koreanLowMemoryFallback = SelectedASRBackend.qwen3
+    public static let koreanFallback: SelectedASRBackend? = nil
     public static let italianDefault = SelectedASRBackend.moss
     public static let italianFallback = SelectedASRBackend.vibeVoice
 }
@@ -134,6 +134,7 @@ public enum ASRAdapterError: Error, Equatable, Sendable, LocalizedError {
     case coverageShortfall(String)
     case inferenceLimit(ASRAttemptStopReason)
     case invalidEOSOutput(String)
+    case evidenceUnavailable(String)
 
     public var errorDescription: String? {
         switch self {
@@ -149,7 +150,7 @@ public enum ASRAdapterError: Error, Equatable, Sendable, LocalizedError {
             "ASR backend output did not prove the pinned model identity"
         case let .inferenceLimit(reason):
             "ASR inference stopped at \(reason.rawValue); output is incomplete"
-        case let .invalidEOSOutput(message):
+        case let .invalidEOSOutput(message), let .evidenceUnavailable(message):
             message
         }
     }
@@ -176,7 +177,7 @@ public struct ASRLimitRecord: Equatable, Sendable {
     public var inputSHA256: String
     public var metrics: ASRAttemptMetrics
     public var language: ASRLanguageEvidence
-    public var helperFingerprint: ASRHelperFingerprint
+    public var helperFingerprint: ASRHelperFingerprint?
 
     public init(
         stopReason: ASRAttemptStopReason,
@@ -190,7 +191,7 @@ public struct ASRLimitRecord: Equatable, Sendable {
         inputSHA256: String,
         metrics: ASRAttemptMetrics,
         language: ASRLanguageEvidence,
-        helperFingerprint: ASRHelperFingerprint
+        helperFingerprint: ASRHelperFingerprint?
     ) {
         self.stopReason = stopReason
         self.glossary = glossary
@@ -213,34 +214,36 @@ public enum ASRAttemptOutcome: Equatable, Sendable {
 }
 
 public struct ASRAttemptMetrics: Codable, Equatable, Sendable {
-    public var preprocessingS: Double
-    public var audioEncoderS: Double
-    public var decoderPrefillS: Double
-    public var tokenDecodeS: Double
+    public var preprocessingS: Double?
+    public var audioEncoderS: Double?
+    public var decoderPrefillS: Double?
+    public var tokenDecodeS: Double?
     public var promptTokens: Int
     public var generatedTokens: Int
     public var maxTokens: Int
-    public var contextHardCapTokens: Int
+    public var contextHardCapTokens: Int?
     public var audioDurationS: Double
     public var totalS: Double
-    public var modelLoadS: Double
+    public var modelLoadS: Double?
     public var runnerWallTimeS: Double
-    public var peakRSSBytes: Int64
+    public var peakRSSBytes: Int64?
+    public var unavailable: [String: String]
 
     public init(
-        preprocessingS: Double,
-        audioEncoderS: Double,
-        decoderPrefillS: Double,
-        tokenDecodeS: Double,
+        preprocessingS: Double?,
+        audioEncoderS: Double?,
+        decoderPrefillS: Double?,
+        tokenDecodeS: Double?,
         promptTokens: Int,
         generatedTokens: Int,
         maxTokens: Int,
-        contextHardCapTokens: Int,
+        contextHardCapTokens: Int?,
         audioDurationS: Double,
         totalS: Double,
-        modelLoadS: Double,
+        modelLoadS: Double?,
         runnerWallTimeS: Double,
-        peakRSSBytes: Int64
+        peakRSSBytes: Int64?,
+        unavailable: [String: String] = [:]
     ) {
         self.preprocessingS = preprocessingS
         self.audioEncoderS = audioEncoderS
@@ -255,6 +258,7 @@ public struct ASRAttemptMetrics: Codable, Equatable, Sendable {
         self.modelLoadS = modelLoadS
         self.runnerWallTimeS = runnerWallTimeS
         self.peakRSSBytes = peakRSSBytes
+        self.unavailable = unavailable
     }
 }
 
@@ -606,6 +610,19 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
                 maximumTokens: maximumTokens
             )
         }
+        if document.outcome == .unverified {
+            guard processResult.status != 0 else {
+                throw ASRAdapterError.malformedOutput(
+                    "ASR unverified evidence record must exit nonzero"
+                )
+            }
+            return try validate(
+                document: document,
+                request: request,
+                outputURL: outputURL,
+                maximumTokens: maximumTokens
+            )
+        }
         guard processResult.status == 0 else {
             throw ASRAdapterError.backendFailed(
                 code: "subprocess_exit_\(processResult.status)",
@@ -772,20 +789,13 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
               document.language.instructionSHA256.isSHA256,
               document.language.promptGuidanceApplied == expectsPromptGuidance
         else { throw ASRAdapterError.malformedOutput("ASR output does not prove the requested language guidance") }
-        let metrics = document.metrics.publicValue(runnerWallTimeS: document.runnerWallTimeS)
-        guard metrics.maxTokens == maximumTokens,
-              metrics.contextHardCapTokens >= metrics.maxTokens,
-              metrics.promptTokens >= 0,
-              metrics.generatedTokens >= 0,
-              metrics.audioDurationS >= 0,
-              metrics.totalS >= 0,
-              metrics.peakRSSBytes >= 0,
-              [metrics.preprocessingS, metrics.audioEncoderS, metrics.decoderPrefillS, metrics.tokenDecodeS, metrics.totalS, metrics.modelLoadS, metrics.runnerWallTimeS, metrics.audioDurationS].allSatisfy({ $0.isFinite && $0 >= 0 }),
-              abs(metrics.audioDurationS - expectedDuration) <= 0.01
+        guard document.metrics.requestedMaxTokens == maximumTokens,
+              document.metrics.hasTruthfulAvailability(document.metricsUnavailable),
+              document.metrics.hasValidValues,
+              document.runnerWallTimeS.isFinite,
+              document.runnerWallTimeS >= 0,
+              abs(document.metrics.audioDurationS - expectedDuration) <= 0.01
         else { throw ASRAdapterError.malformedOutput("ASR metrics are invalid") }
-        if selected == .moss, metrics.contextHardCapTokens != 131_072 {
-            throw ASRAdapterError.malformedOutput("MOSS context hard cap evidence is invalid")
-        }
         let manifestGlossary = ManifestGlossary(
             provided: document.glossary.provided,
             sha256: document.glossary.sha256,
@@ -796,6 +806,54 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
         let fingerprint = document.helperFingerprint?.publicValue
         if selected == .moss, fingerprint == nil {
             throw ASRAdapterError.malformedOutput("MOSS output has no validated helper fingerprint")
+        }
+        if document.outcome == .unverified {
+            guard document.terminalEvidence == .unavailable,
+                  document.stopReason == nil,
+                  document.failure?.code == "evidence_unavailable",
+                  let message = document.failure?.message,
+                  !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  document.coverage.truncated,
+                  abs(document.coverage.inputDurationS - expectedDuration) <= 0.01,
+                  document.coverage.processedDurationS == 0,
+                  document.segments.isEmpty
+            else {
+                throw ASRAdapterError.malformedOutput(
+                    "ASR unverified evidence record is inconsistent"
+                )
+            }
+            if selected == .qwen3, document.timingGranularity == .chunk {
+                throw ASRAdapterError.evidenceUnavailable(
+                    "Qwen output cannot be promoted without terminal and intra-chunk timing evidence"
+                )
+            }
+            throw ASRAdapterError.evidenceUnavailable(
+                "ASR output cannot be promoted without terminal evidence"
+            )
+        }
+        guard document.terminalEvidence == .observed else {
+            throw ASRAdapterError.evidenceUnavailable(
+                "ASR output cannot be promoted without terminal evidence"
+            )
+        }
+        guard document.timingGranularity == .segment else {
+            let message = selected == .qwen3
+                ? "Qwen output has no intra-chunk timestamp evidence"
+                : "ASR output has no segment-level timestamp evidence"
+            throw ASRAdapterError.evidenceUnavailable(message)
+        }
+        guard let metrics = document.metrics.publicValue(
+            runnerWallTimeS: document.runnerWallTimeS,
+            unavailable: document.metricsUnavailable
+        ), metrics.maxTokens == maximumTokens
+        else { throw ASRAdapterError.malformedOutput("ASR measured metrics are incomplete") }
+        if let contextHardCapTokens = metrics.contextHardCapTokens,
+           contextHardCapTokens < metrics.maxTokens
+        {
+            throw ASRAdapterError.malformedOutput("ASR context cap evidence is invalid")
+        }
+        if selected == .moss, metrics.contextHardCapTokens != 131_072 {
+            throw ASRAdapterError.malformedOutput("MOSS context hard cap evidence is invalid")
         }
         if document.outcome == .invalidEOSOutput {
             guard selected == .moss,
@@ -824,7 +882,7 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
                   document.coverage.processedDurationS == 0,
                   document.rawText.isEmpty,
                   document.segments.isEmpty,
-                  let fingerprint
+                  selected != .moss || fingerprint != nil
             else { throw ASRAdapterError.malformedOutput("ASR limit output contains promotable partial content") }
             return .limit(ASRLimitRecord(
                 stopReason: stop,
@@ -1270,18 +1328,19 @@ private struct RunnerDocument: Decodable {
     }
 
     struct RunnerMetrics: Decodable {
-        var preprocessingS: Double
-        var audioEncoderS: Double
-        var decoderPrefillS: Double
-        var tokenDecodeS: Double
-        var totalS: Double
-        var modelLoadS: Double
+        var preprocessingS: Double?
+        var audioEncoderS: Double?
+        var decoderPrefillS: Double?
+        var tokenDecodeS: Double?
+        var totalS: Double?
+        var modelLoadS: Double?
         var audioDurationS: Double
-        var promptTokens: Int
-        var generatedTokens: Int
-        var maxTokens: Int
-        var contextHardCapTokens: Int
-        var peakRSSBytes: Int64
+        var promptTokens: Int?
+        var generatedTokens: Int?
+        var requestedMaxTokens: Int
+        var maxTokens: Int?
+        var contextHardCapTokens: Int?
+        var peakRSSBytes: Int64?
         enum CodingKeys: String, CodingKey {
             case preprocessingS = "preprocessing_s"
             case audioEncoderS = "audio_encoder_s"
@@ -1292,13 +1351,84 @@ private struct RunnerDocument: Decodable {
             case audioDurationS = "audio_duration_s"
             case promptTokens = "prompt_tokens"
             case generatedTokens = "generated_tokens"
+            case requestedMaxTokens = "requested_max_tokens"
             case maxTokens = "max_tokens"
             case contextHardCapTokens = "context_hard_cap_tokens"
             case peakRSSBytes = "peak_rss_bytes"
         }
-        func publicValue(runnerWallTimeS: Double) -> ASRAttemptMetrics {
-            .init(preprocessingS: preprocessingS, audioEncoderS: audioEncoderS, decoderPrefillS: decoderPrefillS, tokenDecodeS: tokenDecodeS, promptTokens: promptTokens, generatedTokens: generatedTokens, maxTokens: maxTokens, contextHardCapTokens: contextHardCapTokens, audioDurationS: audioDurationS, totalS: totalS, modelLoadS: modelLoadS, runnerWallTimeS: runnerWallTimeS, peakRSSBytes: peakRSSBytes)
+
+        var hasValidValues: Bool {
+            let floatingPointValues = [
+                preprocessingS, audioEncoderS, decoderPrefillS, tokenDecodeS,
+                totalS, modelLoadS,
+            ].compactMap { $0 }
+            let integerValues = [
+                promptTokens, generatedTokens, maxTokens,
+                contextHardCapTokens,
+            ].compactMap { $0 }
+            return requestedMaxTokens > 0
+                && audioDurationS.isFinite
+                && audioDurationS >= 0
+                && floatingPointValues.allSatisfy { $0.isFinite && $0 >= 0 }
+                && integerValues.allSatisfy { $0 >= 0 }
+                && (peakRSSBytes.map { $0 >= 0 } ?? true)
         }
+
+        func hasTruthfulAvailability(_ unavailable: [String: String]) -> Bool {
+            var absentFields = Set<String>()
+            if preprocessingS == nil { absentFields.insert("preprocessing_s") }
+            if audioEncoderS == nil { absentFields.insert("audio_encoder_s") }
+            if decoderPrefillS == nil { absentFields.insert("decoder_prefill_s") }
+            if tokenDecodeS == nil { absentFields.insert("token_decode_s") }
+            if totalS == nil { absentFields.insert("total_s") }
+            if modelLoadS == nil { absentFields.insert("model_load_s") }
+            if promptTokens == nil { absentFields.insert("prompt_tokens") }
+            if generatedTokens == nil { absentFields.insert("generated_tokens") }
+            if maxTokens == nil { absentFields.insert("max_tokens") }
+            if contextHardCapTokens == nil {
+                absentFields.insert("context_hard_cap_tokens")
+            }
+            if peakRSSBytes == nil { absentFields.insert("peak_rss_bytes") }
+            return Set(unavailable.keys) == absentFields
+                && unavailable.values.allSatisfy {
+                    !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }
+        }
+
+        func publicValue(
+            runnerWallTimeS: Double,
+            unavailable: [String: String]
+        ) -> ASRAttemptMetrics? {
+            guard let promptTokens,
+                  let generatedTokens,
+                  let maxTokens,
+                  let totalS
+            else { return nil }
+            return .init(
+                preprocessingS: preprocessingS,
+                audioEncoderS: audioEncoderS,
+                decoderPrefillS: decoderPrefillS,
+                tokenDecodeS: tokenDecodeS,
+                promptTokens: promptTokens,
+                generatedTokens: generatedTokens,
+                maxTokens: maxTokens,
+                contextHardCapTokens: contextHardCapTokens,
+                audioDurationS: audioDurationS,
+                totalS: totalS,
+                modelLoadS: modelLoadS,
+                runnerWallTimeS: runnerWallTimeS,
+                peakRSSBytes: peakRSSBytes,
+                unavailable: unavailable
+            )
+        }
+    }
+
+    enum TerminalEvidence: String, Decodable {
+        case observed, unavailable
+    }
+
+    enum TimingGranularity: String, Decodable {
+        case segment, chunk
     }
 
     struct RunnerFingerprint: Decodable {
@@ -1352,14 +1482,17 @@ private struct RunnerDocument: Decodable {
     var backendRawArtifact: RunnerArtifact
     var outcome: Outcome
     var stopReason: ASRAttemptStopReason?
+    var terminalEvidence: TerminalEvidence
+    var timingGranularity: TimingGranularity
     var language: RunnerLanguage
     var metrics: RunnerMetrics
+    var metricsUnavailable: [String: String]
     var helperFingerprint: RunnerFingerprint?
     var runnerWallTimeS: Double
     var failure: RunnerFailure?
 
     enum Outcome: String, Decodable {
-        case complete, limit
+        case complete, limit, unverified
         case invalidEOSOutput = "invalid_eos_output"
     }
 
@@ -1368,8 +1501,11 @@ private struct RunnerDocument: Decodable {
         case rawText = "raw_text"
         case backendRawArtifact = "backend_raw_artifact"
         case stopReason = "stop_reason"
+        case terminalEvidence = "terminal_evidence"
+        case timingGranularity = "timing_granularity"
         case helperFingerprint = "helper_fingerprint"
         case runnerWallTimeS = "runner_wall_time_s"
+        case metricsUnavailable = "metrics_unavailable"
     }
 }
 

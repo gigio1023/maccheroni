@@ -86,7 +86,7 @@ import Testing
         swift = "Swift synthetic"
         document = {
           "backend":"moss", "model":{"hf_model_id":"aufklarer/MOSS-Transcribe-Diarize-0.9B-MLX-INT8", "revision":"90aa65287111a327db98eb83e325bd5332945edd", "quantization":"int8-decoder+fp16-audio-vq-kv"},
-          "outcome":"invalid_eos_output" if invalid_eos else "limit", "stop_reason":"endOfSequence" if invalid_eos else "maximumTokens", "raw_text":"", "segments":[],
+          "outcome":"invalid_eos_output" if invalid_eos else "limit", "stop_reason":"endOfSequence" if invalid_eos else "maximumTokens", "terminal_evidence":"observed", "timing_granularity":"segment", "raw_text":"", "segments":[],
           "failure":{"code":"invalid_eos_output","message":"MOSS EOS output has no validated segments"} if invalid_eos else None,
           "language":{"requested":args.language,"instruction_sha256":instruction,"prompt_guidance_applied":args.language != "auto"},
           "glossary":{"provided":bool(entries),"sha256":args.glossary_sha256,"item_count":len(entries),"injection_mode":args.injection_mode if entries else "none","applied":bool(entries),"payload_sha256":instruction,"payload_entry_count":len(entries),"instruction_sha256":instruction},
@@ -94,7 +94,7 @@ import Testing
           "input":{"sha256_before":audio_hash,"sha256_after":audio_hash}, "command":["synthetic-helper","--max-tokens",args.max_tokens,"--language",args.language],
           "backend_raw_artifact":{"path":str(raw),"sha256":hashlib.sha256(raw.read_bytes()).hexdigest()},
           "helper_fingerprint":{"path":"/synthetic/helper.fingerprint.json","sha256":h("sidecar"),"contract_version":"moss-harness-v2","source_tree_sha256":h("source"),"package_swift_sha256":h("package"),"package_resolved_sha256":h("resolved"),"swift_version":swift,"swift_version_sha256":h(swift),"target_architecture":"arm64","configuration":"release","build_flags":["--configuration","release","--arch","arm64","--product","MaccheroniMossHarness"],"executable_sha256":h("binary"),"metallib_sha256":h("metallib")},
-          "runner_wall_time_s":0.1, "metrics":{"preprocessing_s":0,"audio_encoder_s":0,"decoder_prefill_s":0,"token_decode_s":0,"total_s":0,"model_load_s":0,"audio_duration_s":args.end_s-args.start_s,"prompt_tokens":1,"generated_tokens":5120,"max_tokens":int(args.max_tokens),"context_hard_cap_tokens":131072,"peak_rss_bytes":0}
+          "runner_wall_time_s":0.1, "metrics":{"preprocessing_s":0,"audio_encoder_s":0,"decoder_prefill_s":0,"token_decode_s":0,"total_s":0,"model_load_s":0,"audio_duration_s":args.end_s-args.start_s,"prompt_tokens":1,"generated_tokens":5120,"requested_max_tokens":int(args.max_tokens),"max_tokens":int(args.max_tokens),"context_hard_cap_tokens":131072,"peak_rss_bytes":0}, "metrics_unavailable":{}
         }
         with output.open("x", encoding="utf-8") as stream: json.dump(document, stream)
         sys.exit(2 if invalid_eos else (75 if "nonzero" in pathlib.Path(sys.argv[0]).name else 0))
@@ -109,9 +109,152 @@ import Testing
         ), scratch)
     }
 
+    private func fakeQwenEvidenceRuntime(
+        unavailable: Bool
+    ) throws -> (ASRRuntime, URL) {
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "maccheroni-asr-fake-qwen-evidence-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: scratch,
+            withIntermediateDirectories: true
+        )
+        let runner = scratch.appendingPathComponent(
+            unavailable ? "qwen-unverified.py" : "qwen-chunk-timing.py"
+        )
+        let source = #"""
+        import argparse, hashlib, json, pathlib, sys
+        parser = argparse.ArgumentParser()
+        parser.add_argument("operation"); parser.add_argument("--backend")
+        parser.add_argument("--audio"); parser.add_argument("--start-s", type=float); parser.add_argument("--end-s", type=float)
+        parser.add_argument("--language"); parser.add_argument("--glossary"); parser.add_argument("--glossary-sha256")
+        parser.add_argument("--injection-mode"); parser.add_argument("--cache-root"); parser.add_argument("--output")
+        parser.add_argument("--timeout-seconds"); parser.add_argument("--max-tokens", type=int)
+        args = parser.parse_args()
+        output = pathlib.Path(args.output); raw = output.with_suffix(".stdout.txt")
+        raw.write_text("Result: synthetic Qwen transcript\n", encoding="utf-8")
+        h = lambda value: hashlib.sha256(value.encode()).hexdigest()
+        audio_hash = hashlib.sha256(pathlib.Path(args.audio).read_bytes()).hexdigest()
+        duration = args.end_s - args.start_s
+        unavailable = "unverified" in pathlib.Path(sys.argv[0]).name
+        nullable_metrics = {
+          "preprocessing_s":None,"audio_encoder_s":None,"decoder_prefill_s":None,"token_decode_s":None,
+          "total_s":None,"model_load_s":None,"audio_duration_s":duration,"prompt_tokens":None,
+          "generated_tokens":None,"requested_max_tokens":args.max_tokens,"max_tokens":None,
+          "context_hard_cap_tokens":None,"peak_rss_bytes":None
+        }
+        measured_metrics = {
+          "preprocessing_s":0.01,"audio_encoder_s":0.02,"decoder_prefill_s":0.03,"token_decode_s":0.04,
+          "total_s":0.1,"model_load_s":0.01,"audio_duration_s":duration,"prompt_tokens":2,
+          "generated_tokens":3,"requested_max_tokens":args.max_tokens,"max_tokens":args.max_tokens,
+          "context_hard_cap_tokens":131072,"peak_rss_bytes":1024
+        }
+        unavailable_reasons = {key:"speech 0.0.23 does not expose this measurement" for key, value in nullable_metrics.items() if value is None}
+        document = {
+          "backend":"qwen3", "model":{"hf_model_id":"aufklarer/Qwen3-ASR-1.7B-MLX-8bit", "revision":"e5450a26d1fd417c45fc9c405651ddc3180a27a6", "quantization":"int8"},
+          "outcome":"unverified" if unavailable else "complete", "stop_reason":None if unavailable else "endOfSequence",
+          "terminal_evidence":"unavailable" if unavailable else "observed", "timing_granularity":"chunk",
+          "raw_text":"synthetic Qwen transcript", "segments":[] if unavailable else [{"start_s":args.start_s,"end_s":args.end_s,"text":"synthetic Qwen transcript","speaker":""}],
+          "failure":{"code":"evidence_unavailable","message":"Qwen cannot observe a terminal reason or intra-chunk timing"} if unavailable else None,
+          "language":{"requested":args.language,"instruction_sha256":h("qwen3-no-context"),"prompt_guidance_applied":False},
+          "glossary":{"provided":False,"sha256":None,"item_count":0,"injection_mode":"none","applied":False,"payload_sha256":None,"payload_entry_count":0,"instruction_sha256":h("qwen3-no-context")},
+          "coverage":{"input_duration_s":duration,"processed_duration_s":0 if unavailable else duration,"truncated":unavailable},
+          "input":{"sha256_before":audio_hash,"sha256_after":audio_hash}, "command":["speech","transcribe"],
+          "backend_raw_artifact":{"path":str(raw),"sha256":hashlib.sha256(raw.read_bytes()).hexdigest()},
+          "helper_fingerprint":None, "runner_wall_time_s":0.1,
+          "metrics":nullable_metrics if unavailable else measured_metrics,
+          "metrics_unavailable":unavailable_reasons if unavailable else {}
+        }
+        with output.open("x", encoding="utf-8") as stream: json.dump(document, stream)
+        sys.exit(3 if unavailable else 0)
+        """#
+        try Data(source.utf8).write(to: runner, options: .withoutOverwriting)
+        return (
+            ASRRuntime(
+                pythonExecutable: cacheRoot.appendingPathComponent(
+                    "venvs/mlx-audio/bin/python"
+                ),
+                runnerURL: runner,
+                cacheRoot: cacheRoot,
+                outputRoot: scratch.appendingPathComponent(
+                    "output",
+                    isDirectory: true
+                ),
+                timeout: 10
+            ),
+            scratch
+        )
+    }
+
+    private func fakeVibeVoiceLimitRuntime() throws -> (ASRRuntime, URL) {
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "maccheroni-asr-fake-vibe-limit-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: scratch,
+            withIntermediateDirectories: true
+        )
+        let runner = scratch.appendingPathComponent("vibe-limit.py")
+        let source = #"""
+        import argparse, hashlib, json, pathlib
+        parser = argparse.ArgumentParser()
+        parser.add_argument("operation"); parser.add_argument("--backend")
+        parser.add_argument("--audio"); parser.add_argument("--start-s", type=float); parser.add_argument("--end-s", type=float)
+        parser.add_argument("--language"); parser.add_argument("--glossary"); parser.add_argument("--glossary-sha256")
+        parser.add_argument("--injection-mode"); parser.add_argument("--cache-root"); parser.add_argument("--output")
+        parser.add_argument("--timeout-seconds"); parser.add_argument("--max-tokens", type=int)
+        args = parser.parse_args()
+        output = pathlib.Path(args.output); raw = output.with_suffix(".backend.json")
+        raw.write_text('{"generation_tokens": "cap reached"}\n', encoding="utf-8")
+        h = lambda value: hashlib.sha256(value.encode()).hexdigest()
+        audio_hash = hashlib.sha256(pathlib.Path(args.audio).read_bytes()).hexdigest()
+        duration = args.end_s - args.start_s
+        unavailable = {
+          "preprocessing_s":"mlx-audio exposes aggregate time only", "audio_encoder_s":"mlx-audio exposes aggregate time only",
+          "decoder_prefill_s":"mlx-audio exposes aggregate time only", "token_decode_s":"mlx-audio exposes aggregate time only",
+          "model_load_s":"mlx-audio exposes aggregate time only", "context_hard_cap_tokens":"mlx-audio does not expose this cap",
+          "peak_rss_bytes":"mlx-audio does not expose peak RSS"
+        }
+        document = {
+          "backend":"vibevoice", "model":{"hf_model_id":"mlx-community/VibeVoice-ASR-8bit", "revision":"725c72e54d6ef875472c27fbc50fab470a960940", "quantization":"int8"},
+          "outcome":"limit", "stop_reason":"maximumTokens", "terminal_evidence":"observed", "timing_granularity":"segment",
+          "raw_text":"", "segments":[], "failure":None,
+          "language":{"requested":args.language,"instruction_sha256":h("vibevoice-no-prompt"),"prompt_guidance_applied":False},
+          "glossary":{"provided":False,"sha256":None,"item_count":0,"injection_mode":"none","applied":False,"payload_sha256":None,"payload_entry_count":0,"instruction_sha256":h("vibevoice-no-prompt")},
+          "coverage":{"input_duration_s":duration,"processed_duration_s":0,"truncated":True},
+          "input":{"sha256_before":audio_hash,"sha256_after":audio_hash}, "command":["mlx_audio.stt.generate"],
+          "backend_raw_artifact":{"path":str(raw),"sha256":hashlib.sha256(raw.read_bytes()).hexdigest()},
+          "helper_fingerprint":None, "runner_wall_time_s":0.2,
+          "metrics":{"preprocessing_s":None,"audio_encoder_s":None,"decoder_prefill_s":None,"token_decode_s":None,"total_s":0.1,"model_load_s":None,"audio_duration_s":duration,"prompt_tokens":4,"generated_tokens":args.max_tokens,"requested_max_tokens":args.max_tokens,"max_tokens":args.max_tokens,"context_hard_cap_tokens":None,"peak_rss_bytes":None},
+          "metrics_unavailable":unavailable
+        }
+        with output.open("x", encoding="utf-8") as stream: json.dump(document, stream)
+        """#
+        try Data(source.utf8).write(to: runner, options: .withoutOverwriting)
+        return (
+            ASRRuntime(
+                pythonExecutable: cacheRoot.appendingPathComponent(
+                    "venvs/mlx-audio/bin/python"
+                ),
+                runnerURL: runner,
+                cacheRoot: cacheRoot,
+                outputRoot: scratch.appendingPathComponent(
+                    "output",
+                    isDirectory: true
+                ),
+                timeout: 10
+            ),
+            scratch
+        )
+    }
+
     @Test func selectedBackendsExposeTheApprovedPinnedModels() {
         #expect(SelectedASRBackend.koreanDefault == .vibeVoice)
-        #expect(SelectedASRBackend.koreanLowMemoryFallback == .qwen3)
+        #expect(SelectedASRBackend.koreanFallback == nil)
         #expect(SelectedASRBackend.italianDefault == .moss)
         #expect(SelectedASRBackend.italianFallback == .vibeVoice)
         #expect(SelectedASRBackend.vibeVoice.model.revision.count == 40)
@@ -294,28 +437,123 @@ import Testing
         }
     }
 
-    @Test func qwenUsesRealContextTransportAndPinnedProvenance() async throws {
-        let adapter = PinnedASRAdapter(.qwen3, runtime: freshRuntime())
+    @Test func qwenRetainsRealContextEvidenceButRefusesPromotion() async throws {
+        let runtime = freshRuntime()
+        let adapter = PinnedASRAdapter(.qwen3, runtime: runtime)
         let terms = try glossary("benchmarks/runs/ko-asr/fixtures/hike-tech/glossary.txt")
-        let record = try await adapter.transcribeDetailed(ASRRequest(
-            audioURL: fixture("benchmarks/runs/ko-asr/fixtures/hike-tech/items/000.wav"),
+        do {
+            _ = try await adapter.transcribeDetailed(ASRRequest(
+                audioURL: fixture(
+                    "benchmarks/runs/ko-asr/fixtures/hike-tech/items/000.wav"
+                ),
+                startS: 0,
+                endS: 4.08,
+                language: .fixed("ko"),
+                glossary: terms,
+                injectionMode: .freeTextContext
+            ))
+            Issue.record("expected Qwen evidence refusal")
+            return
+        } catch let error as ASRAdapterError {
+            let expected = ASRAdapterError.evidenceUnavailable(
+                "Qwen output cannot be promoted without terminal and intra-chunk timing evidence"
+            )
+            guard error == expected else { throw error }
+        }
+        let records = try FileManager.default.contentsOfDirectory(
+            at: runtime.outputRoot,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
+        #expect(records.count == 1)
+        guard let recordURL = records.first,
+              let record = try JSONSerialization.jsonObject(
+                  with: Data(contentsOf: recordURL)
+              ) as? [String: Any]
+        else {
+            Issue.record("expected one protected Qwen runner record")
+            return
+        }
+        #expect(record["outcome"] as? String == "unverified")
+        #expect(record["terminal_evidence"] as? String == "unavailable")
+        #expect(record["timing_granularity"] as? String == "chunk")
+        #expect(record["stop_reason"] is NSNull)
+        #expect((record["raw_text"] as? String)?.isEmpty == false)
+        #expect((record["segments"] as? [Any])?.isEmpty == true)
+        let command = record["command"] as? [String]
+        #expect(command?.contains("--context") == true)
+        #expect(command?.contains("--language") == true)
+        #expect(command?.contains("ko") == true)
+    }
+
+    @Test func qwenRefusesUnavailableTerminalAndTimingEvidence() async throws {
+        let (runtime, scratch) = try fakeQwenEvidenceRuntime(unavailable: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let adapter = PinnedASRAdapter(.qwen3, runtime: runtime)
+
+        await #expect(throws: ASRAdapterError.evidenceUnavailable(
+            "Qwen output cannot be promoted without terminal and intra-chunk timing evidence"
+        )) {
+            _ = try await adapter.transcribeDetailed(ASRRequest(
+                audioURL: fixture(
+                    "benchmarks/runs/ko-asr/fixtures/hike-tech/items/000.wav"
+                ),
+                startS: 0,
+                endS: 4.08,
+                language: .fixed("ko")
+            ))
+        }
+    }
+
+    @Test func qwenRefusesChunkOnlyTimingEvenWithClaimedEOS() async throws {
+        let (runtime, scratch) = try fakeQwenEvidenceRuntime(unavailable: false)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let adapter = PinnedASRAdapter(.qwen3, runtime: runtime)
+
+        await #expect(throws: ASRAdapterError.evidenceUnavailable(
+            "Qwen output has no intra-chunk timestamp evidence"
+        )) {
+            _ = try await adapter.transcribeDetailed(ASRRequest(
+                audioURL: fixture(
+                    "benchmarks/runs/ko-asr/fixtures/hike-tech/items/000.wav"
+                ),
+                startS: 0,
+                endS: 4.08,
+                language: .fixed("ko")
+            ))
+        }
+    }
+
+    @Test func vibeVoiceTokenCapReturnsTypedLimitWithUnavailableMetrics() async throws {
+        let (runtime, scratch) = try fakeVibeVoiceLimitRuntime()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let adapter = PinnedASRAdapter(.vibeVoice, runtime: runtime)
+        let request = ASRRequest(
+            audioURL: fixture(
+                "benchmarks/runs/ko-asr/fixtures/hike-tech/items/000.wav"
+            ),
             startS: 0,
             endS: 4.08,
-            language: .fixed("ko"),
-            glossary: terms,
-            injectionMode: .freeTextContext
-        ))
-        #expect(!record.result.rawText.isEmpty)
-        #expect(record.result.segments.count == 1)
-        #expect(record.result.segments[0].language == "ko")
-        #expect(record.glossary.applied)
-        #expect(record.glossaryPayloadEntryCount == terms.entries.count)
-        #expect(record.command.contains("--context"))
-        #expect(record.command.contains("--language"))
-        #expect(record.command.contains("ko"))
-        #expect(record.result.segments.allSatisfy { $0.flags == nil })
-        let backendOutput = try String(contentsOf: record.backendRawArtifactURL, encoding: .utf8)
-        #expect(backendOutput.contains("Result: \(record.result.rawText)"))
+            language: .fixed("ko")
+        )
+
+        let outcome = try await adapter.transcribeAttempt(
+            request,
+            maximumTokens: 7
+        )
+        guard case let .limit(limit) = outcome else {
+            Issue.record("expected typed VibeVoice token limit")
+            return
+        }
+        #expect(limit.stopReason == .maximumTokens)
+        #expect(limit.metrics.maxTokens == 7)
+        #expect(limit.metrics.generatedTokens == 7)
+        #expect(limit.metrics.contextHardCapTokens == nil)
+        #expect(limit.metrics.preprocessingS == nil)
+        #expect(limit.metrics.unavailable["preprocessing_s"] != nil)
+        #expect(limit.helperFingerprint == nil)
+        await #expect(throws: ASRAdapterError.inferenceLimit(.maximumTokens)) {
+            _ = try await adapter.transcribeDetailed(request)
+        }
     }
 
     @Test func doctorReportsPinnedRuntimeAndModelSnapshots() async throws {

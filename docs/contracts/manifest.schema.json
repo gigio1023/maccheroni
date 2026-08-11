@@ -31,7 +31,8 @@
       "enum": [
         "succeeded",
         "partial",
-        "failed"
+        "failed",
+        "canceled"
       ]
     },
     "input": {
@@ -149,7 +150,8 @@
           "status": {
             "enum": [
               "partial",
-              "failed"
+              "failed",
+              "canceled"
             ]
           },
           "coverage": {
@@ -779,8 +781,29 @@
       ],
       "properties": {
         "code": {
-          "type": "string",
-          "pattern": "^[A-Z][A-Z0-9_]*$"
+          "enum": [
+            "ASR_ERROR",
+            "CANCELED",
+            "CHUNK_PLAN_ERROR",
+            "DIARIZATION_ERROR",
+            "GLOSSARY_ERROR",
+            "INPUT_MUTATED",
+            "MERGE_ERROR",
+            "MOSS_LIMIT_EXHAUSTED",
+            "POSTPROCESS_ERROR",
+            "PREPROCESS_ERROR",
+            "PROFILE_ERROR",
+            "RUN_ERROR",
+            "RUN_INCOMPLETE",
+            "USAGE_ERROR",
+            "VAD_ERROR",
+            "asr_coverage_shortfall",
+            "asr_evidence_unavailable",
+            "asr_malformed_output",
+            "asr_model_identity_mismatch",
+            "asr_timeout",
+            "invalid_eos_output"
+          ]
         },
         "message": {
           "type": "string",

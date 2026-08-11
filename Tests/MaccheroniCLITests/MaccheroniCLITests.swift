@@ -183,6 +183,82 @@ struct MaccheroniCLITests {
     }
 
     @Test
+    func cancellationBeforeAnyChunkPersistsCanceledStatusAndZeroCoverage() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "canceled-before-first.wav")
+        let profiles = try profileFile(in: root)
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        let app = testApplication(
+            runID: "canceled-before-first",
+            dependencies: testDependencies(cancelASRAtOrAfterS: 0)
+        )
+
+        do {
+            _ = try await app.execute(arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--output-root", outputRoot.path,
+            ])
+            Issue.record("expected cancellation before the first ASR chunk")
+        } catch let error as CLIError {
+            #expect(error.code == "RUN_ERROR")
+        }
+
+        let run = outputRoot.appendingPathComponent(
+            "canceled-before-first",
+            isDirectory: true
+        )
+        let manifest: Manifest = try decode("manifest.json", in: run)
+        #expect(manifest.status == .canceled)
+        #expect(manifest.failure?.code == "CANCELED")
+        #expect(manifest.coverage.chunksPlanned == 2)
+        #expect(manifest.coverage.chunksCompleted == 0)
+        #expect(abs(manifest.coverage.processedDurationS) < 0.01)
+        #expect(manifest.coverage.truncated)
+        #expect(manifest.chunkBoundaries.map(\.status) == [.failed, .skipped])
+    }
+
+    @Test
+    func cancellationAfterOneChunkPersistsCanceledStatusAndCompletedCoverage() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "canceled-after-first.wav")
+        let profiles = try profileFile(in: root)
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        let app = testApplication(
+            runID: "canceled-after-first",
+            dependencies: testDependencies(cancelASRAtOrAfterS: 1)
+        )
+
+        do {
+            _ = try await app.execute(arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--output-root", outputRoot.path,
+            ])
+            Issue.record("expected cancellation after the first ASR chunk")
+        } catch let error as CLIError {
+            #expect(error.code == "RUN_ERROR")
+        }
+
+        let run = outputRoot.appendingPathComponent(
+            "canceled-after-first",
+            isDirectory: true
+        )
+        let manifest: Manifest = try decode("manifest.json", in: run)
+        #expect(manifest.status == .canceled)
+        #expect(manifest.failure?.code == "CANCELED")
+        #expect(manifest.coverage.chunksPlanned == 2)
+        #expect(manifest.coverage.chunksCompleted == 1)
+        #expect(abs(manifest.coverage.processedDurationS - 1) < 0.01)
+        #expect(manifest.coverage.truncated)
+        #expect(manifest.chunkBoundaries.map(\.status) == [.succeeded, .failed])
+    }
+
+    @Test
     func inputHashChangeAtCanonicalSealCannotCreatePromotionRecord() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -975,8 +1051,8 @@ struct MaccheroniCLITests {
         )
         let manifest: Manifest = try decode("manifest.json", in: run)
         #expect(parent["status"] as? String == "limit_isolated")
-        #expect(left["status"] as? String == "canceled")
-        #expect(right["status"] as? String == "canceled")
+        #expect(left["status"] as? String == "CANCELED")
+        #expect(right["status"] as? String == "CANCELED")
         #expect(right["request_sha256"] == nil)
         // An in-progress cancellation and an unstarted sibling must persist the
         // same code; the presentation error stays the generic run failure.
@@ -1082,6 +1158,12 @@ struct MaccheroniCLITests {
                 "asr_timeout"
             ),
             (
+                "asr-evidence-unavailable",
+                .evidenceUnavailable("synthetic terminal evidence unavailable"),
+                "asr_evidence_unavailable",
+                "asr_evidence_unavailable"
+            ),
+            (
                 "asr-malformed",
                 .malformedOutput("synthetic malformed output"),
                 "asr_malformed_output",
@@ -1107,6 +1189,7 @@ struct MaccheroniCLITests {
             ),
         ]
         var observed: [String: (status: String, code: String)] = [:]
+        let schemaFailureCodes = try manifestSchemaFailureCodes()
 
         for testCase in cases {
             let recorder = MOSSAttemptRecorder()
@@ -1144,6 +1227,7 @@ struct MaccheroniCLITests {
             )
             #expect(manifest.status == .failed)
             #expect(manifest.failure?.code == testCase.code)
+            #expect(schemaFailureCodes.contains(testCase.code))
             #expect(outcome["status"] as? String == testCase.status)
             #expect(outcome["error_code"] as? String == testCase.code)
             #expect(outcome["child_attempt_ids"] as? [String] == [])
@@ -1306,6 +1390,7 @@ struct MaccheroniCLITests {
 
 private func testDependencies(
     failASRAtOrAfterS: Double? = nil,
+    cancelASRAtOrAfterS: Double? = nil,
     postprocessFailure: Bool = false,
     codexVersion: String = "codex-cli test",
     inputSHA256: @escaping @Sendable (URL) throws -> String = {
@@ -1364,6 +1449,11 @@ private func testDependencies(
             )
         },
         asr: { _, request, _, _ in
+            if let cancelASRAtOrAfterS,
+               request.startS >= cancelASRAtOrAfterS
+            {
+                throw CancellationError()
+            }
             if let failASRAtOrAfterS,
                request.startS >= failASRAtOrAfterS
             {
@@ -2054,6 +2144,25 @@ private func jsonObject(
         throw CLIError.run("test JSON object is malformed: \(path)")
     }
     return object
+}
+
+private func manifestSchemaFailureCodes() throws -> Set<String> {
+    let testFile = URL(fileURLWithPath: #filePath)
+    let repositoryRoot = testFile
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let data = try Data(contentsOf: repositoryRoot.appendingPathComponent(
+        "docs/contracts/manifest.schema.json"
+    ))
+    let schema = try #require(
+        JSONSerialization.jsonObject(with: data) as? [String: Any]
+    )
+    let definitions = try #require(schema["$defs"] as? [String: Any])
+    let failure = try #require(definitions["failure"] as? [String: Any])
+    let properties = try #require(failure["properties"] as? [String: Any])
+    let code = try #require(properties["code"] as? [String: Any])
+    return Set(try #require(code["enum"] as? [String]))
 }
 
 private func regularRelativePaths(in root: URL) throws -> Set<String> {

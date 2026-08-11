@@ -222,6 +222,59 @@ import Testing
         #expect(codexPostprocess["glossary_sha256"] is NSNull)
     }
 
+    @Test func manifestSchemaEnumeratesRunStatusesAndFailureCodes() throws {
+        let data = try Data(contentsOf: fixtureURL(
+            "docs/contracts/manifest.schema.json"
+        ))
+        let schema = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let properties = try #require(schema["properties"] as? [String: Any])
+        let status = try #require(properties["status"] as? [String: Any])
+        #expect(status["enum"] as? [String] == [
+            "succeeded",
+            "partial",
+            "failed",
+            "canceled",
+        ])
+
+        let definitions = try #require(schema["$defs"] as? [String: Any])
+        let failure = try #require(definitions["failure"] as? [String: Any])
+        let failureProperties = try #require(
+            failure["properties"] as? [String: Any]
+        )
+        let code = try #require(failureProperties["code"] as? [String: Any])
+        #expect(code["enum"] as? [String] == [
+            "ASR_ERROR",
+            "CANCELED",
+            "CHUNK_PLAN_ERROR",
+            "DIARIZATION_ERROR",
+            "GLOSSARY_ERROR",
+            "INPUT_MUTATED",
+            "MERGE_ERROR",
+            "MOSS_LIMIT_EXHAUSTED",
+            "POSTPROCESS_ERROR",
+            "PREPROCESS_ERROR",
+            "PROFILE_ERROR",
+            "RUN_ERROR",
+            "RUN_INCOMPLETE",
+            "USAGE_ERROR",
+            "VAD_ERROR",
+            "asr_coverage_shortfall",
+            "asr_evidence_unavailable",
+            "asr_malformed_output",
+            "asr_model_identity_mismatch",
+            "asr_timeout",
+            "invalid_eos_output",
+        ])
+    }
+
+    @Test func canceledRunStatusRoundTrips() throws {
+        let encoded = try JSONEncoder().encode(RunStatus.canceled)
+        #expect(String(decoding: encoded, as: UTF8.self) == #""canceled""#)
+        #expect(try JSONDecoder().decode(RunStatus.self, from: encoded) == .canceled)
+    }
+
     @Test func postprocessManifestDecodesLegacyCorrectionAndRoundTripsTranslationEvidence() throws {
         let legacy = Data(#"""
         {
