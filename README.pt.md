@@ -21,7 +21,7 @@
 
 ---
 
-**Maccheroni** (de *macaronic speech*, isto é, enunciados que misturam idiomas) transcreve as conversas que muitos aplicativos interpretam mal sem avisar: reuniões em coreano com nomes de produtos em inglês em todas as frases, aulas de idiomas e chamadas multilíngues. Tudo é executado no dispositivo com modelos MLX/CoreML fixados em versões específicas.
+**Maccheroni** (de *macaronic speech*, isto é, enunciados que misturam idiomas) transcreve as conversas mais difíceis de transcrever corretamente: reuniões em coreano com nomes de produtos em inglês em todas as frases, aulas de idiomas e chamadas multilíngues. Tudo é executado no dispositivo com modelos MLX/CoreML fixados em versões específicas.
 
 Exemplo de exportação (amostra ilustrativa, não é uma saída do modelo):
 
@@ -42,13 +42,27 @@ As correções incertas são marcadas e nunca substituídas silenciosamente. Os 
 
 ## Por que este projeto existe
 
-Em 2 de agosto de 2026, auditamos no nível do código-fonte sete aplicativos macOS de transcrição local. Nenhum ofereceu a combinação de que reuniões realmente multilíngues precisam:
+Maccheroni é uma ferramenta pessoal: uma bancada configurável para transformar
+conversas que misturam idiomas em registros atribuídos aos falantes em um único
+Mac. Quem a utiliza ajusta essa bancada às próprias necessidades, não às de um
+mercado.
 
-- Os aplicativos com diarização local não entregavam o glossário ao modelo ASR: usavam substituição posterior de strings, parâmetros SDK inativos ou dicionários disponíveis apenas na nuvem.
-- O aplicativo com o glossário mais limpo no nível do modelo não tinha diarização.
-- “Suporte multilíngue” quase sempre significa *um idioma por sessão*, exatamente o oposto de uma conversa que mistura idiomas.
+- **Os perfis compõem a configuração de cada conversa.** Cada perfil combina
+  um modelo ASR fixado e executado no dispositivo com o contexto do glossário e
+  o tratamento dos falantes no arquivo inteiro, de acordo com o som real da
+  conversa. Uma reunião em coreano repleta de nomes de produtos em inglês exige
+  escolhas diferentes de um diálogo em italiano entre dois falantes.
+- **As combinações são medidas, não presumidas.** Os fixtures públicos e
+  sintéticos, a recuperação de termos e as taxas de erro ficam neste
+  repositório. Assim, mudar um modelo ou glossário se torna uma comparação que
+  pode ser refeita, não um palpite.
+- **Cada execução guarda sua evidência.** As revisões fixadas dos modelos, o
+  registro de entrega do glossário, as transcrições brutas, a linha do tempo dos
+  falantes e as falhas tipadas ficam selados na execução. Assim, o resultado
+  pode ser inspecionado e reproduzido mais tarde.
 
-Todas as peças existem na camada de bibliotecas. A combinação não existia na camada do aplicativo. Este repositório a constrói e mantém a auditoria em [docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
+As notas no nível do código-fonte que orientaram essas escolhas estão em
+[docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
 
 ## O que o torna diferente
 

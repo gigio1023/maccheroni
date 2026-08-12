@@ -375,6 +375,22 @@ not deleted.
   diagnostic evidence. Qwen3-ASR may return as a fallback when a backend version
   exposes all missing terminal, token, and timestamp evidence. D23's VibeVoice Korean
   default remains in force.
+- D38 [maintainer] Reframes public positioning from market exclusivity to personal
+  configurability (decided 2026-08-12). The README family no longer claims that apps
+  with local diarization do not deliver glossaries to the ASR model, that the app with
+  the cleanest model-level glossary lacked diarization, that multilingual support
+  almost always means one language per session, or that the combination did not exist
+  at the app layer. A 2026-08-12 recheck found public counterexamples: Superwhisper
+  documents recognition-time vocabulary for its local Whisper models plus offline
+  speaker separation, and Transcribe Anything's pinned source forwards
+  `initial_prompt` and diarization to a local WhisperX. The 2026-08-02 audit excluded
+  closed-source apps, so its scope cannot support market-wide conclusions. The
+  replacement framing presents Maccheroni as a personal, configurable tool whose
+  per-conversation profiles pair pinned models with glossary context and a whole-file
+  speaker authority, measure those pairings on public fixtures, and seal run evidence.
+  Section 1 retains the dated, named 2026-08-02 audit findings as history. From this
+  decision onward, comparative statements about other products require a named
+  product, version, route, and evidence.
 
 ## Project-wide Done Criteria
 

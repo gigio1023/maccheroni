@@ -21,7 +21,7 @@
 
 ---
 
-**Maccheroni** (von *macaronic speech*, also Äußerungen, die Sprachen mischen) transkribiert die Gespräche, an denen die meisten Apps unbemerkt scheitern: koreanische Meetings mit englischen Produktnamen in jedem Satz, Sprachunterricht und mehrsprachige Anrufe. Alles läuft mit festgeschriebenen MLX/CoreML-Modellen auf dem Gerät.
+**Maccheroni** (von *macaronic speech*, also Äußerungen, die Sprachen mischen) transkribiert die Gespräche, bei denen eine korrekte Transkription am schwierigsten ist: koreanische Meetings mit englischen Produktnamen in jedem Satz, Sprachunterricht und mehrsprachige Anrufe. Alles läuft mit festgeschriebenen MLX/CoreML-Modellen auf dem Gerät.
 
 So sieht ein Export aus (anschauliches Beispiel, keine Modellausgabe):
 
@@ -42,13 +42,28 @@ Unsichere Korrekturen werden gekennzeichnet und niemals stillschweigend ersetzt.
 
 ## Warum es dieses Projekt gibt
 
-Am 2. August 2026 haben wir sieben lokale macOS-Transkriptions-Apps auf Quellcodeebene geprüft. Keine erfüllte die Kombination, die echte gemischtsprachige Meetings brauchen:
+Maccheroni ist ein persönliches Werkzeug: eine konfigurierbare Werkbank, die
+gemischtsprachige Gespräche auf einem Mac in Aufzeichnungen mit
+Sprecherzuordnung verwandelt. Der Anwender stimmt sie auf seine Gespräche ab,
+nicht auf einen Markt.
 
-- Apps mit lokaler Diarisierung übergaben das Glossar nicht an das ASR-Modell. Stattdessen nutzten sie nachträgliche Zeichenkettenersetzung, wirkungslose SDK-Parameter oder Wörterbücher, die nur in der Cloud verfügbar waren.
-- Die App mit dem saubersten Glossar auf Modellebene bot keine Diarisierung.
-- „Mehrsprachige Unterstützung“ bedeutet fast immer *eine Sprache pro Sitzung*. Gemischtsprachige Äußerungen funktionieren gerade nicht so.
+- **Profile stellen die Einrichtung für jedes Gespräch zusammen.** Jedes
+  Profil kombiniert ein festgeschriebenes On-Device-ASR-Modell mit
+  Glossarkontext und einer Sprecheranalyse über die gesamte Datei, passend zum
+  tatsächlichen Klang des Gesprächs. Ein koreanisches Meeting voller englischer
+  Produktnamen braucht andere Einstellungen als ein italienischer Dialog mit
+  zwei Sprechern.
+- **Kombinationen werden gemessen, nicht vorausgesetzt.** Öffentliche und
+  synthetische Fixtures, Begriffstrefferquoten und Fehlerraten liegen in diesem
+  Repository. Ein anderes Modell oder ein anderes Glossar lässt sich damit in einem
+  wiederholbaren Vergleich bewerten statt nach Gefühl.
+- **Jeder Lauf bewahrt seine Evidenz.** Festgeschriebene Modellrevisionen, der
+  Nachweis der Glossarübergabe, Rohtranskripte, die Sprecherzeitleiste und
+  typisierte Fehler werden im Lauf versiegelt. So lässt sich ein Ergebnis
+  später prüfen und reproduzieren.
 
-Auf Bibliotheksebene sind alle Bausteine vorhanden. Auf App-Ebene fehlte ihre Kombination. Dieses Repository setzt sie um; die Prüfung ist unter [docs/reference-project-source-audit.md](docs/reference-project-source-audit.md) dokumentiert.
+Die Notizen auf Quellcodeebene, auf denen diese Entscheidungen beruhen, stehen unter
+[docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
 
 ## Was Maccheroni unterscheidet
 

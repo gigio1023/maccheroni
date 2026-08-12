@@ -21,7 +21,7 @@
 
 ---
 
-**Maccheroni** (from *macaronic speech* — utterances that mix languages) transcribes the conversations most apps quietly get wrong: Korean meetings with English product names in every sentence, language classes, multilingual calls. Everything runs on-device with pinned MLX/CoreML models.
+**Maccheroni** (from *macaronic speech* — utterances that mix languages) transcribes the conversations that are hardest to get right: Korean meetings with English product names in every sentence, language classes, multilingual calls. Everything runs on-device with pinned MLX/CoreML models.
 
 What an export looks like (illustrative sample, not model output):
 
@@ -42,13 +42,25 @@ Uncertain corrections are flagged, never silently substituted. Speaker labels co
 
 ## Why this exists
 
-On 2026-08-02 we audited seven macOS local transcription apps at source level. None passed the combination that real mixed-language meetings need:
+Maccheroni is a personal tool: a configurable workbench for turning
+mixed-language conversations into speaker-attributed records on one Mac,
+tuned by its operator rather than for a market.
 
-- Apps with local diarization didn't deliver the glossary to the ASR model (post-hoc string substitution, dead SDK parameters, or cloud-only dictionaries).
-- The app with the cleanest model-level glossary had no diarization.
-- "Multilingual support" almost always means *one language per session*, which is exactly what mixed-language speech is not.
+- **Profiles compose the setup per conversation.** Each profile pairs a
+  pinned on-device ASR model with glossary context and whole-file speaker
+  handling that fit how that conversation actually sounds — a Korean meeting
+  dense with English product names needs different choices than an Italian
+  two-speaker dialogue.
+- **Pairings are measured, not assumed.** Public and synthetic fixtures,
+  term recall, and error rates live in this repository, so changing a model
+  or glossary is a comparison you can rerun, not a hunch.
+- **Every run keeps its evidence.** Pinned model revisions, the
+  glossary-delivery record, raw transcripts, the speaker timeline, and typed
+  failures are sealed into the run, so a result can be inspected and
+  reproduced later.
 
-The parts all exist at the library layer. The combination didn't exist at the app layer. So this repo builds it — and the audit lives in [docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
+The source-level notes that shaped these choices live in
+[docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
 
 ## What makes it different
 

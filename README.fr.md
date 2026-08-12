@@ -21,7 +21,7 @@
 
 ---
 
-**Maccheroni** (de *macaronic speech*, des énoncés qui mélangent les langues) transcrit les conversations que la plupart des applications traitent mal sans le dire : réunions en coréen où chaque phrase contient des noms de produits anglais, cours de langue, appels multilingues. Tout s’exécute sur l’appareil avec des modèles MLX/CoreML épinglés.
+**Maccheroni** (de *macaronic speech*, des énoncés qui mélangent les langues) transcrit les conversations les plus difficiles à transcrire correctement : réunions en coréen où chaque phrase contient des noms de produits anglais, cours de langue, appels multilingues. Tout s’exécute sur l’appareil avec des modèles MLX/CoreML épinglés.
 
 Voici à quoi ressemble un export (exemple illustratif, et non sortie d’un modèle) :
 
@@ -42,13 +42,28 @@ Les corrections incertaines sont signalées, jamais remplacées en silence. Les 
 
 ## Pourquoi ce projet existe
 
-Le 2 août 2026, nous avons audité au niveau du code source sept applications macOS de transcription locale. Aucune ne réunissait les fonctions nécessaires aux vraies réunions multilingues :
+Maccheroni est un outil personnel : un établi configurable qui transforme, sur
+un seul Mac, des conversations mêlant plusieurs langues en comptes rendus
+attribués aux locuteurs. La personne qui l’utilise le règle selon ses besoins
+plutôt qu’en fonction d’un marché.
 
-- Les applications dotées d’une diarisation locale ne transmettaient pas le glossaire au modèle ASR (substitution de chaînes après coup, paramètres SDK inactifs ou dictionnaires réservés au cloud).
-- L’application qui proposait le glossaire le plus propre au niveau du modèle n’avait pas de diarisation.
-- La « prise en charge multilingue » signifie presque toujours *une seule langue par session*, soit précisément l’inverse d’une conversation où les langues se mélangent.
+- **Les profils composent la configuration de chaque conversation.** Chaque
+  profil associe un modèle ASR épinglé exécuté sur l’appareil au contexte du
+  glossaire et à la gestion des locuteurs sur l’ensemble du fichier, choisis en
+  fonction des caractéristiques sonores réelles de la conversation. Une réunion en coréen
+  riche en noms de produits anglais demande des choix différents d’un dialogue
+  italien à deux locuteurs.
+- **Les associations sont mesurées, pas supposées.** Les fixtures publiques et
+  synthétiques, le rappel des termes et les taux d’erreur se trouvent dans ce
+  dépôt. Changer de modèle ou de glossaire devient ainsi une comparaison que
+  l’on peut relancer, pas une intuition.
+- **Chaque exécution conserve ses preuves.** Les révisions épinglées des
+  modèles, le registre de transmission du glossaire, les transcriptions brutes,
+  la chronologie des locuteurs et les échecs typés sont scellés dans
+  l’exécution. Le résultat peut ainsi être inspecté et reproduit plus tard.
 
-Toutes les briques existent dans les bibliothèques. Leur combinaison n’existait pas dans une application. Ce dépôt la construit, et l’audit se trouve dans [docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
+Les notes au niveau du code source qui ont guidé ces choix se trouvent dans
+[docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
 
 ## Ce qui le distingue
 
