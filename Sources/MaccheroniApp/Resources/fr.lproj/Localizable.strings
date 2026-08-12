@@ -560,5 +560,43 @@
 	<string>Glossaire de l’exécution source</string>
 	<key>Current Derived Post-processing</key>
 	<string>Post-traitement dérivé actuel</string>
+	<key>Free Space</key>
+	<string>Espace libre</string>
+	<key>Unavailable</key>
+	<string>Indisponible</string>
+	<key>Stale Bookmark</key>
+	<string>Signet obsolète</string>
+	<key>Library Metadata</key>
+	<string>Métadonnées de la bibliothèque</string>
+	<key>Request Logs</key>
+	<string>Journaux des requêtes</string>
+	<key>ASR Model Cache</key>
+	<string>Cache du modèle ASR</string>
+	<key>VAD Model Cache</key>
+	<string>Cache du modèle VAD</string>
+	<key>Diarization Model Cache</key>
+	<string>Cache du modèle de diarisation</string>
+	<key>Post-processing Model Cache</key>
+	<string>Cache du modèle de post-traitement</string>
+	<key>Temporary Work</key>
+	<string>Travail temporaire</string>
+	<key>Available</key>
+	<string>Disponible</string>
+	<key>Not Created</key>
+	<string>Pas encore créé</string>
+	<key>Unmounted</key>
+	<string>Non monté</string>
+	<key>Unreadable</key>
+	<string>Illisible</string>
+	<key>Bookmark Unavailable</key>
+	<string>Signet indisponible</string>
+	<key>Volume Readiness</key>
+	<string>État des volumes</string>
+	<key>Storage Role</key>
+	<string>Rôle de stockage</string>
+	<key>Model Cache on %@</key>
+	<string>Cache du modèle sur %@</string>
+	<key>A configured storage folder is no longer available. Choose the folder again in Settings.</key>
+	<string>Un dossier de stockage configuré n’est plus disponible. Sélectionnez-le de nouveau dans Réglages.</string>
 	</dict>
 </plist>

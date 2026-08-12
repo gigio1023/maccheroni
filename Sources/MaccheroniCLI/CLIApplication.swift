@@ -8,6 +8,7 @@ import MaccheroniDiarize
 import MaccheroniMerge
 import MaccheroniPostprocess
 import MaccheroniPreprocess
+import MaccheroniStorage
 
 private let cliResourcesBundle = PackagedResourceBundle.resolve(
     named: "Maccheroni_MaccheroniCLI"
@@ -574,20 +575,30 @@ public struct CLIDependencies: Sendable {
 }
 
 struct CLIDoctorReport: Equatable, Sendable {
-    var diagnostics: String
+    var diagnosticValues: String
+    var storage: StorageReport
     var isReady: Bool
+
+    var diagnostics: String {
+        ([diagnosticValues] + storage.textLines()).joined(separator: "\n")
+    }
 }
 
 public struct CLIApplication: Sendable {
     public var dependencies: CLIDependencies
     public var now: @Sendable () -> Date
     public var runID: @Sendable (Date) -> String
+    public var storageReport: @Sendable (CLIProfile) -> StorageReport
     public init(
         dependencies: CLIDependencies = .production,
         now: @escaping @Sendable () -> Date = Date.init,
-        runID: @escaping @Sendable (Date) -> String = CLIApplication.defaultRunID
+        runID: @escaping @Sendable (Date) -> String = CLIApplication.defaultRunID,
+        storageReport: @escaping @Sendable (CLIProfile) -> StorageReport = CLIApplication.productionStorageReport
     ) {
-        self.dependencies = dependencies; self.now = now; self.runID = runID
+        self.dependencies = dependencies
+        self.now = now
+        self.runID = runID
+        self.storageReport = storageReport
     }
 
     public static func defaultRunID(_ date: Date) -> String {
@@ -597,6 +608,28 @@ public struct CLIApplication: Sendable {
         formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
         let suffix = UUID().uuidString.prefix(6).lowercased()
         return "\(formatter.string(from: date))-\(suffix)"
+    }
+
+    public static func productionStorageReport(_ profile: CLIProfile) -> StorageReport {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let library = LibraryStorageConfiguration(
+            applicationSupportDirectory: home.appendingPathComponent(
+                "Library/Application Support",
+                isDirectory: true
+            ),
+            environment: ProcessInfo.processInfo.environment,
+            preferences: .appDomain()
+        )
+        let roots = StorageRootInventory.current(
+            library: library,
+            profile: ConfiguredStorageProfile(
+                diarizationBackend: profile.diarization.enabled
+                    ? profile.diarization.backend
+                    : nil,
+                postprocessBackend: profile.postprocess
+            )
+        )
+        return StorageReadinessReporter().report(roots: roots)
     }
 
     public func execute(arguments: [String]) async throws -> String {
@@ -2069,9 +2102,7 @@ public struct CLIApplication: Sendable {
             profilesURL: profilesURL
         ).profile
         let selected = try selectedASR(profile.asrBackend)
-        let freeBytes = ((try? FileManager.default.attributesOfFileSystem(
-            forPath: FileManager.default.homeDirectoryForCurrentUser.path
-        )[.systemFreeSize]) as? NSNumber)?.int64Value ?? -1
+        let storage = storageReport(profile)
         let postprocessBackend = PostprocessBackendID(rawValue: profile.postprocess)
         var lines = [
             "profile=\(profile.name)",
@@ -2079,8 +2110,7 @@ public struct CLIApplication: Sendable {
             "diarization_enabled=\(profile.diarization.enabled)",
             "diarization_backend=\(profile.diarization.backend)",
             "postprocess=\(profile.postprocess)",
-            "disk_available_bytes=\(freeBytes)",
-            "check.disk=\(freeBytes > 0)",
+            "check.storage=\(storage.isObservable)",
             modelLine(name: "asr_model", model: selected.model),
             modelLine(name: "vad_model", model: SileroVADProvenance().model),
         ]
@@ -2100,9 +2130,10 @@ public struct CLIApplication: Sendable {
             $0.hasPrefix("check.") && $0.hasSuffix("=false")
         }
         return CLIDoctorReport(
-            diagnostics: PrivacyBoundText.redactingFilePaths(
+            diagnosticValues: PrivacyBoundText.redactingFilePaths(
                 in: lines.joined(separator: "\n")
             ),
+            storage: storage,
             isReady: !failed
         )
     }

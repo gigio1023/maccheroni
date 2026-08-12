@@ -7,6 +7,7 @@ import MaccheroniDiarize
 import MaccheroniMerge
 import MaccheroniPostprocess
 import MaccheroniPreprocess
+import MaccheroniStorage
 import Testing
 @testable import MaccheroniCLI
 
@@ -334,7 +335,10 @@ struct MaccheroniCLITests {
         #expect(doctor.contains("profile=ko-meeting"))
         #expect(doctor.contains(SelectedASRBackend.vibeVoice.model.revision))
         #expect(doctor.contains(SelectedASRBackend.vibeVoice.model.quantization))
-        #expect(doctor.contains("check.disk=true"))
+        #expect(doctor.contains("check.storage=true"))
+        #expect(doctor.contains("storage.volume.0.name=Fixture Volume"))
+        #expect(doctor.contains("storage.volume.0.roles=recordings,runs"))
+        #expect(doctor.contains("storage.volume.0.available_bytes=0"))
         #expect(doctor.contains("check.asr_doctor=true"))
         #expect(try recursiveSnapshot(of: root) == before)
 
@@ -385,6 +389,70 @@ struct MaccheroniCLITests {
             #expect(!description.contains(root.path))
             #expect(description.contains("asr_error=missing <redacted-path>"))
         }
+    }
+
+    @Test
+    func doctorTextAndJSONPreserveUnavailableStorageFactsWithoutAByteThreshold() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let profiles = try profileFile(in: root)
+        let storage = StorageReport(
+            volumes: [StorageVolume(
+                id: "archive",
+                name: "Archive",
+                roles: [.recordings],
+                availableBytes: nil
+            )],
+            roots: [
+                StorageRootObservation(
+                    id: "recordings",
+                    role: .recordings,
+                    status: .notCreated,
+                    bookmarkStatus: .stale,
+                    volumeID: "archive"
+                ),
+                StorageRootObservation(
+                    id: "runs",
+                    role: .runs,
+                    status: .unreadable,
+                    bookmarkStatus: .none,
+                    volumeID: nil
+                ),
+            ]
+        )
+        let app = testApplication(runID: "doctor-storage", storageReport: { _ in storage })
+
+        let report = try await app.inspectDoctor(
+            profileName: "ko-meeting",
+            profilesPath: profiles.path
+        )
+
+        #expect(!report.isReady)
+        #expect(report.diagnostics.contains("storage.volume.0.name=Archive"))
+        #expect(report.diagnostics.contains("storage.volume.0.roles=recordings"))
+        #expect(report.diagnostics.contains("storage.volume.0.available_bytes=unavailable"))
+        #expect(report.diagnostics.contains("storage.root.0.status=not_created"))
+        #expect(report.diagnostics.contains("storage.root.0.bookmark_status=stale"))
+        #expect(report.diagnostics.contains("storage.root.1.status=unreadable"))
+
+        let json = try CLIOutput.doctorJSON(
+            diagnostics: report.diagnosticValues,
+            storage: report.storage,
+            ready: report.isReady
+        )
+        let object = try #require(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let jsonStorage = try #require(object["storage"] as? [String: Any])
+        let volumes = try #require(jsonStorage["volumes"] as? [[String: Any]])
+        let roots = try #require(jsonStorage["roots"] as? [[String: Any]])
+
+        #expect(object["ready"] as? Bool == false)
+        #expect(volumes[0]["available_bytes"] is NSNull)
+        #expect(volumes[0]["capacity_status"] as? String == "unavailable")
+        #expect(roots[0]["status"] as? String == "not_created")
+        #expect(roots[0]["bookmark_status"] as? String == "stale")
+        #expect(roots[1]["status"] as? String == "unreadable")
     }
 
     @Test
@@ -2072,14 +2140,45 @@ struct MaccheroniCLITests {
 
     private func testApplication(
         runID: String,
-        dependencies: CLIDependencies? = nil
+        dependencies: CLIDependencies? = nil,
+        storageReport: @escaping @Sendable (CLIProfile) -> StorageReport = { _ in
+            fixtureStorageReport()
+        }
     ) -> CLIApplication {
         CLIApplication(
             dependencies: dependencies ?? testDependencies(),
             now: { Date(timeIntervalSince1970: 1_786_000_000) },
-            runID: { _ in runID }
+            runID: { _ in runID },
+            storageReport: storageReport
         )
     }
+}
+
+private func fixtureStorageReport() -> StorageReport {
+    StorageReport(
+        volumes: [StorageVolume(
+            id: "fixture-volume",
+            name: "Fixture Volume",
+            roles: [.recordings, .runs],
+            availableBytes: 0
+        )],
+        roots: [
+            StorageRootObservation(
+                id: "recordings",
+                role: .recordings,
+                status: .available,
+                bookmarkStatus: .none,
+                volumeID: "fixture-volume"
+            ),
+            StorageRootObservation(
+                id: "runs",
+                role: .runs,
+                status: .available,
+                bookmarkStatus: .none,
+                volumeID: "fixture-volume"
+            ),
+        ]
+    )
 }
 
 private func testDependencies(

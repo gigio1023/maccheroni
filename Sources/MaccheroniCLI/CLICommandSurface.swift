@@ -180,9 +180,10 @@ struct DoctorCommand: AsyncParsableCommand {
         command is read-only and does not create a run or download models.
 
         OUTPUT:
-          Text mode prints the existing key=value diagnostics. --json prints those
-          values and a readiness boolean in a stable object. Failed checks remain
-          machine-readable and exit nonzero.
+          Text mode prints key=value diagnostics with volume names, hosted roles,
+          and free bytes. --json returns the same storage report as typed volumes
+          and roots alongside other values. Failed checks remain machine-readable
+          and exit nonzero.
 
         PRIVACY:
           No audio, transcript, or glossary contents are read or emitted.
@@ -208,7 +209,8 @@ struct DoctorCommand: AsyncParsableCommand {
         )
         if json {
             try CLIOutput.write(try CLIOutput.doctorJSON(
-                diagnostics: report.diagnostics,
+                diagnostics: report.diagnosticValues,
+                storage: report.storage,
                 ready: report.isReady
             ))
             if !report.isReady {

@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "MaccheroniASR", targets: ["MaccheroniASR"]),
         .library(name: "MaccheroniMerge", targets: ["MaccheroniMerge"]),
         .library(name: "MaccheroniPostprocess", targets: ["MaccheroniPostprocess"]),
+        .library(name: "MaccheroniStorage", targets: ["MaccheroniStorage"]),
         .executable(name: "maccheroni", targets: ["MaccheroniCLI"]),
         .executable(name: "MaccheroniApp", targets: ["MaccheroniApp"]),
     ],
@@ -47,6 +48,16 @@ let package = Package(
             ],
             linkerSettings: [.linkedFramework("Security")]
         ),
+        .target(
+            name: "MaccheroniStorage",
+            dependencies: [
+                "MaccheroniCore",
+                "MaccheroniPreprocess",
+                "MaccheroniDiarize",
+                "MaccheroniASR",
+                "MaccheroniPostprocess",
+            ]
+        ),
         .executableTarget(
             name: "MaccheroniCLI",
             dependencies: [
@@ -56,6 +67,7 @@ let package = Package(
                 "MaccheroniASR",
                 "MaccheroniMerge",
                 "MaccheroniPostprocess",
+                "MaccheroniStorage",
                 .product(
                     name: "ArgumentParser",
                     package: "swift-argument-parser"
@@ -70,6 +82,7 @@ let package = Package(
                 "MaccheroniPreprocess",
                 "MaccheroniMerge",
                 "MaccheroniPostprocess",
+                "MaccheroniStorage",
             ],
             resources: [.process("Resources")]
         ),
@@ -90,6 +103,7 @@ let package = Package(
             name: "MaccheroniPostprocessTests",
             dependencies: ["MaccheroniPostprocess", "MaccheroniCore"]
         ),
+        .testTarget(name: "MaccheroniStorageTests", dependencies: ["MaccheroniStorage"]),
         .testTarget(
             name: "MaccheroniCLITests",
             dependencies: [
@@ -100,6 +114,7 @@ let package = Package(
                 "MaccheroniASR",
                 "MaccheroniMerge",
                 "MaccheroniPostprocess",
+                "MaccheroniStorage",
             ]
         ),
         .testTarget(
@@ -110,6 +125,7 @@ let package = Package(
                 "MaccheroniPreprocess",
                 "MaccheroniMerge",
                 "MaccheroniPostprocess",
+                "MaccheroniStorage",
             ]
         ),
     ]

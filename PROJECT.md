@@ -403,6 +403,14 @@ not deleted.
   runs retain its former hash and count but not its bytes; treat a parsed zero-entry
   file as no glossary. The library selects the freshest successful set by sealed
   completion time and derived ID while keeping earlier sets visible.
+- D41 [inference] Report storage readiness as observed per-volume facts (decided
+  2026-08-12). Resolve the configured library, recording, run, model-cache, and
+  backend work roots through one shared computation, group roles with Foundation's
+  volume identity, and expose a localized volume name, roles, and available bytes in
+  the App and doctor schema 1.1.0. Preserve missing, unmounted, unreadable, stale, and
+  unavailable-bookmark states instead of substituting another volume. A measured zero
+  bytes is still observable. Do not infer a minimum, headroom, quota, retention
+  formula, or sufficiency verdict until a maintainer adopts that execution policy.
 
 ## Project-wide Done Criteria
 

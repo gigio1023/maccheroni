@@ -560,5 +560,43 @@
 	<string>원본 실행 용어집</string>
 	<key>Current Derived Post-processing</key>
 	<string>현재 파생 후처리</string>
+	<key>Free Space</key>
+	<string>여유 공간</string>
+	<key>Unavailable</key>
+	<string>사용할 수 없음</string>
+	<key>Stale Bookmark</key>
+	<string>오래된 책갈피</string>
+	<key>Library Metadata</key>
+	<string>라이브러리 메타데이터</string>
+	<key>Request Logs</key>
+	<string>요청 로그</string>
+	<key>ASR Model Cache</key>
+	<string>ASR 모델 캐시</string>
+	<key>VAD Model Cache</key>
+	<string>VAD 모델 캐시</string>
+	<key>Diarization Model Cache</key>
+	<string>화자 분리 모델 캐시</string>
+	<key>Post-processing Model Cache</key>
+	<string>후처리 모델 캐시</string>
+	<key>Temporary Work</key>
+	<string>임시 작업</string>
+	<key>Available</key>
+	<string>사용 가능</string>
+	<key>Not Created</key>
+	<string>아직 생성되지 않음</string>
+	<key>Unmounted</key>
+	<string>마운트되지 않음</string>
+	<key>Unreadable</key>
+	<string>읽을 수 없음</string>
+	<key>Bookmark Unavailable</key>
+	<string>책갈피를 사용할 수 없음</string>
+	<key>Volume Readiness</key>
+	<string>볼륨 준비 상태</string>
+	<key>Storage Role</key>
+	<string>저장소 역할</string>
+	<key>Model Cache on %@</key>
+	<string>%@의 모델 캐시</string>
+	<key>A configured storage folder is no longer available. Choose the folder again in Settings.</key>
+	<string>설정한 저장소 폴더를 더 이상 사용할 수 없습니다. 설정에서 폴더를 다시 선택하세요.</string>
 	</dict>
 </plist>

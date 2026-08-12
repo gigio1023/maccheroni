@@ -1,6 +1,7 @@
 import AppKit
 import MaccheroniCore
 import MaccheroniPostprocess
+import MaccheroniStorage
 import SwiftUI
 
 struct SettingsView: View {
@@ -19,6 +20,7 @@ struct SettingsView: View {
     @State private var loadError: String?
     @State private var recordingsDirectoryPath: String?
     @State private var runsDirectoryPath: String?
+    @State private var storageReport: StorageReport?
 
     private let repository = LibraryRepository.local
     private let modelDownloadService = ModelDownloadService()
@@ -49,6 +51,7 @@ struct SettingsView: View {
             do {
                 profiles = try AppProfileRegistry.load()
                 cacheStatuses = ModelCacheInspector.statuses(for: uniqueModels)
+                await refreshStorageReport()
             } catch {
                 loadError = error.localizedDescription
             }
@@ -57,6 +60,9 @@ struct SettingsView: View {
             codexAvailability = await Task.detached(priority: .utility) {
                 await CodexPostprocessBackend.detectAvailability()
             }.value
+        }
+        .task(id: postprocessRaw) {
+            await refreshStorageReport()
         }
         .alert(appLocalized("Maccheroni Needs Attention"), isPresented: Binding(
             get: { loadError != nil },
@@ -131,12 +137,19 @@ struct SettingsView: View {
     private var models: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
+                if let storageReport {
+                    StorageVolumeReportView(presentation: StorageReportPresentation(
+                        report: storageReport,
+                        roles: StorageRole.modelCacheRoles
+                    ))
+                }
                 ForEach(uniqueModels, id: \.key) { model in
                     ModelRegistryCard(
                         model: model.descriptor,
                         languages: model.languages,
                         metrics: model.metrics,
                         status: cacheStatuses[model.key] ?? .missing,
+                        storageVolumeName: modelStorageVolumeName(model.descriptor),
                         isDownloading: downloadingModelKeys.contains(model.key),
                         reveal: { revealModel(model.descriptor) },
                         download: { downloadModel(model.descriptor, key: model.key) },
@@ -178,6 +191,16 @@ struct SettingsView: View {
                     useDefault: useDefaultRunsDirectory
                 )
                 StoragePathRow(title: appLocalized("Glossaries"), url: repository.glossariesRoot)
+            }
+            Section(appLocalized("Volume Readiness")) {
+                if let storageReport {
+                    StorageVolumeReportView(
+                        presentation: StorageReportPresentation(report: storageReport)
+                    )
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                }
             }
             Section {
                 if storageEnvironmentOverrideIsActive {
@@ -241,25 +264,35 @@ struct SettingsView: View {
 
     private func chooseRecordingsDirectory() {
         chooseDirectory { url in
-            persistDirectory(url, key: LibraryStorageSettings.recordingsDirectoryKey)
+            persistDirectory(
+                url,
+                key: LibraryStorageSettings.recordingsDirectoryKey,
+                bookmarkKey: LibraryStorageSettings.recordingsBookmarkKey
+            )
             recordingsDirectoryPath = url.path(percentEncoded: false)
         }
     }
 
     private func chooseRunsDirectory() {
         chooseDirectory { url in
-            persistDirectory(url, key: LibraryStorageSettings.runsDirectoryKey)
+            persistDirectory(
+                url,
+                key: LibraryStorageSettings.runsDirectoryKey,
+                bookmarkKey: LibraryStorageSettings.runsBookmarkKey
+            )
             runsDirectoryPath = url.path(percentEncoded: false)
         }
     }
 
     private func useDefaultRecordingsDirectory() {
         UserDefaults.standard.removeObject(forKey: LibraryStorageSettings.recordingsDirectoryKey)
+        UserDefaults.standard.removeObject(forKey: LibraryStorageSettings.recordingsBookmarkKey)
         recordingsDirectoryPath = nil
     }
 
     private func useDefaultRunsDirectory() {
         UserDefaults.standard.removeObject(forKey: LibraryStorageSettings.runsDirectoryKey)
+        UserDefaults.standard.removeObject(forKey: LibraryStorageSettings.runsBookmarkKey)
         runsDirectoryPath = nil
     }
 
@@ -273,8 +306,54 @@ struct SettingsView: View {
         save(url.standardizedFileURL)
     }
 
-    private func persistDirectory(_ url: URL, key: String) {
+    private func persistDirectory(_ url: URL, key: String, bookmarkKey: String) {
         UserDefaults.standard.set(url.standardizedFileURL.path(percentEncoded: false), forKey: key)
+        if let bookmark = try? repository.bookmark(for: url.standardizedFileURL) {
+            UserDefaults.standard.set(bookmark, forKey: bookmarkKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: bookmarkKey)
+        }
+    }
+
+    private func refreshStorageReport() async {
+        let library = repository.storageConfiguration
+        let configuredProfiles = profiles.map {
+            ConfiguredStorageProfile(
+                diarizationBackend: $0.diarizationBackend,
+                postprocessBackend: nil
+            )
+        } + [ConfiguredStorageProfile(
+            diarizationBackend: nil,
+            postprocessBackend: postprocessRaw
+        )]
+        let displayedModelRoots = uniqueModels.compactMap { model -> StorageRoot? in
+            guard let role = storageRole(for: model.descriptor.role),
+                  let url = ModelCacheInspector.location(for: model.descriptor)
+            else { return nil }
+            return StorageRoot(
+                id: ModelRegistry.storageRootID(for: model.descriptor),
+                role: role,
+                url: url
+            )
+        }
+        storageReport = await Task.detached(priority: .utility) {
+            StorageReadinessReporter().report(
+                roots: StorageRootInventory.current(
+                    library: library,
+                    profiles: configuredProfiles
+                ) + displayedModelRoots
+            )
+        }.value
+    }
+
+    private func modelStorageVolumeName(_ descriptor: ModelDescriptor) -> String? {
+        guard let storageReport else { return nil }
+        let rootID = ModelRegistry.storageRootID(for: descriptor)
+        guard let volumeID = storageReport.roots.first(where: { $0.id == rootID })?.volumeID
+        else {
+            return nil
+        }
+        return storageVolumeName(volumeID: volumeID, in: storageReport)
     }
 
     private func revealModel(_ descriptor: ModelDescriptor) {
@@ -292,6 +371,7 @@ struct SettingsView: View {
             do {
                 try await modelDownloadService.download(descriptor)
                 cacheStatuses = ModelCacheInspector.statuses(for: uniqueModels)
+                await refreshStorageReport()
             } catch {
                 loadError = error.localizedDescription
             }
@@ -308,6 +388,7 @@ struct SettingsView: View {
                     loadError = error.localizedDescription
                 } else {
                     cacheStatuses = ModelCacheInspector.statuses(for: uniqueModels)
+                    await refreshStorageReport()
                 }
             }
         }
@@ -338,6 +419,20 @@ enum ModelRegistry {
 
     static func isLocalPostprocessModel(_ descriptor: ModelDescriptor) -> Bool {
         descriptor == LocalPostprocessBackend.pinnedModel
+    }
+
+    static func storageRootID(for descriptor: ModelDescriptor) -> String {
+        "app.model.\(key(for: descriptor))"
+    }
+}
+
+private func storageRole(for modelRole: ModelRole) -> StorageRole? {
+    switch modelRole {
+    case .asr: .asrModelCache
+    case .vad: .vadModelCache
+    case .diarization: .diarizationModelCache
+    case .postprocess: .postprocessModelCache
+    case .alignment, .enhancement: nil
     }
 }
 
@@ -443,6 +538,7 @@ private struct ModelRegistryCard: View {
     let languages: Set<String>
     let metrics: [BenchmarkMetric]
     let status: ModelCacheStatus
+    let storageVolumeName: String?
     let isDownloading: Bool
     let reveal: () -> Void
     let download: () -> Void
@@ -481,6 +577,12 @@ private struct ModelRegistryCard: View {
                     Text(languages.sorted().formatted())
                 }
                 if let bytes = status.sizeBytes {
+                    GridRow {
+                        Text(appLocalized("Storage Role")).foregroundStyle(.secondary)
+                        Text(storageVolumeName.map {
+                            appString("Model Cache on \($0)")
+                        } ?? appString("Unavailable"))
+                    }
                     GridRow {
                         Text(appLocalized("Disk Use")).foregroundStyle(.secondary)
                         Text(ByteCountFormatStyle(style: .file).format(bytes))

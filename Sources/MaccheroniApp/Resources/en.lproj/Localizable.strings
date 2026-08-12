@@ -560,5 +560,43 @@
 	<string>Source Run Glossary</string>
 	<key>Current Derived Post-processing</key>
 	<string>Current Derived Post-processing</string>
+	<key>Free Space</key>
+	<string>Free Space</string>
+	<key>Unavailable</key>
+	<string>Unavailable</string>
+	<key>Stale Bookmark</key>
+	<string>Stale Bookmark</string>
+	<key>Library Metadata</key>
+	<string>Library Metadata</string>
+	<key>Request Logs</key>
+	<string>Request Logs</string>
+	<key>ASR Model Cache</key>
+	<string>ASR Model Cache</string>
+	<key>VAD Model Cache</key>
+	<string>VAD Model Cache</string>
+	<key>Diarization Model Cache</key>
+	<string>Diarization Model Cache</string>
+	<key>Post-processing Model Cache</key>
+	<string>Post-processing Model Cache</string>
+	<key>Temporary Work</key>
+	<string>Temporary Work</string>
+	<key>Available</key>
+	<string>Available</string>
+	<key>Not Created</key>
+	<string>Not Created</string>
+	<key>Unmounted</key>
+	<string>Unmounted</string>
+	<key>Unreadable</key>
+	<string>Unreadable</string>
+	<key>Bookmark Unavailable</key>
+	<string>Bookmark Unavailable</string>
+	<key>Volume Readiness</key>
+	<string>Volume Readiness</string>
+	<key>Storage Role</key>
+	<string>Storage Role</string>
+	<key>Model Cache on %@</key>
+	<string>Model Cache on %@</string>
+	<key>A configured storage folder is no longer available. Choose the folder again in Settings.</key>
+	<string>A configured storage folder is no longer available. Choose the folder again in Settings.</string>
 	</dict>
 </plist>

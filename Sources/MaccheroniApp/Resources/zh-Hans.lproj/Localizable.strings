@@ -560,5 +560,43 @@
 	<string>源运行术语表</string>
 	<key>Current Derived Post-processing</key>
 	<string>当前派生后处理</string>
+	<key>Free Space</key>
+	<string>可用空间</string>
+	<key>Unavailable</key>
+	<string>不可用</string>
+	<key>Stale Bookmark</key>
+	<string>过期的书签</string>
+	<key>Library Metadata</key>
+	<string>资料库元数据</string>
+	<key>Request Logs</key>
+	<string>请求日志</string>
+	<key>ASR Model Cache</key>
+	<string>ASR 模型缓存</string>
+	<key>VAD Model Cache</key>
+	<string>VAD 模型缓存</string>
+	<key>Diarization Model Cache</key>
+	<string>说话人分离模型缓存</string>
+	<key>Post-processing Model Cache</key>
+	<string>后处理模型缓存</string>
+	<key>Temporary Work</key>
+	<string>临时工作数据</string>
+	<key>Available</key>
+	<string>可用</string>
+	<key>Not Created</key>
+	<string>尚未创建</string>
+	<key>Unmounted</key>
+	<string>未挂载</string>
+	<key>Unreadable</key>
+	<string>无法读取</string>
+	<key>Bookmark Unavailable</key>
+	<string>书签不可用</string>
+	<key>Volume Readiness</key>
+	<string>卷状态</string>
+	<key>Storage Role</key>
+	<string>存储角色</string>
+	<key>Model Cache on %@</key>
+	<string>%@ 上的模型缓存</string>
+	<key>A configured storage folder is no longer available. Choose the folder again in Settings.</key>
+	<string>已配置的存储文件夹不再可用。请在设置中重新选择该文件夹。</string>
 	</dict>
 </plist>

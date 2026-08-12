@@ -730,7 +730,7 @@ struct AppShellTests {
         )
 
         #expect(catalog.sourceLanguage == "en")
-        #expect(catalog.strings.count == 279)
+        #expect(catalog.strings.count == 298)
         #expect(requiredFinalKeys.isSubset(of: Set(catalog.strings.keys)))
         for (key, entry) in catalog.strings {
             #expect(Set(entry.localizations.keys) == Set(locales), "locale parity: \(key)")
