@@ -7,7 +7,10 @@ struct RunInspector: View {
 
     var body: some View {
         Form {
-            Section(appLocalized("Run")) {
+            Section(run.resultOperation == nil
+                ? appLocalized("Run")
+                : appLocalized("Source Run"))
+            {
                 LabeledContent(appLocalized("Run ID"), value: run.manifest.runID)
                 LabeledContent(appLocalized("Status"), value: run.manifest.status.rawValue)
                 LabeledContent(appLocalized("Wall Time")) {
@@ -25,8 +28,51 @@ struct RunInspector: View {
                 }
             }
 
+            if let operation = run.resultOperation {
+                Section(appLocalized("Current Derived Result")) {
+                    LabeledContent(appLocalized("Run ID"), value: run.effectiveResultID)
+                    LabeledContent(appLocalized("Profile"), value: operation.profileName)
+                    LabeledContent(appLocalized("Operation")) {
+                        Text(PostprocessOperationChoice(operation.mode).title)
+                    }
+                    if let target = operation.targetLanguage {
+                        LabeledContent(appLocalized("Target Language")) {
+                            if let language = AppLanguage(rawValue: target) {
+                                Text(language.title)
+                            } else {
+                                Text(verbatim: target)
+                            }
+                        }
+                    }
+                    LabeledContent(appLocalized("Glossary Semantics")) {
+                        Text(verbatim: operation.glossarySemantics.rawValue)
+                    }
+                    LabeledContent(appLocalized("Provided")) {
+                        Text(operation.glossarySHA256 == nil
+                            ? appLocalized("No")
+                            : appLocalized("Yes"))
+                    }
+                    LabeledContent(
+                        appLocalized("Items"),
+                        value: operation.glossaryItemCount.formatted()
+                    )
+                    if let hash = operation.glossarySHA256 {
+                        LabeledContent(appLocalized("SHA-256")) {
+                            Text(hash)
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+
             if let postprocess = run.effectivePostprocess {
-                PostprocessInspectorSection(postprocess: postprocess)
+                PostprocessInspectorSection(
+                    title: run.resultOperation == nil
+                        ? appLocalized("Post-processing")
+                        : appLocalized("Current Derived Post-processing"),
+                    postprocess: postprocess
+                )
             }
 
             if !run.derivedResults.isEmpty {
@@ -43,7 +89,10 @@ struct RunInspector: View {
                 }
             }
 
-            Section(appLocalized("Glossary")) {
+            Section(run.resultOperation == nil
+                ? appLocalized("Glossary")
+                : appLocalized("Source Run Glossary"))
+            {
                 LabeledContent(appLocalized("Provided")) {
                     Text(run.manifest.glossary.provided ? appLocalized("Yes") : appLocalized("No"))
                 }
@@ -147,10 +196,11 @@ private struct DerivedResultInspectorRow: View {
 }
 
 private struct PostprocessInspectorSection: View {
+    let title: LocalizedStringResource
     let postprocess: ManifestPostprocess
 
     var body: some View {
-        Section(appLocalized("Post-processing")) {
+        Section(title) {
             LabeledContent(appLocalized("Operation")) {
                 Text(PostprocessOperationChoice(postprocess.mode).title)
             }

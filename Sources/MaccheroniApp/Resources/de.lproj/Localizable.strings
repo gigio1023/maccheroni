@@ -550,5 +550,15 @@
 	<string>Das Manifest eines abgeleiteten Ergebnisses ist ungültig: %@</string>
 	<key>A derived result does not match its source run: %@</key>
 	<string>Ein abgeleitetes Ergebnis stimmt nicht mit seinem Quelllauf überein: %@</string>
+	<key>Source Run</key>
+	<string>Quelllauf</string>
+	<key>Current Derived Result</key>
+	<string>Aktuelles abgeleitetes Ergebnis</string>
+	<key>Glossary Semantics</key>
+	<string>Glossarsemantik</string>
+	<key>Source Run Glossary</key>
+	<string>Glossar des Quelllaufs</string>
+	<key>Current Derived Post-processing</key>
+	<string>Aktuelle abgeleitete Nachbearbeitung</string>
 	</dict>
 </plist>

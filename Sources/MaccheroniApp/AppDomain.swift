@@ -247,6 +247,7 @@ struct LoadedRun: Equatable, Sendable {
     var resultID: String? = nil
     var derivedResults: [DerivedResultSummary] = []
     var resultPostprocess: ManifestPostprocess? = nil
+    var resultOperation: DerivedOperation? = nil
 
     var effectiveResultID: String { resultID ?? manifest.runID }
 

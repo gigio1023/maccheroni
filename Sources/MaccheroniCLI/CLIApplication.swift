@@ -2482,7 +2482,8 @@ public struct CLIApplication: Sendable {
         }
 
         let document = result.document
-        guard document.schemaVersion == original.schemaVersion,
+        guard SegmentsDocumentContract.isValid(document),
+              document.schemaVersion == original.schemaVersion,
               document.numSpeakers == original.numSpeakers,
               document.source == original.source,
               document.segments.count == original.segments.count

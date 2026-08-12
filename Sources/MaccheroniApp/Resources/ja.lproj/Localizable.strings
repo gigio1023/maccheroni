@@ -550,5 +550,15 @@
 	<string>派生結果のマニフェストが無効です: %@</string>
 	<key>A derived result does not match its source run: %@</key>
 	<string>派生結果がソース実行と一致しません: %@</string>
+	<key>Source Run</key>
+	<string>ソース実行</string>
+	<key>Current Derived Result</key>
+	<string>現在の派生結果</string>
+	<key>Glossary Semantics</key>
+	<string>用語集のセマンティクス</string>
+	<key>Source Run Glossary</key>
+	<string>ソース実行の用語集</string>
+	<key>Current Derived Post-processing</key>
+	<string>現在の派生後処理</string>
 	</dict>
 </plist>

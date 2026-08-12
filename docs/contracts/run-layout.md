@@ -127,8 +127,14 @@ legacy `postprocess/` files, or an earlier derived set.
    backend, decode the source manifest and require a successful complete run.
    Validate every manifest artifact path, reject duplicates and unsafe paths,
    require every listed artifact to exist with its recorded SHA-256, and decode
-   the uniquely identified `merged/segments.json`. Refuse with a typed integrity
-   failure if any check fails.
+   the uniquely identified `merged/segments.json` from the same bytes whose hash
+   was verified. Require the canonical `primary/raw.txt`,
+   `primary/segments.json`, `diarization/timeline.json`,
+   `merged/segments.json`, and `merged/conflicts.json` kinds and paths, plus the
+   recorded post-processing form. The manifest inventory must equal all regular
+   files under the source run except `manifest.json`, the complete `derived/`
+   tree, and Finder's `.DS_Store` metadata. Refuse with a typed integrity failure
+   if any check fails.
 10. An existing-run operation always reads the verified canonical
     `merged/segments.json`. It does not run preprocessing, VAD, ASR,
     diarization, or merge. It uses the invocation profile's current glossary,
@@ -165,8 +171,17 @@ checked.
   duration. The floating-point tolerance is 10ms.
 - For a successful run, `processed_duration_s` equals `input_duration_s` within
   10ms and `truncated` is false.
+- A successful run uses `full` or `chunked` coverage and has at least one
+  successful chunk. Its boundaries start at zero, are contiguous within 10ms,
+  and end at `input_duration_s` within 10ms. Their total covered duration and
+  final boundary both equal `processed_duration_s` within 10ms.
 - `chunks_completed <= chunks_planned`, and chunk indexes increase from 0
-  without duplicates.
+  without duplicates. `full` has one chunk; `chunked` has more than one.
+- A successful run that records a provided glossary also records
+  `applied: true`.
+- Every segment field satisfies `segments.schema.json`, including confidence
+  range, language-tag syntax, unique flags, and flag syntax, in addition to the
+  time ordering and speaker-count checks below.
 - `num_speakers` equals the number of unique speakers excluding `UNASSIGNED`
   and `UNKNOWN`.
 - The speakers and times in post-processing segments exactly match those in the

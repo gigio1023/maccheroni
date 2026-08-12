@@ -37,6 +37,11 @@ private struct VerifiedDerivedResult {
     var loaded: LoadedRun
 }
 
+private struct VerifiedArtifactData {
+    var url: URL
+    var data: Data
+}
+
 enum LibraryStorageSettings {
     static let recordingsDirectoryKey = "maccheroni.storage.recordingsDirectory"
     static let runsDirectoryKey = "maccheroni.storage.runsDirectory"
@@ -104,6 +109,7 @@ struct LibraryRepository: Sendable {
     let runsRoot: URL
     let recordingsRoot: URL
     private let bookmarkAccess: LibraryBookmarkAccess
+    private let onDerivedArtifactVerified: @Sendable (URL) throws -> Void
 
     var indexURL: URL { root.appendingPathComponent("library.json") }
     var requestsRoot: URL { root.appendingPathComponent("Requests", isDirectory: true) }
@@ -113,7 +119,8 @@ struct LibraryRepository: Sendable {
         root: URL,
         runsRoot: URL? = nil,
         recordingsRoot: URL? = nil,
-        bookmarkAccess: LibraryBookmarkAccess = .system
+        bookmarkAccess: LibraryBookmarkAccess = .system,
+        onDerivedArtifactVerified: @escaping @Sendable (URL) throws -> Void = { _ in }
     ) {
         let standardizedRoot = root.standardizedFileURL
         self.root = standardizedRoot
@@ -124,6 +131,7 @@ struct LibraryRepository: Sendable {
             ?? standardizedRoot.appendingPathComponent("Recordings", isDirectory: true))
             .standardizedFileURL
         self.bookmarkAccess = bookmarkAccess
+        self.onDerivedArtifactVerified = onDerivedArtifactVerified
     }
 
     static var local: LibraryRepository {
@@ -258,21 +266,17 @@ struct LibraryRepository: Sendable {
             manifest: manifest,
             runURL: runURL
         )
-        var transcript = try JSONDecoder().decode(
-            SegmentsDocument.self,
-            from: Data(contentsOf: segmentsArtifact)
-        )
+        var transcript = try SegmentsDocumentContract.decode(segmentsArtifact.data)
         var mergedTranscript: SegmentsDocument?
         if postprocessMode == .correction {
-            let merged = try JSONDecoder().decode(
-                SegmentsDocument.self,
-                from: Data(contentsOf: mergedSegmentsArtifact)
+            let merged = try SegmentsDocumentContract.decode(
+                mergedSegmentsArtifact.data
             )
             mergedTranscript = merged
         }
         var conflicts = try JSONDecoder().decode(
             [MergeConflict].self,
-            from: Data(contentsOf: conflictsArtifact)
+            from: conflictsArtifact.data
         )
         let canonicalConflicts = conflicts
         if postprocessMode == .correction {
@@ -283,7 +287,7 @@ struct LibraryRepository: Sendable {
             )
             let postprocessConflicts = try JSONDecoder().decode(
                 [PostprocessConflict].self,
-                from: Data(contentsOf: postprocessConflictsArtifact)
+                from: postprocessConflictsArtifact.data
             )
             guard let mergedTranscript else {
                 throw LibraryRepositoryError.artifactMissing("merged_segments")
@@ -292,7 +296,7 @@ struct LibraryRepository: Sendable {
                 transcript,
                 against: mergedTranscript,
                 conflicts: postprocessConflicts,
-                artifactName: segmentsArtifact.lastPathComponent
+                artifactName: segmentsArtifact.url.lastPathComponent
             )
             for conflict in postprocessConflicts {
                 let mapped = MergeConflict(
@@ -334,14 +338,14 @@ struct LibraryRepository: Sendable {
             )
             let translation = try JSONDecoder().decode(
                 TranslationDocument.self,
-                from: Data(contentsOf: translationArtifact)
+                from: translationArtifact.data
             )
             try validateTranslation(
                 translation,
                 against: transcript,
                 provenance: provenance,
                 sourceSegmentsSHA256: mergedArtifact.sha256,
-                artifactName: translationArtifact.lastPathComponent
+                artifactName: translationArtifact.url.lastPathComponent
             )
             for value in translation.translations {
                 transcript.segments[value.segmentIndex].text = value.translatedText
@@ -503,14 +507,14 @@ struct LibraryRepository: Sendable {
 
         var artifactPaths = Set<String>()
         var artifactKinds = Set<String>()
-        var artifactURLs: [String: URL] = [:]
+        var artifactData: [String: VerifiedArtifactData] = [:]
         for artifact in manifest.artifacts {
             guard artifactPaths.insert(artifact.path).inserted,
                   artifactKinds.insert(artifact.kind).inserted
             else {
                 throw LibraryRepositoryError.derivedManifestInvalid(manifest.derivedID)
             }
-            artifactURLs[artifact.kind] = try verifiedDerivedArtifact(
+            artifactData[artifact.kind] = try verifiedDerivedArtifact(
                 artifact,
                 root: directory
             )
@@ -526,24 +530,21 @@ struct LibraryRepository: Sendable {
                     "postprocess/segments.json",
                     "postprocess/conflicts.json",
                   ],
-                  let segmentsURL = artifactURLs["postprocess_segments"],
-                  let conflictsURL = artifactURLs["postprocess_conflicts"]
+                  let segmentsArtifact = artifactData["postprocess_segments"],
+                  let conflictsArtifact = artifactData["postprocess_conflicts"]
             else {
                 throw LibraryRepositoryError.derivedManifestInvalid(manifest.derivedID)
             }
-            document = try JSONDecoder().decode(
-                SegmentsDocument.self,
-                from: Data(contentsOf: segmentsURL)
-            )
+            document = try SegmentsDocumentContract.decode(segmentsArtifact.data)
             let postprocessConflicts = try JSONDecoder().decode(
                 [PostprocessConflict].self,
-                from: Data(contentsOf: conflictsURL)
+                from: conflictsArtifact.data
             )
             try validatePostprocess(
                 document,
                 against: source.document,
                 conflicts: postprocessConflicts,
-                artifactName: segmentsURL.lastPathComponent
+                artifactName: segmentsArtifact.url.lastPathComponent
             )
             conflicts = merging(postprocessConflicts, into: conflicts)
         case .translation:
@@ -553,20 +554,20 @@ struct LibraryRepository: Sendable {
                     options: .regularExpression
                   ) != nil,
                   artifactPaths == ["postprocess/translation.json"],
-                  let translationURL = artifactURLs["postprocess_translation"]
+                  let translationArtifact = artifactData["postprocess_translation"]
             else {
                 throw LibraryRepositoryError.derivedManifestInvalid(manifest.derivedID)
             }
             let translation = try JSONDecoder().decode(
                 TranslationDocument.self,
-                from: Data(contentsOf: translationURL)
+                from: translationArtifact.data
             )
             try validateTranslation(
                 translation,
                 against: source.document,
                 provenance: postprocess,
                 sourceSegmentsSHA256: source.lineage.segmentsSHA256,
-                artifactName: translationURL.lastPathComponent
+                artifactName: translationArtifact.url.lastPathComponent
             )
             for value in translation.translations {
                 document.segments[value.segmentIndex].text = value.translatedText
@@ -607,7 +608,8 @@ struct LibraryRepository: Sendable {
                 conflicts: conflicts,
                 segments: segments,
                 resultID: manifest.derivedID,
-                resultPostprocess: postprocess
+                resultPostprocess: postprocess,
+                resultOperation: manifest.operation
             )
         )
     }
@@ -688,7 +690,10 @@ struct LibraryRepository: Sendable {
         return conflicts
     }
 
-    private func verifiedDerivedArtifact(_ artifact: Artifact, root: URL) throws -> URL {
+    private func verifiedDerivedArtifact(
+        _ artifact: Artifact,
+        root: URL
+    ) throws -> VerifiedArtifactData {
         let relative = artifact.path
         guard !relative.isEmpty,
               !(relative as NSString).isAbsolutePath,
@@ -732,7 +737,8 @@ struct LibraryRepository: Sendable {
         guard digest == artifact.sha256 else {
             throw LibraryRepositoryError.artifactHashMismatch(relative)
         }
-        return unresolved
+        try onDerivedArtifactVerified(unresolved)
+        return VerifiedArtifactData(url: unresolved, data: data)
     }
 
     private func derivedDate(_ value: String) -> Date? {
@@ -753,6 +759,7 @@ struct LibraryRepository: Sendable {
         }
 
         guard corrected.schemaVersion == original.schemaVersion,
+              SegmentsDocumentContract.isValid(corrected),
               corrected.numSpeakers == original.numSpeakers,
               corrected.source == original.source,
               corrected.segments.count == original.segments.count
@@ -976,7 +983,7 @@ struct LibraryRepository: Sendable {
         kind: String,
         manifest: Manifest,
         runURL: URL
-    ) throws -> URL {
+    ) throws -> VerifiedArtifactData {
         guard let artifact = manifest.artifacts.first(where: { $0.kind == kind }) else {
             throw LibraryRepositoryError.artifactMissing(kind)
         }
@@ -994,12 +1001,13 @@ struct LibraryRepository: Sendable {
         guard FileManager.default.isReadableFile(atPath: url.path) else {
             throw LibraryRepositoryError.artifactMissing(relative)
         }
-        let digest = SHA256.hash(data: try Data(contentsOf: url))
+        let data = try Data(contentsOf: url)
+        let digest = SHA256.hash(data: data)
             .map { String(format: "%02x", $0) }
             .joined()
         guard digest == artifact.sha256 else {
             throw LibraryRepositoryError.artifactHashMismatch(relative)
         }
-        return url
+        return VerifiedArtifactData(url: url, data: data)
     }
 }

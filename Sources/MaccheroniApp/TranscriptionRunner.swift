@@ -38,13 +38,17 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
     private let executableURL: URL
     private let requestsRoot: URL
     private let terminationTiming: ProcessTerminationTiming
+    private let pollWait: @Sendable () async throws -> Void
     private var process: Process?
     private var cancelRequested = false
 
     init(
         executableURL: URL? = nil,
         requestsRoot: URL = LibraryRepository.local.requestsRoot,
-        terminationTiming: ProcessTerminationTiming = .default
+        terminationTiming: ProcessTerminationTiming = .default,
+        pollWait: @escaping @Sendable () async throws -> Void = {
+            try await Task.sleep(for: .milliseconds(250))
+        }
     ) throws {
         guard let resolved = executableURL ?? Self.resolveExecutable(),
               FileManager.default.isExecutableFile(atPath: resolved.path)
@@ -54,6 +58,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
         self.executableURL = resolved
         self.requestsRoot = requestsRoot
         self.terminationTiming = terminationTiming
+        self.pollWait = pollWait
     }
 
     func run(
@@ -142,7 +147,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
                 ))
             }
             do {
-                try await Task.sleep(for: .milliseconds(250))
+                try await pollWait()
             } catch {
                 cancelRequested = true
                 await terminate(task, liveness: liveness)
@@ -251,9 +256,11 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
             message: nil
         ))
 
+        var cancellationInterruptedChild = false
         while task.isRunning {
             if cancelRequested || Task.isCancelled {
                 cancelRequested = true
+                cancellationInterruptedChild = true
                 await terminate(task, liveness: liveness)
                 break
             }
@@ -264,17 +271,20 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
                 message: nil
             ))
             do {
-                try await Task.sleep(for: .milliseconds(250))
+                try await pollWait()
             } catch {
                 cancelRequested = true
-                await terminate(task, liveness: liveness)
+                if task.isRunning {
+                    cancellationInterruptedChild = true
+                    await terminate(task, liveness: liveness)
+                }
                 break
             }
         }
-        if !cancelRequested, !Task.isCancelled { task.waitUntilExit() }
+        if !cancellationInterruptedChild { task.waitUntilExit() }
         stdout.synchronizeFile()
         stderr.synchronizeFile()
-        if cancelRequested || Task.isCancelled { throw CancellationError() }
+        if cancellationInterruptedChild { throw CancellationError() }
         guard task.terminationStatus == 0 else {
             let message = try String(contentsOf: stderrURL, encoding: .utf8)
                 .trimmingCharacters(in: .whitespacesAndNewlines)

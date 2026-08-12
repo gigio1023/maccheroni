@@ -2,7 +2,7 @@
 import CryptoKit
 import Foundation
 import MaccheroniASR
-import MaccheroniCore
+@testable import MaccheroniCore
 import MaccheroniDiarize
 import MaccheroniMerge
 import MaccheroniPostprocess
@@ -1005,6 +1005,384 @@ struct MaccheroniCLITests {
             atPath: sourceRun.appendingPathComponent("derived").path
         ))
         #expect(stages.stages.isEmpty)
+    }
+
+    @Test
+    func completedRunVerifierDecodesTheExactArtifactBytesItHashed() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "source.wav")
+        let profiles = try profileFile(in: root, fileName: "source.json")
+        let sourcePath = try await testApplication(runID: "source-run").execute(
+            arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--output-root", root.appendingPathComponent("runs").path,
+            ]
+        )
+        let sourceRun = URL(fileURLWithPath: sourcePath, isDirectory: true)
+        let segmentsURL = sourceRun.appendingPathComponent("merged/segments.json")
+        let verifiedBytes = try Data(contentsOf: segmentsURL)
+        let verifiedDocument = try JSONDecoder().decode(
+            SegmentsDocument.self,
+            from: verifiedBytes
+        )
+        var swappedDocument = verifiedDocument
+        swappedDocument.segments[0].text = "bytes swapped after hashing"
+        let swappedBytes = try JSONEncoder().encode(swappedDocument)
+        defer { try? verifiedBytes.write(to: segmentsURL) }
+
+        let verified = try RunIntegrityVerifier.verifyCompletedRun(
+            at: sourceRun,
+            onArtifactVerified: { artifact, url in
+                if artifact.path == "merged/segments.json" {
+                    try swappedBytes.write(to: url)
+                }
+            }
+        )
+
+        #expect(verified.document == verifiedDocument)
+        #expect(try Data(contentsOf: segmentsURL) == swappedBytes)
+    }
+
+    @Test
+    func existingRunPostprocessRejectsEmptyRejectedGappedAndShortCoverage() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "source.wav")
+        let sourceProfiles = try profileFile(in: root, fileName: "source.json")
+        let sourcePath = try await testApplication(runID: "source-run").execute(
+            arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", sourceProfiles.path,
+                "--output-root", root.appendingPathComponent("runs").path,
+            ]
+        )
+        let sourceRun = URL(fileURLWithPath: sourcePath, isDirectory: true)
+        let manifestURL = sourceRun.appendingPathComponent("manifest.json")
+        let original = try JSONDecoder().decode(
+            Manifest.self,
+            from: Data(contentsOf: manifestURL)
+        )
+        let postprocessProfiles = try profileFile(
+            in: root,
+            fileName: "correction.json",
+            postprocess: "codex"
+        )
+        let recorder = StageInvocationRecorder()
+        let cases: [(String, (inout Manifest) -> Void)] = [
+            ("empty", { manifest in
+                manifest.coverage.strategy = .rejected
+                manifest.coverage.chunksPlanned = 0
+                manifest.coverage.chunksCompleted = 0
+                manifest.chunkBoundaries = []
+            }),
+            ("rejected", { manifest in
+                manifest.coverage.strategy = .rejected
+            }),
+            ("gapped", { manifest in
+                let duration = manifest.coverage.inputDurationS
+                manifest.coverage.strategy = .chunked
+                manifest.coverage.chunksPlanned = 2
+                manifest.coverage.chunksCompleted = 2
+                manifest.chunkBoundaries = [
+                    ChunkBoundary(index: 0, startS: 0, endS: 0.5, status: .succeeded),
+                    ChunkBoundary(index: 1, startS: 1, endS: duration, status: .succeeded),
+                ]
+            }),
+            ("short", { manifest in
+                manifest.coverage.strategy = .full
+                manifest.coverage.chunksPlanned = 1
+                manifest.coverage.chunksCompleted = 1
+                manifest.chunkBoundaries = [
+                    ChunkBoundary(index: 0, startS: 0, endS: 1, status: .succeeded),
+                ]
+            }),
+        ]
+
+        for (identifier, mutation) in cases {
+            var manifest = original
+            mutation(&manifest)
+            try JSONEncoder().encode(manifest).write(to: manifestURL)
+            do {
+                _ = try await testApplication(
+                    runID: "invalid-coverage-\(identifier)",
+                    dependencies: postprocessOnlyDependencies(recorder: recorder)
+                ).execute(arguments: [
+                    "postprocess", sourceRun.path,
+                    "--profile", "ko-meeting",
+                    "--profiles", postprocessProfiles.path,
+                ])
+                Issue.record("expected \(identifier) coverage rejection")
+            } catch let error as CLIError {
+                guard case .sourceIntegrity = error else {
+                    Issue.record("unexpected CLI error for \(identifier): \(error)")
+                    continue
+                }
+            }
+            #expect(!FileManager.default.fileExists(
+                atPath: sourceRun.appendingPathComponent(
+                    "derived/invalid-coverage-\(identifier)"
+                ).path
+            ))
+        }
+        #expect(recorder.stages.isEmpty)
+    }
+
+    @Test
+    func existingRunPostprocessRequiresCanonicalInventoryAndRejectsUnlistedMutation() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "source.wav")
+        let sourceProfiles = try profileFile(in: root, fileName: "source.json")
+        let sourcePath = try await testApplication(runID: "source-run").execute(
+            arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", sourceProfiles.path,
+                "--output-root", root.appendingPathComponent("runs").path,
+            ]
+        )
+        let sourceRun = URL(fileURLWithPath: sourcePath, isDirectory: true)
+        let manifestURL = sourceRun.appendingPathComponent("manifest.json")
+        let originalData = try Data(contentsOf: manifestURL)
+        let original = try JSONDecoder().decode(Manifest.self, from: originalData)
+        let postprocessProfiles = try profileFile(
+            in: root,
+            fileName: "correction.json",
+            postprocess: "codex"
+        )
+
+        var missingCanonical = original
+        let primarySegments = try #require(missingCanonical.artifacts.first {
+            $0.kind == "primary_segments"
+        })
+        let primarySegmentsURL = sourceRun.appendingPathComponent(primarySegments.path)
+        let primarySegmentsData = try Data(contentsOf: primarySegmentsURL)
+        missingCanonical.artifacts.removeAll { $0.kind == "primary_segments" }
+        try FileManager.default.removeItem(at: primarySegmentsURL)
+        try JSONEncoder().encode(missingCanonical).write(to: manifestURL)
+        do {
+            _ = try await testApplication(runID: "missing-canonical").execute(arguments: [
+                "postprocess", sourceRun.path,
+                "--profile", "ko-meeting",
+                "--profiles", postprocessProfiles.path,
+            ])
+            Issue.record("expected missing canonical artifact rejection")
+        } catch let error as CLIError {
+            guard case .sourceIntegrity = error else {
+                Issue.record("unexpected CLI error: \(error)")
+                return
+            }
+        }
+
+        try originalData.write(to: manifestURL)
+        try primarySegmentsData.write(to: primarySegmentsURL)
+        var unlisted = original
+        let evidence = try #require(unlisted.artifacts.first {
+            $0.kind == "preprocessed_audio"
+        })
+        let evidenceURL = sourceRun.appendingPathComponent(evidence.path)
+        let evidenceData = try Data(contentsOf: evidenceURL)
+        unlisted.artifacts.removeAll { $0.path == evidence.path }
+        try JSONEncoder().encode(unlisted).write(to: manifestURL)
+        let recorder = StageInvocationRecorder()
+        var dependencies = postprocessOnlyDependencies(recorder: recorder)
+        let postprocess = dependencies.postprocess
+        dependencies.postprocess = { backend, request in
+            let result = try await postprocess(backend, request)
+            try Data("mutated while postprocessing".utf8).write(
+                to: evidenceURL
+            )
+            return result
+        }
+        do {
+            _ = try await testApplication(
+                runID: "unlisted-mutation",
+                dependencies: dependencies
+            ).execute(arguments: [
+                "postprocess", sourceRun.path,
+                "--profile", "ko-meeting",
+                "--profiles", postprocessProfiles.path,
+            ])
+            Issue.record("expected unlisted artifact rejection")
+        } catch let error as CLIError {
+            guard case .sourceIntegrity = error else {
+                Issue.record("unexpected CLI error: \(error)")
+                return
+            }
+        }
+        #expect(recorder.stages.isEmpty)
+
+        try originalData.write(to: manifestURL)
+        try evidenceData.write(to: evidenceURL)
+        let addedDuringOperation = sourceRun.appendingPathComponent(
+            "unlisted-during-operation.txt"
+        )
+        let secondRecorder = StageInvocationRecorder()
+        var secondDependencies = postprocessOnlyDependencies(recorder: secondRecorder)
+        let secondPostprocess = secondDependencies.postprocess
+        secondDependencies.postprocess = { backend, request in
+            let result = try await secondPostprocess(backend, request)
+            try Data("new unlisted source evidence".utf8).write(
+                to: addedDuringOperation,
+                options: .withoutOverwriting
+            )
+            return result
+        }
+        do {
+            _ = try await testApplication(
+                runID: "unlisted-added-during-operation",
+                dependencies: secondDependencies
+            ).execute(arguments: [
+                "postprocess", sourceRun.path,
+                "--profile", "ko-meeting",
+                "--profiles", postprocessProfiles.path,
+            ])
+            Issue.record("expected second-pass unlisted artifact rejection")
+        } catch let error as CLIError {
+            guard case .sourceIntegrity = error else {
+                Issue.record("unexpected CLI error: \(error)")
+                return
+            }
+        }
+        #expect(secondRecorder.stages == ["postprocess"])
+        let failed: DerivedManifest = try decode(
+            "manifest.json",
+            in: sourceRun.appendingPathComponent(
+                "derived/unlisted-added-during-operation"
+            )
+        )
+        #expect(failed.status == .failed)
+        #expect(failed.failure?.code == "SOURCE_INTEGRITY_ERROR")
+    }
+
+    @Test
+    func existingRunPostprocessRejectsUnappliedGlossaryAndInvalidSegmentMetadata() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "source.wav")
+        let sourceProfiles = try profileFile(in: root, fileName: "source.json")
+        let sourcePath = try await testApplication(runID: "source-run").execute(
+            arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", sourceProfiles.path,
+                "--output-root", root.appendingPathComponent("runs").path,
+            ]
+        )
+        let sourceRun = URL(fileURLWithPath: sourcePath, isDirectory: true)
+        let manifestURL = sourceRun.appendingPathComponent("manifest.json")
+        let segmentsURL = sourceRun.appendingPathComponent("merged/segments.json")
+        let originalManifest = try JSONDecoder().decode(
+            Manifest.self,
+            from: Data(contentsOf: manifestURL)
+        )
+        let originalSegments = try JSONDecoder().decode(
+            SegmentsDocument.self,
+            from: Data(contentsOf: segmentsURL)
+        )
+        let postprocessProfiles = try profileFile(
+            in: root,
+            fileName: "correction.json",
+            postprocess: "codex"
+        )
+
+        var unapplied = originalManifest
+        unapplied.glossary = ManifestGlossary(
+            provided: true,
+            sha256: String(repeating: "a", count: 64),
+            itemCount: 1,
+            injectionMode: .hotwordInstruction,
+            applied: false
+        )
+        try JSONEncoder().encode(unapplied).write(to: manifestURL)
+        do {
+            _ = try await testApplication(runID: "unapplied-glossary").execute(arguments: [
+                "postprocess", sourceRun.path,
+                "--profile", "ko-meeting",
+                "--profiles", postprocessProfiles.path,
+            ])
+            Issue.record("expected unapplied glossary rejection")
+        } catch let error as CLIError {
+            guard case .sourceIntegrity = error else {
+                Issue.record("unexpected CLI error: \(error)")
+                return
+            }
+        }
+
+        let invalidDocuments: [(String, (inout Segment) -> Void)] = [
+            ("confidence", { $0.confidence = 2 }),
+            ("language", { $0.language = "not a language tag!" }),
+            ("duplicate-flags", { $0.flags = ["uncertain", "uncertain"] }),
+            ("invalid-flag", { $0.flags = ["Invalid Flag"] }),
+        ]
+        for (identifier, mutation) in invalidDocuments {
+            var document = originalSegments
+            mutation(&document.segments[0])
+            let data = try JSONEncoder().encode(document)
+            try data.write(to: segmentsURL)
+            var manifest = originalManifest
+            let index = try #require(manifest.artifacts.firstIndex {
+                $0.kind == "merged_segments"
+            })
+            manifest.artifacts[index].sha256 = SHA256.hash(data: data)
+                .map { String(format: "%02x", $0) }.joined()
+            try JSONEncoder().encode(manifest).write(to: manifestURL)
+            do {
+                _ = try await testApplication(
+                    runID: "invalid-segment-\(identifier)"
+                ).execute(arguments: [
+                    "postprocess", sourceRun.path,
+                    "--profile", "ko-meeting",
+                    "--profiles", postprocessProfiles.path,
+                ])
+                Issue.record("expected invalid \(identifier) rejection")
+            } catch let error as CLIError {
+                guard case .sourceIntegrity = error else {
+                    Issue.record("unexpected CLI error for \(identifier): \(error)")
+                    continue
+                }
+            }
+        }
+
+        var rawDocument = try #require(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(originalSegments)
+            ) as? [String: Any]
+        )
+        var rawSegments = try #require(rawDocument["segments"] as? [[String: Any]])
+        rawSegments[0]["extra_metadata"] = true
+        rawDocument["segments"] = rawSegments
+        let extraMetadataData = try JSONSerialization.data(withJSONObject: rawDocument)
+        try extraMetadataData.write(to: segmentsURL)
+        var extraMetadataManifest = originalManifest
+        let extraMetadataIndex = try #require(
+            extraMetadataManifest.artifacts.firstIndex {
+                $0.kind == "merged_segments"
+            }
+        )
+        extraMetadataManifest.artifacts[extraMetadataIndex].sha256 = SHA256.hash(
+            data: extraMetadataData
+        ).map { String(format: "%02x", $0) }.joined()
+        try JSONEncoder().encode(extraMetadataManifest).write(to: manifestURL)
+        do {
+            _ = try await testApplication(
+                runID: "invalid-segment-extra-metadata"
+            ).execute(arguments: [
+                "postprocess", sourceRun.path,
+                "--profile", "ko-meeting",
+                "--profiles", postprocessProfiles.path,
+            ])
+            Issue.record("expected additional segment metadata rejection")
+        } catch let error as CLIError {
+            guard case .sourceIntegrity = error else {
+                Issue.record("unexpected CLI error for extra metadata: \(error)")
+                return
+            }
+        }
     }
 
     @Test

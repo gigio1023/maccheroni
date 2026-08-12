@@ -550,5 +550,15 @@
 	<string>A derived result manifest is invalid: %@</string>
 	<key>A derived result does not match its source run: %@</key>
 	<string>A derived result does not match its source run: %@</string>
+	<key>Source Run</key>
+	<string>Source Run</string>
+	<key>Current Derived Result</key>
+	<string>Current Derived Result</string>
+	<key>Glossary Semantics</key>
+	<string>Glossary Semantics</string>
+	<key>Source Run Glossary</key>
+	<string>Source Run Glossary</string>
+	<key>Current Derived Post-processing</key>
+	<string>Current Derived Post-processing</string>
 	</dict>
 </plist>

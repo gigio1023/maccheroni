@@ -150,6 +150,135 @@ public struct VerifiedRunSource: Sendable {
     }
 }
 
+public enum RunArtifactContract {
+    /// Contract tolerance for source-relative time ranges.
+    public static let timeToleranceS = 0.01
+}
+
+public enum SegmentsDocumentContract {
+    public static func decode(_ data: Data) throws -> SegmentsDocument {
+        guard hasCanonicalJSONShape(data) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: [],
+                debugDescription: "segments document does not match segments.schema.json"
+            ))
+        }
+        let document = try JSONDecoder().decode(SegmentsDocument.self, from: data)
+        guard isValid(document) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: [],
+                debugDescription: "segments document violates segments.schema.json"
+            ))
+        }
+        return document
+    }
+
+    public static func isValid(_ document: SegmentsDocument) -> Bool {
+        guard document.schemaVersion == MaccheroniSchema.version,
+              document.numSpeakers >= 0,
+              !document.source.fileName.isEmpty,
+              !document.source.fileName.contains("/"),
+              !document.source.fileName.contains("\\"),
+              RunIntegrityVerifier.isLowercaseSHA256(document.source.sha256),
+              document.source.durationS.isFinite,
+              document.source.durationS > 0
+        else {
+            return false
+        }
+
+        var previous: Segment?
+        var speakers = Set<String>()
+        for segment in document.segments {
+            guard segment.startS.isFinite,
+                  segment.endS.isFinite,
+                  segment.endS > segment.startS,
+                  segment.startS >= 0,
+                  segment.endS <= document.source.durationS
+                    + RunArtifactContract.timeToleranceS,
+                  !segment.speaker.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                  ).isEmpty,
+                  !segment.text.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                  ).isEmpty,
+                  segment.language.map(isLanguageTag) ?? true,
+                  segment.confidence.map({
+                    $0.isFinite && (0 ... 1).contains($0)
+                  }) ?? true,
+                  flagsAreValid(segment.flags)
+            else {
+                return false
+            }
+            if let previous,
+               segment.startS < previous.startS
+                || (segment.startS == previous.startS
+                    && segment.endS < previous.endS)
+            {
+                return false
+            }
+            if !["UNASSIGNED", "UNKNOWN"].contains(segment.speaker) {
+                speakers.insert(segment.speaker)
+            }
+            previous = segment
+        }
+        return document.numSpeakers == speakers.count
+    }
+
+    private static func isLanguageTag(_ value: String) -> Bool {
+        fullMatch(
+            value,
+            of: "^[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,8})*$",
+            options: .regularExpression
+        )
+    }
+
+    private static func flagsAreValid(_ flags: [String]?) -> Bool {
+        guard let flags else { return true }
+        guard Set(flags).count == flags.count else { return false }
+        return flags.allSatisfy {
+            fullMatch(
+                $0,
+                of: "^[a-z][a-z0-9_-]*$",
+                options: .regularExpression
+            )
+        }
+    }
+
+    private static func fullMatch(
+        _ value: String,
+        of pattern: String,
+        options: String.CompareOptions
+    ) -> Bool {
+        value.range(of: pattern, options: options) == value.startIndex ..< value.endIndex
+    }
+
+    private static func hasCanonicalJSONShape(_ data: Data) -> Bool {
+        guard let root = try? JSONSerialization.jsonObject(with: data),
+              let document = root as? [String: Any],
+              Set(document.keys) == [
+                "schema_version", "segments", "num_speakers", "source",
+              ],
+              let segments = document["segments"] as? [Any],
+              let source = document["source"] as? [String: Any],
+              Set(source.keys) == ["file_name", "sha256", "duration_s"]
+        else {
+            return false
+        }
+        let requiredSegmentKeys: Set<String> = [
+            "speaker", "start_s", "end_s", "text",
+        ]
+        let allowedSegmentKeys = requiredSegmentKeys.union([
+            "language", "confidence", "flags",
+        ])
+        return segments.allSatisfy { value in
+            guard let segment = value as? [String: Any] else { return false }
+            let keys = Set(segment.keys)
+            return requiredSegmentKeys.isSubset(of: keys)
+                && keys.isSubset(of: allowedSegmentKeys)
+        }
+    }
+}
+
 public enum RunIntegrityError: Error, Equatable, Sendable, LocalizedError {
     case manifestMissing
     case manifestInvalid
@@ -159,6 +288,8 @@ public enum RunIntegrityError: Error, Equatable, Sendable, LocalizedError {
     case unsafeArtifactPath(String)
     case artifactMissing(String)
     case artifactHashMismatch(String)
+    case requiredArtifactMissing(kind: String, path: String)
+    case artifactInventoryMismatch(unlisted: [String], missing: [String])
     case mergedSegmentsMissing
     case mergedSegmentsDuplicate
     case mergedSegmentsInvalid
@@ -183,6 +314,10 @@ public enum RunIntegrityError: Error, Equatable, Sendable, LocalizedError {
             "A source run artifact is missing: \(path)"
         case let .artifactHashMismatch(path):
             "A source run artifact failed its integrity check: \(path)"
+        case let .requiredArtifactMissing(kind, path):
+            "The source run is missing required artifact \(kind) at \(path)."
+        case let .artifactInventoryMismatch(unlisted, missing):
+            "The source run artifact inventory is incomplete (unlisted: \(unlisted), missing: \(missing))."
         case .mergedSegmentsMissing:
             "The source run has no merged transcript artifact."
         case .mergedSegmentsDuplicate:
@@ -199,6 +334,13 @@ public enum RunIntegrityError: Error, Equatable, Sendable, LocalizedError {
 
 public enum RunIntegrityVerifier {
     public static func verifyCompletedRun(at runURL: URL) throws -> VerifiedRunSource {
+        try verifyCompletedRun(at: runURL, onArtifactVerified: nil)
+    }
+
+    static func verifyCompletedRun(
+        at runURL: URL,
+        onArtifactVerified: ((Artifact, URL) throws -> Void)?
+    ) throws -> VerifiedRunSource {
         let runURL = runURL.standardizedFileURL
         let manifestURL = runURL.appendingPathComponent("manifest.json")
         guard FileManager.default.isReadableFile(atPath: manifestURL.path) else {
@@ -225,16 +367,13 @@ public enum RunIntegrityVerifier {
         guard manifest.status == .succeeded,
               manifest.failure == nil,
               !manifest.coverage.truncated,
-              abs(manifest.coverage.inputDurationS
-                  - manifest.coverage.processedDurationS) <= 0.01,
-              manifest.coverage.chunksPlanned
-                  == manifest.coverage.chunksCompleted,
-              manifest.chunkBoundaries.count
-                  == manifest.coverage.chunksPlanned,
-              manifest.chunkBoundaries.allSatisfy({ $0.status == .succeeded })
+              successfulCoverageIsComplete(manifest),
+              successfulGlossaryIsValid(manifest.glossary)
         else {
             throw RunIntegrityError.sourceRunNotComplete
         }
+
+        try requireSuccessfulArtifactSet(manifest)
 
         let mergedArtifacts = manifest.artifacts.filter {
             $0.kind == "merged_segments"
@@ -250,7 +389,7 @@ public enum RunIntegrityVerifier {
         }
 
         var paths = Set<String>()
-        var artifactURLs: [String: URL] = [:]
+        var artifactData: [String: Data] = [:]
         for artifact in manifest.artifacts {
             guard !artifact.kind.trimmingCharacters(
                 in: .whitespacesAndNewlines
@@ -266,22 +405,36 @@ public enum RunIntegrityVerifier {
                 artifact.path,
                 runURL: runURL
             )
-            guard try sha256(of: artifactURL) == artifact.sha256 else {
+            let data: Data
+            do {
+                data = try Data(contentsOf: artifactURL)
+            } catch {
+                throw RunIntegrityError.artifactMissing(artifact.path)
+            }
+            guard sha256(data: data) == artifact.sha256 else {
                 throw RunIntegrityError.artifactHashMismatch(artifact.path)
             }
-            artifactURLs[artifact.path] = artifactURL
+            try onArtifactVerified?(artifact, artifactURL)
+            artifactData[artifact.path] = data
+        }
+
+        let actualPaths = try regularSourceArtifactPaths(in: runURL)
+        let unlisted = actualPaths.subtracting(paths).sorted()
+        let missing = paths.subtracting(actualPaths).sorted()
+        guard unlisted.isEmpty, missing.isEmpty else {
+            throw RunIntegrityError.artifactInventoryMismatch(
+                unlisted: unlisted,
+                missing: missing
+            )
         }
 
         let mergedArtifact = mergedArtifacts[0]
-        guard let mergedURL = artifactURLs[mergedArtifact.path] else {
+        guard let mergedData = artifactData[mergedArtifact.path] else {
             throw RunIntegrityError.artifactMissing(mergedArtifact.path)
         }
         let document: SegmentsDocument
         do {
-            document = try JSONDecoder().decode(
-                SegmentsDocument.self,
-                from: Data(contentsOf: mergedURL)
-            )
+            document = try SegmentsDocumentContract.decode(mergedData)
         } catch {
             throw RunIntegrityError.mergedSegmentsInvalid
         }
@@ -292,8 +445,9 @@ public enum RunIntegrityVerifier {
               document.source.durationS.isFinite,
               document.source.durationS > 0,
               abs(document.source.durationS
-                  - manifest.coverage.inputDurationS) <= 0.01,
-              segmentsAreSemanticallyValid(document)
+                  - manifest.coverage.inputDurationS)
+                <= RunArtifactContract.timeToleranceS,
+              SegmentsDocumentContract.isValid(document)
         else {
             throw RunIntegrityError.mergedSegmentsSourceMismatch
         }
@@ -376,7 +530,7 @@ public enum RunIntegrityVerifier {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func isLowercaseSHA256(_ value: String) -> Bool {
+    static func isLowercaseSHA256(_ value: String) -> Bool {
         value.count == 64 && value.unicodeScalars.allSatisfy {
             (48 ... 57).contains($0.value) || (97 ... 102).contains($0.value)
         }
@@ -403,7 +557,8 @@ public enum RunIntegrityVerifier {
               manifest.coverage.processedDurationS.isFinite,
               manifest.coverage.processedDurationS >= 0,
               manifest.coverage.processedDurationS
-                  <= manifest.coverage.inputDurationS + 0.01,
+                  <= manifest.coverage.inputDurationS
+                    + RunArtifactContract.timeToleranceS,
               manifest.coverage.chunksPlanned >= 0,
               manifest.coverage.chunksCompleted >= 0,
               manifest.coverage.chunksCompleted
@@ -426,7 +581,8 @@ public enum RunIntegrityVerifier {
                   chunk.endS.isFinite,
                   chunk.startS >= 0,
                   chunk.endS > chunk.startS,
-                  chunk.endS <= manifest.coverage.inputDurationS + 0.01
+                  chunk.endS <= manifest.coverage.inputDurationS
+                    + RunArtifactContract.timeToleranceS
             else {
                 return false
             }
@@ -440,6 +596,125 @@ public enum RunIntegrityVerifier {
             previous = chunk
         }
         return true
+    }
+
+    private static func successfulCoverageIsComplete(_ manifest: Manifest) -> Bool {
+        let coverage = manifest.coverage
+        let boundaries = manifest.chunkBoundaries
+        guard coverage.strategy == .full || coverage.strategy == .chunked,
+              coverage.chunksPlanned > 0,
+              coverage.chunksPlanned == coverage.chunksCompleted,
+              boundaries.count == coverage.chunksPlanned,
+              boundaries.allSatisfy({ $0.status == .succeeded }),
+              let first = boundaries.first,
+              let last = boundaries.last,
+              abs(first.startS) <= RunArtifactContract.timeToleranceS,
+              abs(last.endS - coverage.inputDurationS)
+                <= RunArtifactContract.timeToleranceS,
+              abs(last.endS - coverage.processedDurationS)
+                <= RunArtifactContract.timeToleranceS,
+              (coverage.strategy == .full ? boundaries.count == 1 : boundaries.count > 1)
+        else {
+            return false
+        }
+        for (previous, current) in zip(boundaries, boundaries.dropFirst()) {
+            guard abs(current.startS - previous.endS)
+                    <= RunArtifactContract.timeToleranceS
+            else {
+                return false
+            }
+        }
+        let coveredDuration = boundaries.reduce(0) {
+            $0 + ($1.endS - $1.startS)
+        }
+        return abs(coveredDuration - coverage.processedDurationS)
+            <= RunArtifactContract.timeToleranceS
+    }
+
+    private static func successfulGlossaryIsValid(
+        _ glossary: ManifestGlossary
+    ) -> Bool {
+        glossaryIsSemanticallyValid(glossary)
+            && (!glossary.provided || glossary.applied)
+    }
+
+    private static func requireSuccessfulArtifactSet(_ manifest: Manifest) throws {
+        var required = [
+            "primary_raw": "primary/raw.txt",
+            "primary_segments": "primary/segments.json",
+            "diarization_timeline": "diarization/timeline.json",
+            "merged_segments": "merged/segments.json",
+            "merged_conflicts": "merged/conflicts.json",
+        ]
+        switch manifest.postprocess?.mode {
+        case .correction:
+            required["postprocess_segments"] = "postprocess/segments.json"
+            required["postprocess_conflicts"] = "postprocess/conflicts.json"
+        case .translation:
+            required["postprocess_translation"] = "postprocess/translation.json"
+        case nil:
+            break
+        }
+        for (kind, path) in required {
+            let matches = manifest.artifacts.filter { $0.kind == kind }
+            guard matches.count == 1, matches[0].path == path else {
+                throw RunIntegrityError.requiredArtifactMissing(
+                    kind: kind,
+                    path: path
+                )
+            }
+        }
+    }
+
+    private static func regularSourceArtifactPaths(in runURL: URL) throws -> Set<String> {
+        guard let enumerator = FileManager.default.enumerator(
+            at: runURL,
+            includingPropertiesForKeys: [
+                .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey,
+            ],
+            options: [],
+            errorHandler: nil
+        ) else {
+            throw RunIntegrityError.manifestInvalid
+        }
+        let rootPrefix = runURL.standardizedFileURL.path + "/"
+        var paths = Set<String>()
+        while let url = enumerator.nextObject() as? URL {
+            let standardized = url.standardizedFileURL
+            guard standardized.path.hasPrefix(rootPrefix) else {
+                throw RunIntegrityError.unsafeArtifactPath(url.path)
+            }
+            let relative = String(standardized.path.dropFirst(rootPrefix.count))
+            let values = try standardized.resourceValues(
+                forKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey]
+            )
+            if relative == "derived" {
+                guard values.isDirectory == true,
+                      values.isSymbolicLink != true
+                else {
+                    throw RunIntegrityError.unsafeArtifactPath(relative)
+                }
+                enumerator.skipDescendants()
+                continue
+            }
+            if relative.hasPrefix("derived/") { continue }
+            guard values.isSymbolicLink != true else {
+                if manifestExcludedPath(relative) { continue }
+                throw RunIntegrityError.unsafeArtifactPath(relative)
+            }
+            guard values.isRegularFile == true,
+                  !manifestExcludedPath(relative)
+            else {
+                continue
+            }
+            paths.insert(relative)
+        }
+        return paths
+    }
+
+    private static func manifestExcludedPath(_ relative: String) -> Bool {
+        relative == "manifest.json"
+            || relative.split(separator: "/").last == ".DS_Store"
     }
 
     private static func postprocessIsSemanticallyValid(
@@ -506,38 +781,4 @@ public enum RunIntegrityVerifier {
             && !glossary.applied
     }
 
-    private static func segmentsAreSemanticallyValid(
-        _ document: SegmentsDocument
-    ) -> Bool {
-        var previous: Segment?
-        var speakers = Set<String>()
-        for segment in document.segments {
-            guard segment.startS.isFinite,
-                  segment.endS.isFinite,
-                  segment.endS > segment.startS,
-                  segment.startS >= 0,
-                  segment.endS <= document.source.durationS + 0.01,
-                  !segment.speaker.trimmingCharacters(
-                      in: .whitespacesAndNewlines
-                  ).isEmpty,
-                  !segment.text.trimmingCharacters(
-                      in: .whitespacesAndNewlines
-                  ).isEmpty
-            else {
-                return false
-            }
-            if let previous,
-               segment.startS < previous.startS
-                || (segment.startS == previous.startS
-                    && segment.endS < previous.endS)
-            {
-                return false
-            }
-            if !["UNASSIGNED", "UNKNOWN"].contains(segment.speaker) {
-                speakers.insert(segment.speaker)
-            }
-            previous = segment
-        }
-        return document.numSpeakers == speakers.count
-    }
 }

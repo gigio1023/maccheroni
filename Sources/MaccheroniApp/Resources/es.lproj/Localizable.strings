@@ -550,5 +550,15 @@
 	<string>El manifiesto de un resultado derivado no es válido: %@</string>
 	<key>A derived result does not match its source run: %@</key>
 	<string>Un resultado derivado no coincide con su ejecución de origen: %@</string>
+	<key>Source Run</key>
+	<string>Ejecución de origen</string>
+	<key>Current Derived Result</key>
+	<string>Resultado derivado actual</string>
+	<key>Glossary Semantics</key>
+	<string>Semántica del glosario</string>
+	<key>Source Run Glossary</key>
+	<string>Glosario de la ejecución de origen</string>
+	<key>Current Derived Post-processing</key>
+	<string>Posprocesamiento derivado actual</string>
 	</dict>
 </plist>

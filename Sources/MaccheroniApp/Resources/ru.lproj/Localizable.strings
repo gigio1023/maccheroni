@@ -550,5 +550,15 @@
 	<string>Манифест производного результата недействителен: %@</string>
 	<key>A derived result does not match its source run: %@</key>
 	<string>Производный результат не соответствует исходному запуску: %@</string>
+	<key>Source Run</key>
+	<string>Исходный запуск</string>
+	<key>Current Derived Result</key>
+	<string>Текущий производный результат</string>
+	<key>Glossary Semantics</key>
+	<string>Семантика глоссария</string>
+	<key>Source Run Glossary</key>
+	<string>Глоссарий исходного запуска</string>
+	<key>Current Derived Post-processing</key>
+	<string>Текущая производная постобработка</string>
 	</dict>
 </plist>
