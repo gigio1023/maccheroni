@@ -42,28 +42,13 @@ Unsichere Korrekturen werden gekennzeichnet und niemals stillschweigend ersetzt.
 
 ## Warum es dieses Projekt gibt
 
-Maccheroni ist ein persönliches Werkzeug: eine konfigurierbare Werkbank, die
-gemischtsprachige Gespräche auf einem Mac in Aufzeichnungen mit
-Sprecherzuordnung verwandelt. Der Anwender stimmt sie auf seine Gespräche ab,
-nicht auf einen Markt.
+Maccheroni ist ein persönliches Werkzeug: eine konfigurierbare Werkbank, die gemischtsprachige Gespräche auf einem Mac in Aufzeichnungen mit Sprecherzuordnung verwandelt. Der Anwender stimmt sie auf seine Gespräche ab, nicht auf einen Markt.
 
-- **Profile stellen die Einrichtung für jedes Gespräch zusammen.** Jedes
-  Profil kombiniert ein festgeschriebenes On-Device-ASR-Modell mit
-  Glossarkontext und einer Sprecheranalyse über die gesamte Datei, passend zum
-  tatsächlichen Klang des Gesprächs. Ein koreanisches Meeting voller englischer
-  Produktnamen braucht andere Einstellungen als ein italienischer Dialog mit
-  zwei Sprechern.
-- **Kombinationen werden gemessen, nicht vorausgesetzt.** Öffentliche und
-  synthetische Fixtures, Begriffstrefferquoten und Fehlerraten liegen in diesem
-  Repository. Ein anderes Modell oder ein anderes Glossar lässt sich damit in einem
-  wiederholbaren Vergleich bewerten statt nach Gefühl.
-- **Jeder Lauf bewahrt seine Evidenz.** Festgeschriebene Modellrevisionen, der
-  Nachweis der Glossarübergabe, Rohtranskripte, die Sprecherzeitleiste und
-  typisierte Fehler werden im Lauf versiegelt. So lässt sich ein Ergebnis
-  später prüfen und reproduzieren.
+- **Profile stellen die Einrichtung für jedes Gespräch zusammen.** Jedes Profil kombiniert ein festgeschriebenes On-Device-ASR-Modell mit Glossarkontext und einer Sprecheranalyse über die gesamte Datei, passend zum tatsächlichen Klang des Gesprächs. Ein koreanisches Meeting voller englischer Produktnamen braucht andere Einstellungen als ein italienischer Dialog mit zwei Sprechern.
+- **Kombinationen werden gemessen, nicht vorausgesetzt.** Öffentliche und synthetische Fixtures, Begriffstrefferquoten und Fehlerraten liegen in diesem Repository. Ein anderes Modell oder ein anderes Glossar lässt sich damit in einem wiederholbaren Vergleich bewerten statt nach Gefühl.
+- **Jeder Lauf bewahrt seine Evidenz.** Festgeschriebene Modellrevisionen, der Nachweis der Glossarübergabe, Rohtranskripte, die Sprecherzeitleiste und typisierte Fehler werden im Lauf versiegelt. So lässt sich ein Ergebnis später prüfen und reproduzieren.
 
-Die Notizen auf Quellcodeebene, auf denen diese Entscheidungen beruhen, stehen unter
-[docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
+Die Notizen auf Quellcodeebene, auf denen diese Entscheidungen beruhen, stehen unter [docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
 
 ## Was Maccheroni unterscheidet
 

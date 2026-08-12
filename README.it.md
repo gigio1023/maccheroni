@@ -42,29 +42,13 @@ Le correzioni incerte vengono segnalate e mai sostituite in silenzio. Le etichet
 
 ## Perché esiste
 
-Maccheroni è uno strumento personale: un banco di lavoro configurabile che
-trasforma conversazioni in cui si mescolano più lingue in registrazioni
-attribuite ai parlanti su un solo Mac. Chi lo usa lo configura per le proprie
-esigenze, non per soddisfare le richieste di un mercato.
+Maccheroni è uno strumento personale: un banco di lavoro configurabile che trasforma conversazioni in cui si mescolano più lingue in registrazioni attribuite ai parlanti su un solo Mac. Chi lo usa lo configura per le proprie esigenze, non per soddisfare le richieste di un mercato.
 
-- **I profili compongono la configurazione per ogni conversazione.** Ogni
-  profilo abbina un modello ASR fissato ed eseguito sul dispositivo al contesto
-  del glossario e alla gestione dei parlanti sull’intero file, in base a come
-  suona davvero la conversazione. Una riunione in coreano ricca di nomi di
-  prodotti inglesi richiede scelte diverse da un dialogo italiano tra due
-  parlanti.
-- **Gli abbinamenti vengono misurati, non dati per scontati.** Le fixture
-  pubbliche e sintetiche, il recupero dei termini e i tassi di errore si trovano
-  in questo repository. Cambiare un modello o un glossario diventa così un
-  confronto ripetibile, non un’intuizione.
-- **Ogni esecuzione conserva le sue evidenze.** Le revisioni fissate dei
-  modelli, il registro di consegna del glossario, le trascrizioni grezze, la
-  timeline dei parlanti e gli errori tipizzati vengono sigillati
-  nell’esecuzione. Il risultato può quindi essere esaminato e riprodotto in
-  seguito.
+- **I profili compongono la configurazione per ogni conversazione.** Ogni profilo abbina un modello ASR fissato ed eseguito sul dispositivo al contesto del glossario e alla gestione dei parlanti sull’intero file, in base a come suona davvero la conversazione. Una riunione in coreano ricca di nomi di prodotti inglesi richiede scelte diverse da un dialogo italiano tra due parlanti.
+- **Gli abbinamenti vengono misurati, non dati per scontati.** Le fixture pubbliche e sintetiche, il recupero dei termini e i tassi di errore si trovano in questo repository. Cambiare un modello o un glossario diventa così un confronto ripetibile, non un’intuizione.
+- **Ogni esecuzione conserva le sue evidenze.** Le revisioni fissate dei modelli, il registro di consegna del glossario, le trascrizioni grezze, la timeline dei parlanti e gli errori tipizzati vengono sigillati nell’esecuzione. Il risultato può quindi essere esaminato e riprodotto in seguito.
 
-Le note a livello di codice sorgente che hanno guidato queste scelte si trovano
-in [docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
+Le note a livello di codice sorgente che hanno guidato queste scelte si trovano in [docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
 
 ## Cosa lo distingue
 

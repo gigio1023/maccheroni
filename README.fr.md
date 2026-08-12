@@ -42,28 +42,13 @@ Les corrections incertaines sont signalées, jamais remplacées en silence. Les 
 
 ## Pourquoi ce projet existe
 
-Maccheroni est un outil personnel : un établi configurable qui transforme, sur
-un seul Mac, des conversations mêlant plusieurs langues en comptes rendus
-attribués aux locuteurs. La personne qui l’utilise le règle selon ses besoins
-plutôt qu’en fonction d’un marché.
+Maccheroni est un outil personnel : un établi configurable qui transforme, sur un seul Mac, des conversations mêlant plusieurs langues en comptes rendus attribués aux locuteurs. La personne qui l’utilise le règle selon ses besoins plutôt qu’en fonction d’un marché.
 
-- **Les profils composent la configuration de chaque conversation.** Chaque
-  profil associe un modèle ASR épinglé exécuté sur l’appareil au contexte du
-  glossaire et à la gestion des locuteurs sur l’ensemble du fichier, choisis en
-  fonction des caractéristiques sonores réelles de la conversation. Une réunion en coréen
-  riche en noms de produits anglais demande des choix différents d’un dialogue
-  italien à deux locuteurs.
-- **Les associations sont mesurées, pas supposées.** Les fixtures publiques et
-  synthétiques, le rappel des termes et les taux d’erreur se trouvent dans ce
-  dépôt. Changer de modèle ou de glossaire devient ainsi une comparaison que
-  l’on peut relancer, pas une intuition.
-- **Chaque exécution conserve ses preuves.** Les révisions épinglées des
-  modèles, le registre de transmission du glossaire, les transcriptions brutes,
-  la chronologie des locuteurs et les échecs typés sont scellés dans
-  l’exécution. Le résultat peut ainsi être inspecté et reproduit plus tard.
+- **Les profils composent la configuration de chaque conversation.** Chaque profil associe un modèle ASR épinglé exécuté sur l’appareil au contexte du glossaire et à la gestion des locuteurs sur l’ensemble du fichier, choisis en fonction des caractéristiques sonores réelles de la conversation. Une réunion en coréen riche en noms de produits anglais demande des choix différents d’un dialogue italien à deux locuteurs.
+- **Les associations sont mesurées, pas supposées.** Les fixtures publiques et synthétiques, le rappel des termes et les taux d’erreur se trouvent dans ce dépôt. Changer de modèle ou de glossaire devient ainsi une comparaison que l’on peut relancer, pas une intuition.
+- **Chaque exécution conserve ses preuves.** Les révisions épinglées des modèles, le registre de transmission du glossaire, les transcriptions brutes, la chronologie des locuteurs et les échecs typés sont scellés dans l’exécution. Le résultat peut ainsi être inspecté et reproduit plus tard.
 
-Les notes au niveau du code source qui ont guidé ces choix se trouvent dans
-[docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
+Les notes au niveau du code source qui ont guidé ces choix se trouvent dans [docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
 
 ## Ce qui le distingue
 

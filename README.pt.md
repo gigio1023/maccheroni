@@ -42,27 +42,13 @@ As correções incertas são marcadas e nunca substituídas silenciosamente. Os 
 
 ## Por que este projeto existe
 
-Maccheroni é uma ferramenta pessoal: uma bancada configurável para transformar
-conversas que misturam idiomas em registros atribuídos aos falantes em um único
-Mac. Quem a utiliza ajusta essa bancada às próprias necessidades, não às de um
-mercado.
+Maccheroni é uma ferramenta pessoal: uma bancada configurável para transformar conversas que misturam idiomas em registros atribuídos aos falantes em um único Mac. Quem a utiliza ajusta essa bancada às próprias necessidades, não às de um mercado.
 
-- **Os perfis compõem a configuração de cada conversa.** Cada perfil combina
-  um modelo ASR fixado e executado no dispositivo com o contexto do glossário e
-  o tratamento dos falantes no arquivo inteiro, de acordo com o som real da
-  conversa. Uma reunião em coreano repleta de nomes de produtos em inglês exige
-  escolhas diferentes de um diálogo em italiano entre dois falantes.
-- **As combinações são medidas, não presumidas.** Os fixtures públicos e
-  sintéticos, a recuperação de termos e as taxas de erro ficam neste
-  repositório. Assim, mudar um modelo ou glossário se torna uma comparação que
-  pode ser refeita, não um palpite.
-- **Cada execução guarda sua evidência.** As revisões fixadas dos modelos, o
-  registro de entrega do glossário, as transcrições brutas, a linha do tempo dos
-  falantes e as falhas tipadas ficam selados na execução. Assim, o resultado
-  pode ser inspecionado e reproduzido mais tarde.
+- **Os perfis compõem a configuração de cada conversa.** Cada perfil combina um modelo ASR fixado e executado no dispositivo com o contexto do glossário e o tratamento dos falantes no arquivo inteiro, de acordo com o som real da conversa. Uma reunião em coreano repleta de nomes de produtos em inglês exige escolhas diferentes de um diálogo em italiano entre dois falantes.
+- **As combinações são medidas, não presumidas.** Os fixtures públicos e sintéticos, a recuperação de termos e as taxas de erro ficam neste repositório. Assim, mudar um modelo ou glossário se torna uma comparação que pode ser refeita, não um palpite.
+- **Cada execução guarda sua evidência.** As revisões fixadas dos modelos, o registro de entrega do glossário, as transcrições brutas, a linha do tempo dos falantes e as falhas tipadas ficam selados na execução. Assim, o resultado pode ser inspecionado e reproduzido mais tarde.
 
-As notas no nível do código-fonte que orientaram essas escolhas estão em
-[docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
+As notas no nível do código-fonte que orientaram essas escolhas estão em [docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
 
 ## O que o torna diferente
 
