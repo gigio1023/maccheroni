@@ -141,6 +141,45 @@ class CheckRunTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "artifact hash mismatch"):
                 validate_run(run_root, input_path, "asr")
 
+    def test_acceptance_run_requires_reproducible_term_recall(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_root, input_path = self.make_asr_run(Path(temporary_directory))
+            with self.assertRaisesRegex(ValueError, "missing acceptance term-recall score"):
+                validate_run(run_root, input_path, "acceptance-asr")
+
+            scores_path = run_root / "scores.json"
+            scores = json.loads(scores_path.read_text(encoding="utf-8"))
+            scores["terms"] = {
+                "matched_reference_occurrences": 1,
+                "reference_occurrences": 2,
+                "term_recall": 0.5,
+                "terms": [
+                    {
+                        "term": "API",
+                        "reference_count": 2,
+                        "predicted_count": 1,
+                        "matched_count": 1,
+                    }
+                ],
+            }
+            write_json(scores_path, scores)
+            manifest_path = run_root / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for artifact in manifest["artifacts"]:
+                if artifact["path"] == "scores.json":
+                    artifact["sha256"] = sha256_file(scores_path)
+            write_json(manifest_path, manifest)
+            validate_run(run_root, input_path, "acceptance-asr")
+
+            scores["terms"]["term_recall"] = 1.0
+            write_json(scores_path, scores)
+            for artifact in manifest["artifacts"]:
+                if artifact["path"] == "scores.json":
+                    artifact["sha256"] = sha256_file(scores_path)
+            write_json(manifest_path, manifest)
+            with self.assertRaisesRegex(ValueError, "term_recall is not reproducible"):
+                validate_run(run_root, input_path, "acceptance-asr")
+
 
 if __name__ == "__main__":
     unittest.main()

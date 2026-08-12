@@ -32,7 +32,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-root", required=True, type=Path)
     parser.add_argument("--input", required=True, type=Path)
-    parser.add_argument("--kind", required=True, choices=("asr", "diarization", "full"))
+    parser.add_argument(
+        "--kind",
+        required=True,
+        choices=("asr", "diarization", "full", "acceptance-asr", "acceptance-full"),
+    )
     return parser.parse_args()
 
 
@@ -192,8 +196,54 @@ def validate_scores(path: Path, *, kind: str) -> None:
     for key in ("wer", "cer", "omissions"):
         if key not in scores or not isinstance(scores[key], dict):
             raise ValueError(f"{path}: missing {key} score")
-    if kind == "diarization" and not isinstance(scores.get("diarization"), dict):
+    if kind in {"diarization", "acceptance-full"} and not isinstance(
+        scores.get("diarization"), dict
+    ):
         raise ValueError(f"{path}: missing diarization score")
+    if kind in {"acceptance-asr", "acceptance-full"}:
+        terms = scores.get("terms")
+        if not isinstance(terms, dict):
+            raise ValueError(f"{path}: missing acceptance term-recall score")
+        for key in ("matched_reference_occurrences", "reference_occurrences", "term_recall", "terms"):
+            if key not in terms:
+                raise ValueError(f"{path}: incomplete acceptance term-recall score")
+        matched = terms["matched_reference_occurrences"]
+        reference = terms["reference_occurrences"]
+        details = terms["terms"]
+        if (
+            isinstance(matched, bool)
+            or not isinstance(matched, int)
+            or isinstance(reference, bool)
+            or not isinstance(reference, int)
+            or matched < 0
+            or reference < 0
+            or matched > reference
+            or not isinstance(details, list)
+        ):
+            raise ValueError(f"{path}: invalid acceptance term-recall counts")
+        expected_recall = matched / reference if reference else None
+        if terms["term_recall"] != expected_recall:
+            raise ValueError(f"{path}: acceptance term_recall is not reproducible")
+        total_matched = 0
+        total_reference = 0
+        seen_terms: set[str] = set()
+        for index, detail in enumerate(details):
+            if not isinstance(detail, dict) or not isinstance(detail.get("term"), str):
+                raise ValueError(f"{path}: invalid acceptance term at index {index}")
+            term = detail["term"]
+            if term in seen_terms:
+                raise ValueError(f"{path}: duplicate acceptance term {term!r}")
+            seen_terms.add(term)
+            values = tuple(detail.get(key) for key in ("reference_count", "predicted_count", "matched_count"))
+            if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in values):
+                raise ValueError(f"{path}: invalid acceptance term counts for {term!r}")
+            reference_count, predicted_count, matched_count = values
+            if matched_count != min(reference_count, predicted_count):
+                raise ValueError(f"{path}: invalid acceptance term match count for {term!r}")
+            total_matched += matched_count
+            total_reference += reference_count
+        if (total_matched, total_reference) != (matched, reference):
+            raise ValueError(f"{path}: acceptance term-recall totals disagree with details")
 
 
 def validate_artifacts(run_root: Path, manifest: dict[str, Any]) -> set[str]:
