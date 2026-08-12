@@ -42,29 +42,13 @@ Las correcciones dudosas se marcan y nunca se sustituyen de forma silenciosa. La
 
 ## Por qué existe
 
-Maccheroni es una herramienta personal: un banco de trabajo configurable para
-convertir conversaciones que mezclan idiomas en registros atribuidos a cada
-hablante en un solo Mac. Quien lo utiliza lo ajusta a sus necesidades, no a las
-de un mercado.
+Maccheroni es una herramienta personal: un banco de trabajo configurable para convertir conversaciones que mezclan idiomas en registros atribuidos a cada hablante en un solo Mac. Quien lo utiliza lo ajusta a sus necesidades, no a las de un mercado.
 
-- **Los perfiles componen la configuración de cada conversación.** Cada perfil
-  combina un modelo ASR fijado que se ejecuta en el dispositivo con el contexto
-  del glosario y la gestión de los hablantes del archivo completo, según cómo
-  suena realmente la conversación. Una reunión en coreano repleta de nombres
-  de productos en inglés requiere opciones distintas de un diálogo en italiano
-  entre dos hablantes.
-- **Las combinaciones se miden, no se suponen.** Los fixtures públicos y
-  sintéticos, la recuperación de términos y las tasas de error están en este
-  repositorio. Así, cambiar un modelo o un glosario permite repetir una
-  comparación en vez de confiar en una corazonada.
-- **Cada ejecución conserva su evidencia.** Las revisiones fijadas de los
-  modelos, el registro de entrega del glosario, las transcripciones sin
-  procesar, la línea temporal de los hablantes y los errores tipados quedan
-  sellados en la ejecución. De este modo, el resultado se puede inspeccionar y
-  reproducir más adelante.
+- **Los perfiles componen la configuración de cada conversación.** Cada perfil combina un modelo ASR fijado que se ejecuta en el dispositivo con el contexto del glosario y la gestión de los hablantes del archivo completo, según cómo suena realmente la conversación. Una reunión en coreano repleta de nombres de productos en inglés requiere opciones distintas de un diálogo en italiano entre dos hablantes.
+- **Las combinaciones se miden, no se suponen.** Los fixtures públicos y sintéticos, la recuperación de términos y las tasas de error están en este repositorio. Así, cambiar un modelo o un glosario permite repetir una comparación en vez de confiar en una corazonada.
+- **Cada ejecución conserva su evidencia.** Las revisiones fijadas de los modelos, el registro de entrega del glosario, las transcripciones sin procesar, la línea temporal de los hablantes y los errores tipados quedan sellados en la ejecución. De este modo, el resultado se puede inspeccionar y reproducir más adelante.
 
-Las notas a nivel de código fuente que dieron forma a estas decisiones están en
-[docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
+Las notas a nivel de código fuente que dieron forma a estas decisiones están en [docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
 
 ## Qué lo hace diferente
 

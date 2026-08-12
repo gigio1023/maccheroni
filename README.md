@@ -42,25 +42,13 @@ Uncertain corrections are flagged, never silently substituted. Speaker labels co
 
 ## Why this exists
 
-Maccheroni is a personal tool: a configurable workbench for turning
-mixed-language conversations into speaker-attributed records on one Mac,
-tuned by its operator rather than for a market.
+Maccheroni is a personal tool: a configurable workbench for turning mixed-language conversations into speaker-attributed records on one Mac, tuned by its operator rather than for a market.
 
-- **Profiles compose the setup per conversation.** Each profile pairs a
-  pinned on-device ASR model with glossary context and whole-file speaker
-  handling that fit how that conversation actually sounds — a Korean meeting
-  dense with English product names needs different choices than an Italian
-  two-speaker dialogue.
-- **Pairings are measured, not assumed.** Public and synthetic fixtures,
-  term recall, and error rates live in this repository, so changing a model
-  or glossary is a comparison you can rerun, not a hunch.
-- **Every run keeps its evidence.** Pinned model revisions, the
-  glossary-delivery record, raw transcripts, the speaker timeline, and typed
-  failures are sealed into the run, so a result can be inspected and
-  reproduced later.
+- **Profiles compose the setup per conversation.** Each profile pairs a pinned on-device ASR model with glossary context and whole-file speaker handling that fit how that conversation actually sounds — a Korean meeting dense with English product names needs different choices than an Italian two-speaker dialogue.
+- **Pairings are measured, not assumed.** Public and synthetic fixtures, term recall, and error rates live in this repository, so changing a model or glossary is a comparison you can rerun, not a hunch.
+- **Every run keeps its evidence.** Pinned model revisions, the glossary-delivery record, raw transcripts, the speaker timeline, and typed failures are sealed into the run, so a result can be inspected and reproduced later.
 
-The source-level notes that shaped these choices live in
-[docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
+The source-level notes that shaped these choices live in [docs/reference-project-source-audit.md](docs/reference-project-source-audit.md).
 
 ## What makes it different
 
