@@ -2,6 +2,40 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>Speaker-labelled</key>
+	<string>已标注说话人</string>
+	<key>Corrected</key>
+	<string>已校正</string>
+	<key>Translated</key>
+	<string>已翻译</string>
+	<key>Transcript layer: Speaker-labelled</key>
+	<string>转录层：已标注说话人</string>
+	<key>Transcript layer: Corrected</key>
+	<string>转录层：已校正</string>
+	<key>Transcript layer: Translated</key>
+	<string>转录层：已翻译</string>
+	<key>Copy Transcript</key>
+	<string>复制转录文本</string>
+	<key>Copy Selection</key>
+	<string>复制所选内容</string>
+	<key>The transcript could not be copied.</key>
+	<string>无法复制转录文本。</string>
+	<key>Select this segment for copying.</key>
+	<string>选择此片段以复制。</string>
+	<key>Remove this segment from the copy selection.</key>
+	<string>从复制所选内容中移除此片段。</string>
+	<key>Copied the speaker-labelled transcript.</key>
+	<string>已复制标注说话人的转录文本。</string>
+	<key>Copied the corrected transcript.</key>
+	<string>已复制校正后的转录文本。</string>
+	<key>Copied the translated transcript.</key>
+	<string>已复制翻译后的转录文本。</string>
+	<key>Copied the speaker-labelled selection.</key>
+	<string>已复制标注说话人层的所选内容。</string>
+	<key>Copied the corrected selection.</key>
+	<string>已复制校正层的所选内容。</string>
+	<key>Copied the translated selection.</key>
+	<string>已复制翻译层的所选内容。</string>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
 	<key>%@, %@</key>
