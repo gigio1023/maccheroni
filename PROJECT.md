@@ -403,6 +403,18 @@ not deleted.
   runs retain its former hash and count but not its bytes; treat a parsed zero-entry
   file as no glossary. The library selects the freshest successful set by sealed
   completion time and derived ID while keeping earlier sets visible.
+- D40 [inference] Supersedes D39's current-profile-only glossary limitation
+  (decided 2026-08-12). Store every non-empty glossary's exact source bytes as a
+  create-only content-addressed revision at
+  `<library-root>/Glossaries/Revisions/<sha256>.txt`, outside the repository and all
+  immutable run directories. The mutable per-profile file remains the editor
+  projection. Reuse an already verified revision for unchanged bytes and never rewrite
+  or repair an existing revision path. Existing-run correction and translation default
+  to the invocation profile's current glossary but may explicitly resolve the source
+  manifest's recorded hash and item count. A null source hash means no glossary. A
+  missing or invalid non-null revision fails as typed unavailable without substituting
+  current content or reconstructing bytes. Runs made before this storage contract
+  commonly have no revision and must be shown as unavailable rather than recovered.
 
 ## Project-wide Done Criteria
 

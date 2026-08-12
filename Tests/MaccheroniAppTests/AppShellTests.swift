@@ -250,6 +250,8 @@ struct AppShellTests {
         ])
         #expect(arguments.contains(profile.cliProfile))
         #expect(arguments.contains("--profiles"))
+        #expect(arguments.contains("--glossary-semantics"))
+        #expect(arguments.contains("current-profile"))
         #expect(!arguments.contains("run"))
         #expect(!arguments.contains("--output-root"))
         #expect(!arguments.contains("--glossary"))
@@ -1427,6 +1429,86 @@ struct AppShellTests {
     }
 
     @Test @MainActor
+    func glossarySavesCreateExactDeduplicatedRevisionsAndKeepEarlierBytes() throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: LibraryRepository(root: root),
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+        let first = "\u{FEFF}# owner note\r\nMaccheroni\r\n"
+        let second = "# owner note\nMaccheroni\nCoreAudio\n"
+        let firstGlossary = try Glossary.parse(data: Data(first.utf8))
+        let secondGlossary = try Glossary.parse(data: Data(second.utf8))
+
+        try model.saveGlossary(first, for: .koreanITMeeting)
+        try model.saveGlossary(second, for: .koreanITMeeting)
+        try model.saveGlossary(second, for: .koreanITMeeting)
+
+        let revisions = root.appendingPathComponent("Glossaries/Revisions")
+        let files = try FileManager.default.contentsOfDirectory(
+            at: revisions,
+            includingPropertiesForKeys: nil
+        ).map(\.lastPathComponent).sorted()
+        #expect(files == [
+            "\(firstGlossary.sha256).txt",
+            "\(secondGlossary.sha256).txt",
+        ].sorted())
+        #expect(try Data(contentsOf: revisions.appendingPathComponent(
+            "\(firstGlossary.sha256).txt"
+        )) == Data(first.utf8))
+        #expect(try Data(contentsOf: revisions.appendingPathComponent(
+            "\(secondGlossary.sha256).txt"
+        )) == Data(second.utf8))
+        #expect(try model.loadGlossary(for: .koreanITMeeting) == second)
+    }
+
+    @Test @MainActor
+    func commentOnlySaveCreatesNoRevisionAndRevisionFailurePreservesActiveBytes() throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: LibraryRepository(root: root),
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+        let comments = "# category: terms\n# retained note\n"
+        try model.saveGlossary(comments, for: .italianDialogue)
+        let activeURL = model.glossaryURL(for: .italianDialogue)
+        #expect(try Data(contentsOf: activeURL) == Data(comments.utf8))
+        let revisions = root.appendingPathComponent("Glossaries/Revisions")
+        #expect(!FileManager.default.fileExists(atPath: revisions.path))
+
+        let original = "Maccheroni\n"
+        try model.saveGlossary(original, for: .italianDialogue)
+        let replacement = "CoreAudio\n"
+        let replacementGlossary = try Glossary.parse(data: Data(replacement.utf8))
+        let conflictingURL = revisions.appendingPathComponent(
+            "\(replacementGlossary.sha256).txt"
+        )
+        try Data("conflicting revision\n".utf8).write(
+            to: conflictingURL,
+            options: .withoutOverwriting
+        )
+
+        #expect(throws: GlossaryRevisionError.self) {
+            try model.saveGlossary(replacement, for: .italianDialogue)
+        }
+        #expect(try Data(contentsOf: activeURL) == Data(original.utf8))
+        #expect(try Data(contentsOf: conflictingURL)
+            == Data("conflicting revision\n".utf8))
+    }
+
+    @Test @MainActor
     func commentOnlyGlossaryIsNoGlossaryWhileAnEntryIsPassedToTheRunner() async throws {
         let root = try appShellTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -1467,7 +1549,12 @@ struct AppShellTests {
         )
         model.retrySelectedTranscription()
         await appShellWait { runner.isWaiting }
-        #expect(runner.latestRequest?.glossaryURL == model.glossaryURL(for: record.profileID))
+        let activeGlossary = try #require(try Glossary.parseOptional(
+            data: Data("# category: people\nMaccheroni\n".utf8)
+        ))
+        #expect(runner.latestRequest?.glossaryURL == root.appendingPathComponent(
+            "Glossaries/Revisions/\(activeGlossary.sha256).txt"
+        ))
         runner.fail(with: AppShellFakeError.notImplemented)
         await appShellWait { !model.isTranscribing }
     }
@@ -1515,7 +1602,13 @@ struct AppShellTests {
         #expect(request.postprocess == .local)
         #expect(request.operation == .translation)
         #expect(request.translationTargetLanguage == "it")
-        #expect(request.glossaryURL == model.glossaryURL(for: .italianDialogue))
+        let activeGlossary = try #require(try Glossary.parseOptional(
+            data: Data("# category: terms\nMaccheroni\n".utf8)
+        ))
+        #expect(request.glossarySemantics == .currentProfile)
+        #expect(request.glossaryURL == root.appendingPathComponent(
+            "Glossaries/Revisions/\(activeGlossary.sha256).txt"
+        ))
         #expect(model.canCancelActiveOperation)
         #expect(model.selectedRun == originalRun)
         #expect(model.records.first?.runURL == fixture.runURL)
@@ -1542,6 +1635,46 @@ struct AppShellTests {
         #expect(model.existingRunPostprocessFailure(for: record.id)?.contains(
             "integrity"
         ) == true)
+    }
+
+    @Test @MainActor
+    func existingRunSourceGlossaryRequestOmitsCurrentProfileSnapshot() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try appShellRunFixture(in: root, runID: "existing-run")
+        var record = appShellRecord(sourceURL: fixture.inputURL)
+        record.runURL = fixture.runURL
+        record.state = .done
+        let repository = LibraryRepository(root: root)
+        try repository.saveRecords([record])
+        let runner = AppShellControllableRunner()
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: runner,
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+        try model.saveGlossary(
+            "# category: terms\nCurrent profile term\n",
+            for: record.profileID
+        )
+        model.select(.record(record.id))
+
+        model.postprocessSelectedRun(
+            operation: .correction,
+            backend: .local,
+            glossarySemantics: .sourceRun
+        )
+        await appShellWait { runner.isPostprocessWaiting }
+
+        let request = try #require(runner.latestPostprocessRequest)
+        #expect(request.glossarySemantics == .sourceRun)
+        #expect(request.glossaryURL == nil)
+        runner.failPostprocess(with: AppShellFakeError.notImplemented)
+        await appShellWait { !model.canCancelActiveOperation }
     }
 
     @Test @MainActor
@@ -2123,11 +2256,36 @@ private func appShellWriteManifest(_ manifest: Manifest, to runURL: URL) throws 
 }
 
 @discardableResult
+@Test
+func loadingAcceptsADerivedResultThatUsedTheSourceRunGlossary() throws {
+    let root = try appShellTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fixture = try appShellRunFixture(in: root)
+
+    _ = try appShellWriteDerivedCorrection(
+        fixture: fixture,
+        id: "derived-source-run",
+        finishedAt: "2026-08-12T03:00:00Z",
+        text: "Corrected with the glossary the source run used",
+        glossarySemantics: .sourceRun
+    )
+
+    let loaded = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+
+    #expect(loaded.resultID == "derived-source-run")
+    #expect(loaded.resultOperation?.glossarySemantics == .sourceRun)
+    #expect(
+        loaded.transcript.segments[0].text
+            == "Corrected with the glossary the source run used"
+    )
+}
+
 private func appShellWriteDerivedCorrection(
     fixture: AppShellRunFixture,
     id: String,
     finishedAt: String,
-    text: String
+    text: String,
+    glossarySemantics: DerivedGlossarySemantics = .currentProfile
 ) throws -> URL {
     let verified = try RunIntegrityVerifier.verifyCompletedRun(at: fixture.runURL)
     let directory = fixture.runURL.appendingPathComponent(
@@ -2178,7 +2336,7 @@ private func appShellWriteDerivedCorrection(
         operation: DerivedOperation(
             profileName: "ko-it-meeting",
             mode: .correction,
-            glossarySemantics: .currentProfile,
+            glossarySemantics: glossarySemantics,
             glossaryItemCount: 0
         ),
         timing: RunTiming(

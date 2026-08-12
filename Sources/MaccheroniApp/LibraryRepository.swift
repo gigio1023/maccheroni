@@ -488,11 +488,18 @@ struct LibraryRepository: Sendable {
         let glossaryIsConsistent = manifest.operation.glossarySHA256 == nil
             ? manifest.operation.glossaryItemCount == 0
             : manifest.operation.glossaryItemCount > 0
+        // Switch rather than compare, so a new semantics case cannot be
+        // accepted here without a deliberate decision.
+        let glossarySemanticsIsLoadable: Bool
+        switch manifest.operation.glossarySemantics {
+        case .currentProfile, .sourceRun:
+            glossarySemanticsIsLoadable = true
+        }
         guard manifest.source == source.lineage,
               manifest.source.segmentsPath == "merged/segments.json",
               !manifest.operation.profileName
                 .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              manifest.operation.glossarySemantics == .currentProfile,
+              glossarySemanticsIsLoadable,
               glossaryIsConsistent,
               manifest.operation.glossarySHA256.map(isLowercaseSHA256) ?? true,
               let postprocess = manifest.postprocess,

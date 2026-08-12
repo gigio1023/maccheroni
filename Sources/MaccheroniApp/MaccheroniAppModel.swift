@@ -523,7 +523,8 @@ final class MaccheroniAppModel {
     func postprocessSelectedRun(
         operation: PostprocessMode,
         backend: PostprocessChoice,
-        targetLanguage: AppLanguage? = nil
+        targetLanguage: AppLanguage? = nil,
+        glossarySemantics: DerivedGlossarySemantics = .currentProfile
     ) {
         guard !isRecording, activeTask == nil, let record = selectedRecord,
               canPostprocess(record), let runURL = record.runURL,
@@ -573,9 +574,12 @@ final class MaccheroniAppModel {
                     translationTargetLanguage: operation == .translation
                         ? targetLanguage?.rawValue
                         : nil,
-                    glossaryURL: try activeGlossaryURL(
-                        at: glossaryURL(for: record.profileID)
-                    )
+                    glossarySemantics: glossarySemantics,
+                    glossaryURL: glossarySemantics == .currentProfile
+                        ? try activeGlossaryURL(
+                            at: glossaryURL(for: record.profileID)
+                        )
+                        : nil
                 )
                 _ = try await runner.postprocess(request) { [weak self] progress in
                     guard let self,
@@ -745,11 +749,13 @@ final class MaccheroniAppModel {
 
     func saveGlossary(_ text: String, for profileID: AppProfileID) throws {
         try repository.prepareDirectories()
+        let data = Data(text.utf8)
+        _ = try glossaryRevisionStore.createRevision(from: data)
         let target = glossaryURL(for: profileID)
         let temporary = repository.glossariesRoot.appendingPathComponent(
             ".\(UUID().uuidString)-\(profileID.rawValue).txt"
         )
-        try Data(text.utf8).write(to: temporary, options: .withoutOverwriting)
+        try data.write(to: temporary, options: .withoutOverwriting)
         defer { try? FileManager.default.removeItem(at: temporary) }
         if FileManager.default.fileExists(atPath: target.path) {
             _ = try FileManager.default.replaceItemAt(target, withItemAt: temporary)
@@ -854,7 +860,18 @@ final class MaccheroniAppModel {
 
     private func activeGlossaryURL(at url: URL) throws -> URL? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return try Glossary.parseOptional(data: Data(contentsOf: url)) == nil ? nil : url
+        return try glossaryRevisionStore.createRevision(
+            from: Data(contentsOf: url)
+        )?.url
+    }
+
+    private var glossaryRevisionStore: GlossaryRevisionStore {
+        GlossaryRevisionStore(
+            root: repository.glossariesRoot.appendingPathComponent(
+                "Revisions",
+                isDirectory: true
+            )
+        )
     }
 
     private func prepareRetrySource(recordID: UUID) throws {
