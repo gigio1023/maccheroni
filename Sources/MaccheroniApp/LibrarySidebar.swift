@@ -10,7 +10,10 @@ struct LibrarySidebar: View {
                     .tag(AppSelection.capture)
 
                 ForEach(model.records) { record in
-                    LibraryRecordRow(record: record)
+                    LibraryRecordRow(
+                        record: record,
+                        isPostprocessing: model.isPostprocessingExistingRun(recordID: record.id)
+                    )
                         .tag(AppSelection.record(record.id))
                         .contextMenu {
                             Button(appLocalized("Reveal Original in Finder")) {
@@ -33,11 +36,18 @@ struct LibrarySidebar: View {
 
 private struct LibraryRecordRow: View {
     let record: LibraryRecord
+    let isPostprocessing: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            StatusGlyph(state: record.state)
-                .padding(.top, 2)
+            Group {
+                if isPostprocessing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    StatusGlyph(state: record.state)
+                }
+            }
+            .padding(.top, 2)
             VStack(alignment: .leading, spacing: 3) {
                 Text(record.displayName)
                     .font(.body)

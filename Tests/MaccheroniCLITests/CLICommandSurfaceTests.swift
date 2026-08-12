@@ -74,6 +74,20 @@ struct CLICommandSurfaceTests {
         #expect(parsedRun.glossary == "terms.txt")
         #expect(!parsedRun.json)
 
+        let parsedPostprocess = try #require(
+            MaccheroniCommand.parseAsRoot([
+                "postprocess", "runs/source-run",
+                "--profile", "ko-meeting",
+                "--profiles", "profiles.json",
+                "--glossary", "current-terms.txt",
+            ]) as? PostprocessCommand
+        )
+        #expect(parsedPostprocess.runDirectory == "runs/source-run")
+        #expect(parsedPostprocess.profile == "ko-meeting")
+        #expect(parsedPostprocess.profiles == "profiles.json")
+        #expect(parsedPostprocess.glossary == "current-terms.txt")
+        #expect(!parsedPostprocess.json)
+
         let parsedDoctor = try #require(
             MaccheroniCommand.parseAsRoot([
                 "doctor", "--profile", "ko-meeting",
@@ -118,6 +132,14 @@ struct CLICommandSurfaceTests {
         #expect(run == Fixture.runJSON)
         #expect(try CLIOutput.runJSON(runPath: Fixture.runPath) == run)
 
+        let postprocess = try CLIOutput.postprocessJSON(
+            derivedPath: Fixture.derivedPath
+        )
+        #expect(postprocess == Fixture.postprocessJSON)
+        #expect(try CLIOutput.postprocessJSON(
+            derivedPath: Fixture.derivedPath
+        ) == postprocess)
+
         let doctor = try CLIOutput.doctorJSON(
             diagnostics: "zeta=last\nalpha=one=two"
         )
@@ -134,6 +156,13 @@ struct CLICommandSurfaceTests {
         #expect(Set(runObject.keys) == ["command", "run_path", "schema_version"])
         #expect(runObject["command"] as? String == "run")
         #expect(runObject["schema_version"] as? String == "1.0.0")
+
+        let postprocessObject = try jsonObject(postprocess)
+        #expect(Set(postprocessObject.keys) == [
+            "command", "derived_path", "schema_version",
+        ])
+        #expect(postprocessObject["command"] as? String == "postprocess")
+        #expect(postprocessObject["schema_version"] as? String == "1.0.0")
 
         let doctorObject = try jsonObject(doctor)
         #expect(Set(doctorObject.keys) == [
@@ -325,13 +354,16 @@ struct CLICommandSurfaceTests {
 }
 
 private enum Fixture {
-    static let commandNames = ["help", "run", "doctor", "capabilities"]
+    static let commandNames = [
+        "help", "run", "postprocess", "doctor", "capabilities",
+    ]
 
     static let rootHelpFragments = [
         "OVERVIEW: Transcribe mixed-language audio locally on Apple Silicon.",
         "Audio stays on this Mac.",
         "USAGE: maccheroni <subcommand>",
         "maccheroni help run",
+        "maccheroni postprocess",
         "maccheroni doctor --json",
         "maccheroni capabilities --json",
     ]
@@ -359,6 +391,15 @@ private enum Fixture {
             ]
         ),
         (
+            "postprocess",
+            [
+                "Create a derived result from a completed run.",
+                "Verifies the completed source run manifest",
+                "does not rerun audio",
+                "maccheroni postprocess",
+            ]
+        ),
+        (
             "doctor",
             [
                 "Inspect whether a local profile and its dependencies are ready.",
@@ -381,8 +422,13 @@ private enum Fixture {
     ]
 
     static let runPath = "/tmp/maccheroni-runs/fixture"
+    static let derivedPath = "/tmp/maccheroni-runs/fixture/derived/new-result"
     static let runJSON =
         "{\"command\":\"run\",\"run_path\":\"/tmp/maccheroni-runs/fixture\","
+        + "\"schema_version\":\"1.0.0\"}"
+    static let postprocessJSON =
+        "{\"command\":\"postprocess\",\"derived_path\":"
+        + "\"/tmp/maccheroni-runs/fixture/derived/new-result\","
         + "\"schema_version\":\"1.0.0\"}"
     static let doctorJSON =
         "{\"command\":\"doctor\",\"ready\":true,"
@@ -396,6 +442,9 @@ private enum Fixture {
         + "{\"name\":\"run\",\"output\":\"Run directory path or a JSON run_path envelope on stdout.\","
         + "\"side_effect\":\"Creates a new run directory and may download local model assets.\","
         + "\"summary\":\"Create a local transcription run from audio.\",\"supports_json\":true},"
+        + "{\"name\":\"postprocess\",\"output\":\"Derived directory path or a JSON derived_path envelope on stdout.\","
+        + "\"side_effect\":\"Creates a derived artifact directory under a verified completed run.\","
+        + "\"summary\":\"Correct or translate a completed run without ASR.\",\"supports_json\":true},"
         + "{\"name\":\"doctor\",\"output\":\"key=value diagnostics or a JSON readiness envelope on stdout.\","
         + "\"side_effect\":\"None; performs read-only local checks.\","
         + "\"summary\":\"Inspect local profile and dependency readiness.\",\"supports_json\":true},"

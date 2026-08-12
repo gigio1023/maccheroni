@@ -5,6 +5,25 @@ import MaccheroniCore
 @testable import MaccheroniPreprocess
 
 @Suite(.serialized) struct MaccheroniPreprocessTests {
+    @Test func supportedInputContractMatchesPreprocessorFormats() {
+        #expect(AudioPreprocessor.supportedInputExtensions == ["m4a", "mp3", "wav"])
+        for name in ["recording.m4a", "recording.MP3", "recording.Wav"] {
+            #expect(AudioPreprocessor.supportsInputFile(URL(fileURLWithPath: "/tmp/\(name)")))
+        }
+        for name in ["recording", "recording.aiff", "recording.CAF"] {
+            #expect(!AudioPreprocessor.supportsInputFile(URL(fileURLWithPath: "/tmp/\(name)")))
+        }
+        #expect(!AudioPreprocessor.supportsInputFile(
+            URL(string: "https://example.test/recording.wav")!
+        ))
+        #expect(throws: PreprocessError.unsupportedInputType("caf")) {
+            try AudioPreprocessor().preprocess(
+                inputURL: URL(fileURLWithPath: "/tmp/recording.caf"),
+                outputDirectory: URL(fileURLWithPath: "/tmp/unused")
+            )
+        }
+    }
+
     @Test func convertsAndNormalizesWAVWithoutChangingSourceBytes() throws {
         let directory = try freshTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

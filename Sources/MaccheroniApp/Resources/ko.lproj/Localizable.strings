@@ -540,5 +540,15 @@
 	<string>새로 설정하면 Codex CLI에 로그인한 경우에만 Codex를 선택합니다. 그렇지 않으면 Local을 선택합니다. Codex는 범위를 제한한 전사문 텍스트, 활성 프로필의 용어집 전체와 그 해시, 후처리 지침, 번역할 때는 대상 언어를 받습니다. 오디오는 이 Mac을 떠나지 않습니다.</string>
 	<key>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</key>
 	<string>오디오는 이 Mac에 남습니다. 전사는 로컬에서 실행되며 후처리할 때 Codex는 범위를 제한한 전사문 텍스트, 활성 프로필의 용어집 전체와 그 해시, 후처리 지침, 번역할 때는 대상 언어를 받습니다.</string>
+	<key>Choose an M4A, WAV, or MP3 audio file.</key>
+	<string>M4A, WAV 또는 MP3 오디오 파일을 선택하세요.</string>
+	<key>Post-processing could not start for this completed run.</key>
+	<string>이 완료된 실행의 후처리를 시작할 수 없습니다.</string>
+	<key>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</key>
+	<string>이 승인은 정확히 이 번역문에만 적용됩니다. 변경할 수 없는 원본 전사와 번역은 그대로 유지됩니다.</string>
+	<key>A derived result manifest is invalid: %@</key>
+	<string>파생 결과 매니페스트가 올바르지 않습니다: %@</string>
+	<key>A derived result does not match its source run: %@</key>
+	<string>파생 결과가 원본 실행과 일치하지 않습니다: %@</string>
 	</dict>
 </plist>

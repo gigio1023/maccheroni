@@ -37,6 +37,12 @@ There is no alias syntax. To recognize different forms of the same subject,
 write each form on a separate line. Category comments are for human readers
 and are not included in the backend payload.
 
+If parsing produces zero entries, treat the file as no glossary. Comments and
+blank lines may remain on disk so the editor can preserve its layout, but a run
+or derived operation must record `provided: false`, a null glossary hash, zero
+items, `injection_mode: none`, and `applied: false`. It must not claim that the
+comment-only file reached a decoder or text post-processing backend.
+
 ## Hash and Manifest
 
 Calculate `glossary.sha256` by applying SHA-256 to the input file's original

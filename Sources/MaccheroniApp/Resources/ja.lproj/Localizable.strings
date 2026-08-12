@@ -540,5 +540,15 @@
 	<string>新しい設定では、CLI にサインインしている場合にのみ Codex が選択されます。そうでない場合は Local が選択されます。Codex は、上限を設けたトランスクリプトのテキスト、アクティブなプロフィールの用語集全体とそのハッシュ、後処理の指示、翻訳時には翻訳先の言語を受け取ります。音声がこの Mac から出ることはありません。</string>
 	<key>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</key>
 	<string>音声はこの Mac にとどまります。文字起こしはローカルで実行され、後処理中に Codex は上限を設けたトランスクリプトのテキスト、アクティブなプロフィールの用語集全体とそのハッシュ、後処理の指示、翻訳時には翻訳先の言語を受け取ります。</string>
+	<key>Choose an M4A, WAV, or MP3 audio file.</key>
+	<string>M4A、WAV、または MP3 の音声ファイルを選択してください。</string>
+	<key>Post-processing could not start for this completed run.</key>
+	<string>この完了済み実行の後処理を開始できませんでした。</string>
+	<key>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</key>
+	<string>承認は、この翻訳テキストと完全に一致する場合にのみ適用されます。変更不能なソース文字起こしと翻訳は変更されません。</string>
+	<key>A derived result manifest is invalid: %@</key>
+	<string>派生結果のマニフェストが無効です: %@</string>
+	<key>A derived result does not match its source run: %@</key>
+	<string>派生結果がソース実行と一致しません: %@</string>
 	</dict>
 </plist>

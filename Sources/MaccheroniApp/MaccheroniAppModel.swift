@@ -3,7 +3,16 @@ import AppKit
 import Foundation
 import MaccheroniCore
 import MaccheroniPostprocess
+import MaccheroniPreprocess
 import Observation
+
+enum AppAudioImportError: Error, LocalizedError, Equatable {
+    case unsupportedFormat
+
+    var errorDescription: String? {
+        appString("Choose an M4A, WAV, or MP3 audio file.")
+    }
+}
 
 enum RunLoadIssue: Equatable {
     case missing
@@ -34,6 +43,8 @@ final class MaccheroniAppModel {
     private(set) var activeRecordID: UUID?
     private(set) var runFailures: [UUID: Failure]
     private(set) var codexAvailability: CodexAvailability
+    private(set) var activeExistingRunPostprocess: ActiveExistingRunPostprocess?
+    private(set) var existingRunPostprocessFailures: [UUID: String] = [:]
 
     var selection: AppSelection = .capture {
         didSet { refreshSelectedRun() }
@@ -184,9 +195,24 @@ final class MaccheroniAppModel {
     }
 
     var isTranscribing: Bool { activeRecordID != nil && activeTask != nil }
+    var canCancelActiveOperation: Bool { activeTask != nil }
     var canImportAudio: Bool { !isRecording && activeTask == nil }
     var canStartTranscription: Bool { !isRecording && activeTask == nil }
     var canStartRecording: Bool { !isRecording && activeTask == nil }
+
+    func canPostprocess(_ record: LibraryRecord) -> Bool {
+        canStartTranscription
+            && (record.state == .done || record.state == .hasConflicts)
+            && record.runURL != nil
+    }
+
+    func isPostprocessingExistingRun(recordID: UUID) -> Bool {
+        activeExistingRunPostprocess?.recordID == recordID && activeTask != nil
+    }
+
+    func existingRunPostprocessFailure(for recordID: UUID) -> String? {
+        existingRunPostprocessFailures[recordID]
+    }
 
     func canRetryTranscription(_ record: LibraryRecord) -> Bool {
         guard canStartTranscription,
@@ -196,8 +222,8 @@ final class MaccheroniAppModel {
             return true
         }
         return record.sourceKind == .appRecording
-            && record.microphoneURL.map(Self.isReadableAudio(at:)) == true
-            && record.systemAudioURL.map(Self.isReadableAudio(at:)) == true
+            && record.microphoneURL.map(Self.isDecodableInternalAudio(at:)) == true
+            && record.systemAudioURL.map(Self.isDecodableInternalAudio(at:)) == true
     }
 
     func isTranscribing(recordID: UUID) -> Bool {
@@ -451,7 +477,7 @@ final class MaccheroniAppModel {
     }
 
     func cancelTranscription() {
-        guard activeRecordID != nil else { return }
+        guard activeRecordID != nil || activeExistingRunPostprocess != nil else { return }
         runner.cancel()
     }
 
@@ -494,6 +520,89 @@ final class MaccheroniAppModel {
         }
     }
 
+    func postprocessSelectedRun(
+        operation: PostprocessMode,
+        backend: PostprocessChoice,
+        targetLanguage: AppLanguage? = nil
+    ) {
+        guard !isRecording, activeTask == nil, let record = selectedRecord,
+              canPostprocess(record), let runURL = record.runURL,
+              let profile = profiles.first(where: { $0.id == record.profileID }),
+              backend != .none
+        else { return }
+        if operation == .translation, targetLanguage == nil || targetLanguage == .system {
+            return
+        }
+
+        existingRunPostprocessFailures.removeValue(forKey: record.id)
+        activeExistingRunPostprocess = ActiveExistingRunPostprocess(
+            recordID: record.id,
+            operation: operation,
+            progress: ExistingRunPostprocessProgress(
+                operation: operation,
+                elapsedS: 0,
+                modelID: backend.requestedModelID,
+                message: nil
+            )
+        )
+        activeTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                activeExistingRunPostprocess = nil
+                activeTask = nil
+            }
+            do {
+                if backend == .codex {
+                    if !codexAvailability.isAuthenticated {
+                        await refreshCodexAvailability()
+                    }
+                    guard codexAvailability.isAuthenticated else {
+                        throw TranscriptionRunnerError.pipelineFailed(
+                            appString(
+                                "Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local."
+                            )
+                        )
+                    }
+                }
+                _ = try RunIntegrityVerifier.verifyCompletedRun(at: runURL)
+                let request = ExistingRunPostprocessRequest(
+                    sourceRunURL: runURL,
+                    profile: profile,
+                    postprocess: backend,
+                    operation: operation,
+                    translationTargetLanguage: operation == .translation
+                        ? targetLanguage?.rawValue
+                        : nil,
+                    glossaryURL: try activeGlossaryURL(
+                        at: glossaryURL(for: record.profileID)
+                    )
+                )
+                _ = try await runner.postprocess(request) { [weak self] progress in
+                    guard let self,
+                          activeExistingRunPostprocess?.recordID == record.id
+                    else { return }
+                    activeExistingRunPostprocess?.progress = progress
+                }
+                let loaded = try repository.loadRun(at: runURL)
+                guard let index = records.firstIndex(where: { $0.id == record.id }) else {
+                    return
+                }
+                records[index].state = loaded.requiresReview(for: records[index])
+                    ? .hasConflicts
+                    : .done
+                try recordSaver(records)
+                if selection == .record(record.id) {
+                    selectedRun = loaded
+                    selectedRunIssue = nil
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                existingRunPostprocessFailures[record.id] = error.localizedDescription
+            }
+        }
+    }
+
     func showCapture() {
         stopPlayback()
         selection = .capture
@@ -518,9 +627,53 @@ final class MaccheroniAppModel {
 
     func resolveConflict(at segmentIndex: Int, with text: String) {
         guard case let .record(id) = selection,
-              let index = records.firstIndex(where: { $0.id == id })
+              let index = records.firstIndex(where: { $0.id == id }),
+              let selectedRun,
+              !selectedRun.isTranslation
         else { return }
-        records[index].conflictResolutions[segmentIndex] = text
+        if selectedRun.resultID == nil {
+            records[index].conflictResolutions[segmentIndex] = text
+        } else {
+            var resolutions = records[index].derivedCorrectionResolutions ?? []
+            resolutions.removeAll {
+                $0.resultID == selectedRun.effectiveResultID
+                    && $0.segmentIndex == segmentIndex
+            }
+            resolutions.append(DerivedCorrectionResolution(
+                resultID: selectedRun.effectiveResultID,
+                segmentIndex: segmentIndex,
+                resolvedText: text
+            ))
+            records[index].derivedCorrectionResolutions = resolutions
+        }
+        records[index].state = selectedRun.requiresReview(for: records[index])
+            ? .hasConflicts
+            : .done
+        saveRecordsReportingErrors()
+    }
+
+    func acknowledgeTranslation(at segmentIndex: Int, text: String) {
+        guard case let .record(id) = selection,
+              let index = records.firstIndex(where: { $0.id == id }),
+              let selectedRun,
+              selectedRun.isTranslation,
+              selectedRun.transcript.segments.indices.contains(segmentIndex),
+              selectedRun.transcript.segments[segmentIndex].text == text
+        else { return }
+        var acknowledgements = records[index].translationReviewAcknowledgements ?? []
+        acknowledgements.removeAll {
+            $0.resultID == selectedRun.effectiveResultID
+                && $0.segmentIndex == segmentIndex
+        }
+        acknowledgements.append(TranslationReviewAcknowledgement(
+            resultID: selectedRun.effectiveResultID,
+            segmentIndex: segmentIndex,
+            translatedText: text
+        ))
+        records[index].translationReviewAcknowledgements = acknowledgements
+        records[index].state = selectedRun.requiresReview(for: records[index])
+            ? .hasConflicts
+            : .done
         saveRecordsReportingErrors()
     }
 
@@ -606,6 +759,9 @@ final class MaccheroniAppModel {
     }
 
     private func makeImportedRecord(url: URL) async throws -> LibraryRecord {
+        guard AudioPreprocessor.supportsInputFile(url) else {
+            throw AppAudioImportError.unsupportedFormat
+        }
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         let seconds = try Self.readableAudioDuration(at: url)
@@ -655,12 +811,7 @@ final class MaccheroniAppModel {
         runFailures.removeValue(forKey: recordID)
         activeRecordID = recordID
         try recordSaver(records)
-        let glossary = glossaryURL(for: record.profileID)
-        let glossaryURL = try loadGlossary(for: record.profileID)
-            .split(whereSeparator: \.isNewline)
-            .contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) == true
-            ? glossary
-            : nil
+        let glossaryURL = try activeGlossaryURL(at: glossaryURL(for: record.profileID))
         let source = try resolveOriginalRefreshingRecord(record)
         let accessing = source.startAccessingSecurityScopedResource()
         defer { if accessing { source.stopAccessingSecurityScopedResource() } }
@@ -699,6 +850,11 @@ final class MaccheroniAppModel {
         if selection == .record(recordID) {
             selectedRun = loaded
         }
+    }
+
+    private func activeGlossaryURL(at url: URL) throws -> URL? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try Glossary.parseOptional(data: Data(contentsOf: url)) == nil ? nil : url
     }
 
     private func prepareRetrySource(recordID: UUID) throws {
@@ -775,13 +931,16 @@ final class MaccheroniAppModel {
             selectedRun = try repository.loadRun(at: runURL)
         } catch let error as LibraryRepositoryError {
             switch error {
-            case .artifactHashMismatch, .unsafeArtifactPath:
+            case .artifactHashMismatch, .unsafeArtifactPath,
+                 .derivedManifestInvalid, .derivedLineageMismatch:
                 selectedRunIssue = .integrity(error.localizedDescription)
             case .artifactMissing:
                 selectedRunIssue = .missingArtifact(error.localizedDescription)
             case .originalUnavailable:
                 selectedRunIssue = .missing
             }
+        } catch let error as RunIntegrityError {
+            selectedRunIssue = .integrity(error.localizedDescription)
         } catch let error as DecodingError {
             selectedRunIssue = .decoding(error.localizedDescription)
         } catch {
@@ -871,7 +1030,18 @@ final class MaccheroniAppModel {
         (try? readableAudioDuration(at: url)) != nil
     }
 
+    private static func isDecodableInternalAudio(at url: URL) -> Bool {
+        guard let file = try? AVAudioFile(forReading: url) else { return false }
+        let sampleRate = file.processingFormat.sampleRate
+        guard sampleRate > 0 else { return false }
+        let duration = Double(file.length) / sampleRate
+        return duration.isFinite && duration > 0
+    }
+
     private static func readableAudioDuration(at url: URL) throws -> Double {
+        guard AudioPreprocessor.supportsInputFile(url) else {
+            throw AppAudioImportError.unsupportedFormat
+        }
         do {
             let file = try AVAudioFile(forReading: url)
             let sampleRate = file.processingFormat.sampleRate

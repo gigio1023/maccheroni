@@ -540,5 +540,15 @@
 	<string>Bei einer neuen Einrichtung wird Codex nur ausgewählt, wenn die CLI angemeldet ist; andernfalls wird Local ausgewählt. Codex erhält begrenzten Transkripttext, das vollständige Glossar des aktiven Profils samt Hash, Nachbearbeitungsanweisungen und beim Übersetzen die Zielsprache. Audio verlässt diesen Mac nie.</string>
 	<key>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</key>
 	<string>Audio bleibt auf diesem Mac. Die Transkription läuft lokal; während der Nachbearbeitung erhält Codex begrenzten Transkripttext, das vollständige Glossar des aktiven Profils samt Hash, Nachbearbeitungsanweisungen und beim Übersetzen die Zielsprache.</string>
+	<key>Choose an M4A, WAV, or MP3 audio file.</key>
+	<string>Wählen Sie eine M4A-, WAV- oder MP3-Audiodatei.</string>
+	<key>Post-processing could not start for this completed run.</key>
+	<string>Die Nachbearbeitung für diesen abgeschlossenen Lauf konnte nicht gestartet werden.</string>
+	<key>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</key>
+	<string>Ihre Bestätigung gilt nur für genau diesen übersetzten Text. Das unveränderliche Quelltranskript und die Übersetzung bleiben unverändert.</string>
+	<key>A derived result manifest is invalid: %@</key>
+	<string>Das Manifest eines abgeleiteten Ergebnisses ist ungültig: %@</string>
+	<key>A derived result does not match its source run: %@</key>
+	<string>Ein abgeleitetes Ergebnis stimmt nicht mit seinem Quelllauf überein: %@</string>
 	</dict>
 </plist>

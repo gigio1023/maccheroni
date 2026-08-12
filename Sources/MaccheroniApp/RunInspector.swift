@@ -25,8 +25,16 @@ struct RunInspector: View {
                 }
             }
 
-            if let postprocess = run.manifest.postprocess {
+            if let postprocess = run.effectivePostprocess {
                 PostprocessInspectorSection(postprocess: postprocess)
+            }
+
+            if !run.derivedResults.isEmpty {
+                Section(appLocalized("Run Output")) {
+                    ForEach(run.derivedResults) { result in
+                        DerivedResultInspectorRow(result: result)
+                    }
+                }
             }
 
             Section(appLocalized("Models")) {
@@ -95,6 +103,46 @@ struct RunInspector: View {
         }
         .formStyle(.grouped)
         .inspectorColumnWidth(min: 280, ideal: 330, max: 430)
+    }
+}
+
+private struct DerivedResultInspectorRow: View {
+    let result: DerivedResultSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Label {
+                    Text(PostprocessOperationChoice(result.operation).title)
+                } icon: {
+                    Image(systemName: result.isCurrent ? "checkmark.circle.fill" : "circle")
+                }
+                Spacer()
+                Text(result.createdAt, format: .dateTime.year().month().day().hour().minute().second())
+                    .foregroundStyle(.secondary)
+            }
+            Text(verbatim: result.id)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+            if let targetLanguage = result.targetLanguage {
+                if let language = AppLanguage(rawValue: targetLanguage) {
+                    Text(language.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(verbatim: targetLanguage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let hash = result.glossarySHA256 {
+                Text(hash)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(.vertical, 3)
     }
 }
 

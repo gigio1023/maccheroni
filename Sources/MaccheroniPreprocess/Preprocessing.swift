@@ -104,11 +104,16 @@ public struct PreprocessedAudio: Equatable, Sendable {
 
 /// Converts a supported source into a new PCM WAV artifact. The source URL is only opened for reading.
 public struct AudioPreprocessor: Sendable {
-    public static let supportedExtensions: Set<String> = ["m4a", "wav", "mp3"]
+    public static let supportedInputExtensions: Set<String> = ["m4a", "wav", "mp3"]
+    public static let supportedExtensions = supportedInputExtensions
     public static let targetSampleRate: Double = 16_000
     public static let targetChannels: AVAudioChannelCount = 1
 
     public init() {}
+
+    public static func supportsInputFile(_ url: URL) -> Bool {
+        url.isFileURL && supportedInputExtensions.contains(url.pathExtension.lowercased())
+    }
 
     public func preprocess(
         inputURL: URL,
@@ -116,7 +121,7 @@ public struct AudioPreprocessor: Sendable {
         settings: PreprocessingSettings = .default
     ) throws -> PreprocessedAudio {
         let sourceExtension = inputURL.pathExtension.lowercased()
-        guard Self.supportedExtensions.contains(sourceExtension) else {
+        guard Self.supportsInputFile(inputURL) else {
             throw PreprocessError.unsupportedInputType(sourceExtension)
         }
         guard settings.targetPeak > 0, settings.targetPeak <= 1 else {

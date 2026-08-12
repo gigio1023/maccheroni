@@ -20,6 +20,7 @@ public enum CLIError: Error, LocalizedError, Sendable {
     case glossary(String)
     case mossLimitExhausted(String)
     case run(String)
+    case sourceIntegrity(RunIntegrityError)
 
     public var code: String {
         switch self {
@@ -29,6 +30,7 @@ public enum CLIError: Error, LocalizedError, Sendable {
         case .glossary: "GLOSSARY_ERROR"
         case .mossLimitExhausted: "MOSS_LIMIT_EXHAUSTED"
         case .run: "RUN_ERROR"
+        case .sourceIntegrity: "SOURCE_INTEGRITY_ERROR"
         }
     }
 
@@ -37,6 +39,7 @@ public enum CLIError: Error, LocalizedError, Sendable {
         case let .usage(message), let .profile(message), let .postprocess(message),
              let .glossary(message), let .mossLimitExhausted(message),
              let .run(message): message
+        case let .sourceIntegrity(error): error.localizedDescription
         }
     }
 }
@@ -601,9 +604,30 @@ public struct CLIApplication: Sendable {
         switch command {
         case let .run(audio, profile, profiles, outputRoot, glossary):
             return try await run(audio: audio, profileName: profile, profilesURL: profiles, outputRoot: outputRoot, glossaryURL: glossary)
+        case let .postprocess(run, profile, profiles, glossary):
+            return try await postprocessExistingRun(
+                runURL: run,
+                profileName: profile,
+                profilesURL: profiles,
+                glossaryURL: glossary
+            )
         case let .doctor(profile, profiles):
             return try await doctor(profileName: profile, profilesURL: profiles)
         }
+    }
+
+    func executePostprocess(
+        runPath: String,
+        profileName: String,
+        profilesPath: String?,
+        glossaryPath: String?
+    ) async throws -> String {
+        try await postprocessExistingRun(
+            runURL: URL(fileURLWithPath: runPath, isDirectory: true),
+            profileName: profileName,
+            profilesURL: profilesPath.map(URL.init(fileURLWithPath:)),
+            glossaryURL: glossaryPath.map(URL.init(fileURLWithPath:))
+        )
     }
 
     func executeRun(
@@ -630,6 +654,218 @@ public struct CLIApplication: Sendable {
             profileName: profileName,
             profilesURL: profilesPath.map(URL.init(fileURLWithPath:))
         )
+    }
+
+    private func postprocessExistingRun(
+        runURL: URL,
+        profileName: String,
+        profilesURL: URL?,
+        glossaryURL: URL?
+    ) async throws -> String {
+        let resolution = try resolveProfile(
+            name: profileName,
+            profilesURL: profilesURL
+        )
+        let profile = resolution.profile
+        guard let backend = PostprocessBackendID(rawValue: profile.postprocess) else {
+            throw CLIError.profile(
+                "existing-run postprocess requires a codex or local backend"
+            )
+        }
+        let mode = profile.postprocessMode ?? .correction
+        let glossary = try resolvedGlossary(
+            cliURL: glossaryURL,
+            profile: profile,
+            profileDirectory: resolution.directory
+        )
+        let source: VerifiedRunSource
+        do {
+            source = try RunIntegrityVerifier.verifyCompletedRun(at: runURL)
+        } catch let error as RunIntegrityError {
+            throw CLIError.sourceIntegrity(error)
+        }
+
+        let started = now()
+        let writer = try RunWriter(
+            root: source.runURL.appendingPathComponent(
+                "derived",
+                isDirectory: true
+            ),
+            id: runID(started)
+        )
+        var artifacts: [Artifact] = []
+        var provenance: ManifestPostprocess?
+        let operation = DerivedOperation(
+            profileName: profile.name,
+            mode: mode,
+            targetLanguage: mode == .translation ? profile.targetLanguage : nil,
+            glossarySemantics: .currentProfile,
+            glossarySHA256: glossary?.sha256,
+            glossaryItemCount: glossary?.entries.count ?? 0
+        )
+
+        func manifest(
+            status: RunStatus,
+            failure: Failure?
+        ) -> DerivedManifest {
+            let finished = now()
+            return DerivedManifest(
+                derivedID: writer.id,
+                status: status,
+                source: source.lineage,
+                operation: operation,
+                timing: RunTiming(
+                    startedAt: ISO8601DateFormatter().string(from: started),
+                    finishedAt: ISO8601DateFormatter().string(from: finished),
+                    wallTimeS: max(0, finished.timeIntervalSince(started))
+                ),
+                artifacts: artifacts,
+                failure: failure,
+                postprocess: provenance
+            )
+        }
+
+        try writer.write(
+            manifest(
+                status: .failed,
+                failure: Failure(
+                    code: "RUN_INCOMPLETE",
+                    message: "derived postprocess initialized"
+                )
+            ),
+            at: "manifest.json",
+            replace: true
+        )
+
+        do {
+            switch mode {
+            case .correction:
+                let result: PostprocessResult
+                do {
+                    result = try await dependencies.postprocess(
+                        backend,
+                        PostprocessRequest(
+                            document: source.document,
+                            glossary: glossary
+                        )
+                    )
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    throw CLIError.postprocess(failureMessage(for: error))
+                }
+                try validate(
+                    postprocess: result,
+                    against: source.document,
+                    glossary: glossary,
+                    backend: backend
+                )
+                try writer.write(
+                    result.document,
+                    at: "postprocess/segments.json"
+                )
+                try writer.write(
+                    result.conflicts,
+                    at: "postprocess/conflicts.json"
+                )
+                try writer.addArtifact(
+                    &artifacts,
+                    kind: "postprocess_segments",
+                    relative: "postprocess/segments.json"
+                )
+                try writer.addArtifact(
+                    &artifacts,
+                    kind: "postprocess_conflicts",
+                    relative: "postprocess/conflicts.json"
+                )
+                provenance = result.manifestPostprocess
+            case .translation:
+                guard let targetLanguage = profile.targetLanguage else {
+                    throw CLIError.profile(
+                        "translation mode requires a valid target_language"
+                    )
+                }
+                let result: TranslationResult
+                do {
+                    result = try await dependencies.translate(
+                        backend,
+                        TranslationRequest(
+                            document: source.document,
+                            targetLanguage: targetLanguage,
+                            sourceSegmentsSHA256: source.lineage.segmentsSHA256,
+                            glossary: glossary
+                        )
+                    )
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    throw CLIError.postprocess(failureMessage(for: error))
+                }
+                try validate(
+                    translation: result,
+                    against: source.document,
+                    sourceSegmentsSHA256: source.lineage.segmentsSHA256,
+                    glossary: glossary,
+                    backend: backend,
+                    targetLanguage: targetLanguage
+                )
+                try writer.write(
+                    result.document,
+                    at: "postprocess/translation.json"
+                )
+                try writer.addArtifact(
+                    &artifacts,
+                    kind: "postprocess_translation",
+                    relative: "postprocess/translation.json"
+                )
+                provenance = result.manifestPostprocess
+            }
+
+            try writer.verify(artifacts: artifacts)
+            let sourceAfter: VerifiedRunSource
+            do {
+                sourceAfter = try RunIntegrityVerifier.verifyCompletedRun(
+                    at: source.runURL
+                )
+            } catch let error as RunIntegrityError {
+                throw CLIError.sourceIntegrity(error)
+            }
+            guard sourceAfter.lineage == source.lineage else {
+                throw CLIError.sourceIntegrity(.sourceChangedDuringOperation)
+            }
+            try writer.write(
+                manifest(status: .succeeded, failure: nil),
+                at: "manifest.json",
+                replace: true
+            )
+            return writer.directory.path
+        } catch {
+            try? writer.addAllUntrackedArtifacts(
+                &artifacts,
+                kind: "preserved_partial_artifact"
+            )
+            artifacts = writer.rebuiltArtifacts(preservingKindsFrom: artifacts)
+            let code: String
+            if error is CancellationError {
+                code = "CANCELED"
+            } else if let cliError = error as? CLIError {
+                code = cliError.code
+            } else {
+                code = "RUN_ERROR"
+            }
+            let message = error is CancellationError
+                ? "derived postprocess was canceled"
+                : failureMessage(for: error)
+            try? writer.write(
+                manifest(
+                    status: error is CancellationError ? .canceled : .failed,
+                    failure: Failure(code: code, message: message)
+                ),
+                at: "manifest.json",
+                replace: true
+            )
+            throw error
+        }
     }
 
     private func run(
@@ -1997,11 +2233,7 @@ public struct CLIApplication: Sendable {
         }
         guard let url = cliURL ?? profileURL else { return nil }
         do {
-            let glossary = try Glossary.parse(data: Data(contentsOf: url))
-            guard !glossary.entries.isEmpty else {
-                throw CLIError.glossary("glossary has no entries: \(url.path)")
-            }
-            return glossary
+            return try Glossary.parseOptional(data: Data(contentsOf: url))
         } catch let error as CLIError {
             throw error
         } catch {
@@ -2688,12 +2920,13 @@ private struct DiarizationWarningRecord: Codable {
 
 private enum CLICommand {
     case run(URL, String, URL?, URL?, URL?)
+    case postprocess(URL, String, URL?, URL?)
     case doctor(String?, URL?)
 
     static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let command = arguments.first else {
             throw CLIError.usage(
-                "usage: maccheroni run <audio> --profile <name> | doctor [--profile <name>]"
+                "usage: maccheroni run <audio> --profile <name> | postprocess <run> --profile <name> | doctor [--profile <name>]"
             )
         }
         var values: [String: String] = [:]
@@ -2720,6 +2953,8 @@ private enum CLICommand {
         switch command {
         case "run":
             allowed = ["--profile", "--profiles", "--output-root", "--glossary"]
+        case "postprocess":
+            allowed = ["--profile", "--profiles", "--glossary"]
         case "doctor":
             allowed = ["--profile", "--profiles"]
         default:
@@ -2740,6 +2975,19 @@ private enum CLICommand {
                 profile,
                 values["--profiles"].map(URL.init(fileURLWithPath:)),
                 values["--output-root"].map(URL.init(fileURLWithPath:)),
+                values["--glossary"].map(URL.init(fileURLWithPath:))
+            )
+        }
+        if command == "postprocess" {
+            guard positional.count == 1, let profile = values["--profile"] else {
+                throw CLIError.usage(
+                    "usage: maccheroni postprocess <run> --profile <name>"
+                )
+            }
+            return .postprocess(
+                URL(fileURLWithPath: positional[0], isDirectory: true),
+                profile,
+                values["--profiles"].map(URL.init(fileURLWithPath:)),
                 values["--glossary"].map(URL.init(fileURLWithPath:))
             )
         }

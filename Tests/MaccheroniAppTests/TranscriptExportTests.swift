@@ -112,6 +112,85 @@ struct TranscriptExportTests {
     }
 
     @Test
+    func translationAcknowledgementClearsOnlyTheExactCurrentResultAndText() throws {
+        var fixture = exportFixture()
+        fixture.run.manifest.postprocess = ManifestPostprocess(
+            backend: BackendDescriptor(name: "codex-app-server", version: "fixture"),
+            modelID: "gpt-5.6-sol",
+            mode: .translation,
+            targetLanguage: "en"
+        )
+        fixture.run.resultID = "derived-current"
+        fixture.record.translationReviewAcknowledgements = [
+            TranslationReviewAcknowledgement(
+                resultID: "derived-earlier",
+                segmentIndex: 0,
+                translatedText: "Original text"
+            ),
+            TranslationReviewAcknowledgement(
+                resultID: "derived-current",
+                segmentIndex: 0,
+                translatedText: "Earlier translated text"
+            ),
+        ]
+
+        #expect(fixture.run.requiresReview(for: fixture.record))
+        #expect(try TranscriptExporter.markdown(
+            run: fixture.run,
+            record: fixture.record
+        ).contains("Original text [UNCERTAIN]"))
+
+        fixture.record.translationReviewAcknowledgements?.append(
+            TranslationReviewAcknowledgement(
+                resultID: "derived-current",
+                segmentIndex: 0,
+                translatedText: "Original text"
+            )
+        )
+
+        #expect(!fixture.run.requiresReview(for: fixture.record))
+        let acceptedMarkdown = try TranscriptExporter.markdown(
+            run: fixture.run,
+            record: fixture.record
+        )
+        #expect(!acceptedMarkdown.contains("[UNCERTAIN]"))
+    }
+
+    @Test
+    func derivedCorrectionDoesNotReuseAResolutionFromAnotherResult() throws {
+        var fixture = exportFixture()
+        fixture.run.resultID = "derived-current"
+        fixture.record.conflictResolutions[1] = "Legacy source resolution"
+        fixture.record.derivedCorrectionResolutions = [
+            DerivedCorrectionResolution(
+                resultID: "derived-earlier",
+                segmentIndex: 1,
+                resolvedText: "Earlier derived resolution"
+            ),
+        ]
+
+        let unresolved = try TranscriptExporter.correctedSegmentsDocument(
+            run: fixture.run,
+            record: fixture.record
+        )
+        #expect(unresolved.segments[1].text == "Unresolved wording")
+        #expect(fixture.run.requiresReview(for: fixture.record))
+
+        fixture.record.derivedCorrectionResolutions?.append(
+            DerivedCorrectionResolution(
+                resultID: "derived-current",
+                segmentIndex: 1,
+                resolvedText: "Current derived resolution"
+            )
+        )
+        let resolved = try TranscriptExporter.correctedSegmentsDocument(
+            run: fixture.run,
+            record: fixture.record
+        )
+        #expect(resolved.segments[1].text == "Current derived resolution")
+    }
+
+    @Test
     func srtRejectsInvalidIntervalsInsteadOfAlteringTimestamps() throws {
         var fixture = exportFixture()
         fixture.run.transcript.segments[0].endS = 0.0004

@@ -540,5 +540,15 @@
 	<string>Uma nova configuração seleciona Codex somente quando a CLI está autenticada; caso contrário, seleciona Local. O Codex recebe texto de transcrição limitado, o glossário completo do perfil ativo e seu hash, instruções de pós-processamento e, ao traduzir, o idioma de destino. O áudio nunca sai deste Mac.</string>
 	<key>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</key>
 	<string>O áudio permanece neste Mac. A transcrição é executada localmente; durante o pós-processamento, o Codex recebe texto de transcrição limitado, o glossário completo do perfil ativo e seu hash, instruções de pós-processamento e, ao traduzir, o idioma de destino.</string>
+	<key>Choose an M4A, WAV, or MP3 audio file.</key>
+	<string>Escolha um arquivo de áudio M4A, WAV ou MP3.</string>
+	<key>Post-processing could not start for this completed run.</key>
+	<string>Não foi possível iniciar o pós-processamento desta execução concluída.</string>
+	<key>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</key>
+	<string>Sua aceitação se aplica somente a este texto traduzido exato. A transcrição de origem imutável e a tradução permanecem inalteradas.</string>
+	<key>A derived result manifest is invalid: %@</key>
+	<string>O manifesto de um resultado derivado é inválido: %@</string>
+	<key>A derived result does not match its source run: %@</key>
+	<string>Um resultado derivado não corresponde à sua execução de origem: %@</string>
 	</dict>
 </plist>

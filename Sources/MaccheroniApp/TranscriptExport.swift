@@ -23,11 +23,11 @@ enum TranscriptExporter {
         run: LoadedRun,
         record: LibraryRecord
     ) throws -> SegmentsDocument {
-        let allowsConflictResolution = run.manifest.postprocess?.mode != .translation
+        let allowsConflictResolution = !run.isTranslation
         let correctedSegments = try run.transcript.segments.enumerated().map { index, segment in
             let speaker = record.speakerNames[segment.speaker] ?? segment.speaker
             let text = allowsConflictResolution
-                ? record.conflictResolutions[index] ?? segment.text
+                ? run.correctionResolution(at: index, record: record) ?? segment.text
                 : segment.text
             guard !speaker.isEmpty else {
                 throw TranscriptExportError.emptySpeakerName(segmentIndex: index)
@@ -107,9 +107,21 @@ enum TranscriptExporter {
 
 private extension TranscriptExporter {
     static func unresolvedMarkers(for segmentIndex: Int, run: LoadedRun, record: LibraryRecord) -> String {
-        let allowsConflictResolution = run.manifest.postprocess?.mode != .translation
-        let hasResolution = allowsConflictResolution
-            && record.conflictResolutions[segmentIndex] != nil
+        let allowsConflictResolution = !run.isTranslation
+        let hasResolution: Bool
+        if allowsConflictResolution {
+            hasResolution = run.correctionResolution(
+                at: segmentIndex,
+                record: record
+            ) != nil
+        } else {
+            hasResolution = run.transcript.segments.indices.contains(segmentIndex)
+                && run.isTranslationAcknowledged(
+                    at: segmentIndex,
+                    text: run.transcript.segments[segmentIndex].text,
+                    record: record
+                )
+        }
         let hasUnresolvedConflict = run.conflicts.contains { conflict in
             conflict.segmentIndex == segmentIndex
         } && !hasResolution
