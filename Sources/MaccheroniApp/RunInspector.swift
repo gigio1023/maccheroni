@@ -7,7 +7,10 @@ struct RunInspector: View {
 
     var body: some View {
         Form {
-            Section(appLocalized("Run")) {
+            Section(run.resultOperation == nil
+                ? appLocalized("Run")
+                : appLocalized("Source Run"))
+            {
                 LabeledContent(appLocalized("Run ID"), value: run.manifest.runID)
                 LabeledContent(appLocalized("Status"), value: run.manifest.status.rawValue)
                 LabeledContent(appLocalized("Wall Time")) {
@@ -25,8 +28,59 @@ struct RunInspector: View {
                 }
             }
 
-            if let postprocess = run.manifest.postprocess {
-                PostprocessInspectorSection(postprocess: postprocess)
+            if let operation = run.resultOperation {
+                Section(appLocalized("Current Derived Result")) {
+                    LabeledContent(appLocalized("Run ID"), value: run.effectiveResultID)
+                    LabeledContent(appLocalized("Profile"), value: operation.profileName)
+                    LabeledContent(appLocalized("Operation")) {
+                        Text(PostprocessOperationChoice(operation.mode).title)
+                    }
+                    if let target = operation.targetLanguage {
+                        LabeledContent(appLocalized("Target Language")) {
+                            if let language = AppLanguage(rawValue: target) {
+                                Text(language.title)
+                            } else {
+                                Text(verbatim: target)
+                            }
+                        }
+                    }
+                    LabeledContent(appLocalized("Glossary Semantics")) {
+                        Text(verbatim: operation.glossarySemantics.rawValue)
+                    }
+                    LabeledContent(appLocalized("Provided")) {
+                        Text(operation.glossarySHA256 == nil
+                            ? appLocalized("No")
+                            : appLocalized("Yes"))
+                    }
+                    LabeledContent(
+                        appLocalized("Items"),
+                        value: operation.glossaryItemCount.formatted()
+                    )
+                    if let hash = operation.glossarySHA256 {
+                        LabeledContent(appLocalized("SHA-256")) {
+                            Text(hash)
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+
+            if let postprocess = run.effectivePostprocess {
+                PostprocessInspectorSection(
+                    title: run.resultOperation == nil
+                        ? appLocalized("Post-processing")
+                        : appLocalized("Current Derived Post-processing"),
+                    postprocess: postprocess
+                )
+            }
+
+            if !run.derivedResults.isEmpty {
+                Section(appLocalized("Run Output")) {
+                    ForEach(run.derivedResults) { result in
+                        DerivedResultInspectorRow(result: result)
+                    }
+                }
             }
 
             Section(appLocalized("Models")) {
@@ -35,7 +89,10 @@ struct RunInspector: View {
                 }
             }
 
-            Section(appLocalized("Glossary")) {
+            Section(run.resultOperation == nil
+                ? appLocalized("Glossary")
+                : appLocalized("Source Run Glossary"))
+            {
                 LabeledContent(appLocalized("Provided")) {
                     Text(run.manifest.glossary.provided ? appLocalized("Yes") : appLocalized("No"))
                 }
@@ -98,11 +155,52 @@ struct RunInspector: View {
     }
 }
 
+private struct DerivedResultInspectorRow: View {
+    let result: DerivedResultSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Label {
+                    Text(PostprocessOperationChoice(result.operation).title)
+                } icon: {
+                    Image(systemName: result.isCurrent ? "checkmark.circle.fill" : "circle")
+                }
+                Spacer()
+                Text(result.createdAt, format: .dateTime.year().month().day().hour().minute().second())
+                    .foregroundStyle(.secondary)
+            }
+            Text(verbatim: result.id)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+            if let targetLanguage = result.targetLanguage {
+                if let language = AppLanguage(rawValue: targetLanguage) {
+                    Text(language.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(verbatim: targetLanguage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let hash = result.glossarySHA256 {
+                Text(hash)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(.vertical, 3)
+    }
+}
+
 private struct PostprocessInspectorSection: View {
+    let title: LocalizedStringResource
     let postprocess: ManifestPostprocess
 
     var body: some View {
-        Section(appLocalized("Post-processing")) {
+        Section(title) {
             LabeledContent(appLocalized("Operation")) {
                 Text(PostprocessOperationChoice(postprocess.mode).title)
             }

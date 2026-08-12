@@ -540,5 +540,25 @@
 	<string>新设置仅在 Codex CLI 已登录时选择 Codex；否则选择 Local。Codex 接收受限的转录文本、当前配置文件的完整术语表及其哈希、后处理说明，以及翻译时的目标语言。音频绝不会离开这台 Mac。</string>
 	<key>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</key>
 	<string>音频保留在这台 Mac 上。转录在本地运行；后处理期间 Codex 接收受限的转录文本、当前配置文件的完整术语表及其哈希、后处理说明，以及翻译时的目标语言。</string>
+	<key>Choose an M4A, WAV, or MP3 audio file.</key>
+	<string>请选择 M4A、WAV 或 MP3 音频文件。</string>
+	<key>Post-processing could not start for this completed run.</key>
+	<string>无法为这个已完成的运行启动后处理。</string>
+	<key>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</key>
+	<string>您的确认仅适用于这段完全相同的译文。不可变的源转录和译文保持不变。</string>
+	<key>A derived result manifest is invalid: %@</key>
+	<string>派生结果清单无效：%@</string>
+	<key>A derived result does not match its source run: %@</key>
+	<string>派生结果与其源运行不匹配：%@</string>
+	<key>Source Run</key>
+	<string>源运行</string>
+	<key>Current Derived Result</key>
+	<string>当前派生结果</string>
+	<key>Glossary Semantics</key>
+	<string>术语表语义</string>
+	<key>Source Run Glossary</key>
+	<string>源运行术语表</string>
+	<key>Current Derived Post-processing</key>
+	<string>当前派生后处理</string>
 	</dict>
 </plist>

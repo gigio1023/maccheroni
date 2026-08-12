@@ -1,4 +1,5 @@
 import Foundation
+import MaccheroniCore
 import Testing
 @testable import MaccheroniApp
 
@@ -64,6 +65,20 @@ struct GlossaryRecoveryTests {
         document.restore(removal)
         #expect(document.entries.map(\.term) == ["first", "second", "third", "fourth"])
         #expect(document.serialized() == "# category: terms\nfirst\nsecond\nthird\nfourth\n")
+    }
+
+    @Test
+    func deletingTheLastEntryLeavesCommentsButParsesAsNoGlossary() throws {
+        var document = GlossaryDraftDocument(
+            text: "# category: terms\nMaccheroni\n"
+        )
+
+        _ = document.removeEntries(at: IndexSet(integer: 0))
+
+        #expect(document.serialized() == "# category: terms\n")
+        #expect(try Glossary.parseOptional(
+            data: Data(document.serialized().utf8)
+        ) == nil)
     }
 
     @Test

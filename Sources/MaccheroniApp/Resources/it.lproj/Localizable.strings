@@ -540,5 +540,25 @@
 	<string>Una nuova configurazione seleziona Codex solo se la sua CLI ha effettuato l'accesso; altrimenti seleziona Local. Codex riceve testo della trascrizione limitato, l'intero glossario del profilo attivo e il suo hash, le istruzioni di post-processing e, in caso di traduzione, la lingua di destinazione. L'audio non lascia mai questo Mac.</string>
 	<key>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</key>
 	<string>L'audio resta su questo Mac. La trascrizione viene eseguita localmente; durante il post-processing Codex riceve testo della trascrizione limitato, l'intero glossario del profilo attivo e il suo hash, le istruzioni di post-processing e, in caso di traduzione, la lingua di destinazione.</string>
+	<key>Choose an M4A, WAV, or MP3 audio file.</key>
+	<string>Scegli un file audio M4A, WAV o MP3.</string>
+	<key>Post-processing could not start for this completed run.</key>
+	<string>Impossibile avviare il post-processing per questa esecuzione completata.</string>
+	<key>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</key>
+	<string>L'accettazione vale solo per questo esatto testo tradotto. La trascrizione sorgente immutabile e la traduzione restano invariate.</string>
+	<key>A derived result manifest is invalid: %@</key>
+	<string>Il manifesto di un risultato derivato non è valido: %@</string>
+	<key>A derived result does not match its source run: %@</key>
+	<string>Un risultato derivato non corrisponde alla sua esecuzione sorgente: %@</string>
+	<key>Source Run</key>
+	<string>Esecuzione sorgente</string>
+	<key>Current Derived Result</key>
+	<string>Risultato derivato attuale</string>
+	<key>Glossary Semantics</key>
+	<string>Semantica del glossario</string>
+	<key>Source Run Glossary</key>
+	<string>Glossario dell'esecuzione sorgente</string>
+	<key>Current Derived Post-processing</key>
+	<string>Post-processing derivato attuale</string>
 	</dict>
 </plist>

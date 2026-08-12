@@ -67,6 +67,7 @@ let package = Package(
             name: "MaccheroniApp",
             dependencies: [
                 "MaccheroniCore",
+                "MaccheroniPreprocess",
                 "MaccheroniMerge",
                 "MaccheroniPostprocess",
             ],
@@ -106,6 +107,7 @@ let package = Package(
             dependencies: [
                 "MaccheroniApp",
                 "MaccheroniCore",
+                "MaccheroniPreprocess",
                 "MaccheroniMerge",
                 "MaccheroniPostprocess",
             ]

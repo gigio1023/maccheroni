@@ -10,6 +10,8 @@ enum CLICommandSurface {
             MaccheroniCommand.helpMessage(for: HelpCommand.self)
         case .run:
             MaccheroniCommand.helpMessage(for: RunCommand.self)
+        case .postprocess:
+            MaccheroniCommand.helpMessage(for: PostprocessCommand.self)
         case .doctor:
             MaccheroniCommand.helpMessage(for: DoctorCommand.self)
         case .capabilities:
@@ -21,6 +23,7 @@ enum CLICommandSurface {
 enum HelpTopic: String, CaseIterable, ExpressibleByArgument {
     case help
     case run
+    case postprocess
     case doctor
     case capabilities
 }
@@ -44,11 +47,68 @@ struct HelpCommand: ParsableCommand {
         """
     )
 
-    @Argument(help: "The command to explain: help, run, doctor, or capabilities.")
+    @Argument(help: "The command to explain: help, run, postprocess, doctor, or capabilities.")
     var topic: HelpTopic?
 
     func run() throws {
         try CLIOutput.write(CLICommandSurface.help(for: topic))
+    }
+}
+
+struct PostprocessCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "postprocess",
+        abstract: "Create a derived result from a completed run.",
+        discussion: """
+        Verifies the completed source run manifest and every listed artifact before
+        reading its merged transcript. Creates a new correction or translation result
+        under the source run's derived directory and does not rerun audio transcription.
+
+        OUTPUT:
+          Text mode prints the new derived directory path. --json prints a stable
+          object containing command, derived_path, and schema_version.
+
+        PRIVACY:
+          Audio is not read or sent to a post-processing backend. The selected backend
+          may receive transcript text and the current profile glossary.
+
+        EXAMPLE:
+          maccheroni postprocess Runs/meeting --profile ko-meeting --profiles profiles.json
+        """
+    )
+
+    @Argument(help: "Path to a completed source run directory.")
+    var runDirectory: String
+
+    @Option(name: .long, help: "Required profile name for the current operation.")
+    var profile: String
+
+    @Option(name: .long, help: "Path to a profile registry JSON file.")
+    var profiles: String?
+
+    @Option(
+        name: .long,
+        help: "Path to the current glossary; overrides the profile glossary."
+    )
+    var glossary: String?
+
+    @Flag(name: .long, help: "Emit deterministic JSON instead of the derived path.")
+    var json = false
+
+    mutating func run() async throws {
+        let derivedPath = try await CLIApplication().executePostprocess(
+            runPath: runDirectory,
+            profileName: profile,
+            profilesPath: profiles,
+            glossaryPath: glossary
+        )
+        if json {
+            try CLIOutput.write(try CLIOutput.postprocessJSON(
+                derivedPath: derivedPath
+            ))
+        } else {
+            try CLIOutput.write(derivedPath)
+        }
     }
 }
 

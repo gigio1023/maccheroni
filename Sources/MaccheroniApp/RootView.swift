@@ -1,4 +1,5 @@
 import AppKit
+import MaccheroniPreprocess
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -38,7 +39,7 @@ struct RootView: View {
         }
         .fileImporter(
             isPresented: $isImporting,
-            allowedContentTypes: [.audio],
+            allowedContentTypes: Self.supportedAudioContentTypes,
             allowsMultipleSelection: true
         ) { result in
             model.handleImportResult(result)
@@ -58,7 +59,7 @@ struct RootView: View {
                 importAudio: { isImporting = true },
                 cancelTranscription: model.cancelTranscription,
                 canImportAudio: model.canImportAudio,
-                canCancelTranscription: model.isTranscribing
+                canCancelTranscription: model.canCancelActiveOperation
             )
         )
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
@@ -68,6 +69,11 @@ struct RootView: View {
             model.syncPostprocessSelectionsFromDefaults()
         }
     }
+
+    private static let supportedAudioContentTypes: [UTType] =
+        AudioPreprocessor.supportedInputExtensions.sorted().compactMap {
+            UTType(filenameExtension: $0)
+        }
 
     @ViewBuilder
     private var detail: some View {

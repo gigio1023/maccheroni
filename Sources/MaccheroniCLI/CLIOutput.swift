@@ -40,6 +40,13 @@ enum CLIOutput {
             supportsJSON: true
         ),
         CommandCapability(
+            name: "postprocess",
+            summary: "Correct or translate a completed run without ASR.",
+            sideEffect: "Creates a derived artifact directory under a verified completed run.",
+            output: "Derived directory path or a JSON derived_path envelope on stdout.",
+            supportsJSON: true
+        ),
+        CommandCapability(
             name: "doctor",
             summary: "Inspect local profile and dependency readiness.",
             sideEffect: "None; performs read-only local checks.",
@@ -59,6 +66,14 @@ enum CLIOutput {
         try encode(RunEnvelope(
             command: "run",
             runPath: runPath,
+            schemaVersion: schemaVersion
+        ))
+    }
+
+    static func postprocessJSON(derivedPath: String) throws -> String {
+        try encode(PostprocessEnvelope(
+            command: "postprocess",
+            derivedPath: derivedPath,
             schemaVersion: schemaVersion
         ))
     }
@@ -179,6 +194,18 @@ private struct RunEnvelope: Codable {
     enum CodingKeys: String, CodingKey {
         case command
         case runPath = "run_path"
+        case schemaVersion = "schema_version"
+    }
+}
+
+private struct PostprocessEnvelope: Codable {
+    var command: String
+    var derivedPath: String
+    var schemaVersion: String
+
+    enum CodingKeys: String, CodingKey {
+        case command
+        case derivedPath = "derived_path"
         case schemaVersion = "schema_version"
     }
 }

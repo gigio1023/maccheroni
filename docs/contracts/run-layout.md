@@ -18,10 +18,20 @@ that the source file remains the same.
 ├── merged/
 │   ├── segments.json
 │   └── conflicts.json
-└── postprocess/
-    ├── segments.json
-    ├── conflicts.json
-    └── translation.json
+├── postprocess/
+│   ├── segments.json
+│   ├── conflicts.json
+│   └── translation.json
+└── derived/
+    ├── <derived-id>/
+    │   ├── manifest.json
+    │   └── postprocess/
+    │       ├── segments.json
+    │       └── conflicts.json
+    └── <derived-id>/
+        ├── manifest.json
+        └── postprocess/
+            └── translation.json
 ```
 
 Create `postprocess/` only when post-processing runs. A correction run creates
@@ -30,6 +40,13 @@ Create `postprocess/` only when post-processing runs. A correction run creates
 required for a successful complete run. An intermediate failure still leaves
 `manifest.json`. Do not include artifacts that could not be created in the
 manifest's `artifacts` field.
+
+Create `derived/` only for an operation on a completed run. Every immediate
+child is a create-only derived artifact set. It has its own manifest conforming
+to `derived-manifest.schema.json` and contains exactly one operation form:
+correction creates `segments.json` and `conflicts.json`; translation creates
+only `translation.json`. Never modify the source manifest, the source run's
+legacy `postprocess/` files, or an earlier derived set.
 
 ## Meaning of Each File
 
@@ -73,6 +90,15 @@ manifest's `artifacts` field.
   schema-response byte-budget evidence for batches divided at complete segment
   boundaries. It cannot represent speaker and timestamp fields, so model output
   cannot change the acoustic structure.
+- `derived/<derived-id>/manifest.json`: the sealed record for one existing-run
+  operation. Its `source` field records the source run ID, the source
+  `manifest.json` SHA-256, and the verified `merged/segments.json` path and
+  SHA-256. Its `operation` field records the profile used for the operation,
+  correction or translation mode, optional target language, current-profile
+  glossary semantics, and the parsed glossary hash and item count. Its
+  `postprocess` field carries the same backend, model, text-only, and bounded
+  batch evidence as a new-audio run. `artifacts` contains only files inside this
+  derived set.
 
 ## Writing and Invariants
 
@@ -97,11 +123,38 @@ manifest's `artifacts` field.
 8. Exclusively create the translation artifact as a separate file. Before and
    after translation, `primary/raw.txt`, `primary/segments.json`,
    `merged/segments.json`, and the original input SHA-256 must remain unchanged.
+9. Before an existing-run operation creates `derived/<derived-id>` or calls a
+   backend, decode the source manifest and require a successful complete run.
+   Validate every manifest artifact path, reject duplicates and unsafe paths,
+   require every listed artifact to exist with its recorded SHA-256, and decode
+   the uniquely identified `merged/segments.json` from the same bytes whose hash
+   was verified. Require the canonical `primary/raw.txt`,
+   `primary/segments.json`, `diarization/timeline.json`,
+   `merged/segments.json`, and `merged/conflicts.json` kinds and paths, plus the
+   recorded post-processing form. The manifest inventory must equal all regular
+   files under the source run except `manifest.json`, the complete `derived/`
+   tree, and Finder's `.DS_Store` metadata. Refuse with a typed integrity failure
+   if any check fails.
+10. An existing-run operation always reads the verified canonical
+    `merged/segments.json`. It does not run preprocessing, VAD, ASR,
+    diarization, or merge. It uses the invocation profile's current glossary,
+    with an explicit `--glossary` taking precedence. Old manifests retain only
+    the original glossary hash and item count, so they cannot reconstruct the
+    original glossary bytes. A current glossary with zero parsed entries is no
+    glossary.
+11. Seal a derived manifest only after its output validates against the source
+    structure and every new artifact hash verifies. A failed or canceled set may
+    remain for audit but is not displayable as a result. Choose the freshest
+    successful set by its manifest `finished_at` value, using `derived_id` as a
+    deterministic tie-breaker. Never use filesystem modification time. Keep all
+    successful earlier sets enumerable in the library and run inspector.
 
 ## Identifiers and Time
 
 - Recommended `run-id`: UTC time plus a random suffix in the format
   `20260803T041530Z-7f3a9c`.
+- Recommended `derived-id`: the same UTC time plus random suffix form. A derived
+  ID is unique only within its source run.
 - Time ranges are floating-point seconds from 0 at the start of the original
   file and are interpreted as half-open intervals `[start_s, end_s)`.
 - Sort segments and chunks by `start_s`, then `end_s`. When start points are
@@ -118,8 +171,17 @@ checked.
   duration. The floating-point tolerance is 10ms.
 - For a successful run, `processed_duration_s` equals `input_duration_s` within
   10ms and `truncated` is false.
+- A successful run uses `full` or `chunked` coverage and has at least one
+  successful chunk. Its boundaries start at zero, are contiguous within 10ms,
+  and end at `input_duration_s` within 10ms. Their total covered duration and
+  final boundary both equal `processed_duration_s` within 10ms.
 - `chunks_completed <= chunks_planned`, and chunk indexes increase from 0
-  without duplicates.
+  without duplicates. `full` has one chunk; `chunked` has more than one.
+- A successful run that records a provided glossary also records
+  `applied: true`.
+- Every segment field satisfies `segments.schema.json`, including confidence
+  range, language-tag syntax, unique flags, and flag syntax, in addition to the
+  time ordering and speaker-count checks below.
 - `num_speakers` equals the number of unique speakers excluding `UNASSIGNED`
   and `UNKNOWN`.
 - The speakers and times in post-processing segments exactly match those in the
@@ -133,6 +195,11 @@ checked.
   actual artifact values. Calculate the accepted output bound from the raw
   schema-response bytes, including the JSON envelope and escaping, rather than
   counting only the decoded translations.
+- A successful derived manifest's source manifest hash and source segment hash
+  must still match the immutable source files. Correction output must preserve
+  source, segment count, speakers, time ranges, languages, confidence, and all
+  non-review flags. Translation must preserve exact index coverage and must not
+  represent acoustic structure.
 
 `benchmarks/scripts/scoring/check_contracts.py` validates schema examples and
 the applicable conditions above against run manifests.

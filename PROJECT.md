@@ -391,6 +391,18 @@ not deleted.
   Section 1 retains the dated, named 2026-08-02 audit findings as history. From this
   decision onward, comparative statements about other products require a named
   product, version, route, and evidence.
+- D39 [inference] Close the glossary correction loop with immutable existing-run
+  derivations (decided 2026-08-12). A completed run may create correction or
+  translation sets under `derived/<derived-id>/` from its hash-verified canonical
+  `merged/segments.json`. Each set has a sealed manifest that records the source run,
+  source manifest and segment hashes, operation profile, current-profile glossary hash,
+  backend and model, and the unchanged D30 batch evidence. Verify the source manifest
+  and every listed artifact before creating a set or calling a text backend. Never run
+  preprocessing, ASR, diarization, or merge for this operation, and never modify the
+  source run or an earlier set. Use the current invocation profile glossary because old
+  runs retain its former hash and count but not its bytes; treat a parsed zero-entry
+  file as no glossary. The library selects the freshest successful set by sealed
+  completion time and derived ID while keeping earlier sets visible.
 
 ## Project-wide Done Criteria
 

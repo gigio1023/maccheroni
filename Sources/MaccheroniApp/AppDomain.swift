@@ -193,7 +193,50 @@ struct LibraryRecord: Codable, Equatable, Identifiable, Sendable {
     var state: LibraryItemState
     var speakerNames: [String: String]
     var conflictResolutions: [Int: String]
+    /// Correction decisions for create-only derived results. Legacy source-run
+    /// decisions remain in `conflictResolutions` and are deliberately not
+    /// reused by a newly derived result at the same segment index.
+    var derivedCorrectionResolutions: [DerivedCorrectionResolution]? = nil
+    /// Review acknowledgements are scoped to one immutable result and the
+    /// exact translated text that the operator accepted. Keeping this optional
+    /// preserves decoding of library indexes written before acknowledgements
+    /// existed.
+    var translationReviewAcknowledgements: [TranslationReviewAcknowledgement]? = nil
     var failureMessage: String?
+}
+
+struct DerivedCorrectionResolution: Codable, Equatable, Sendable {
+    var resultID: String
+    var segmentIndex: Int
+    var resolvedText: String
+
+    enum CodingKeys: String, CodingKey {
+        case resultID = "result_id"
+        case segmentIndex = "segment_index"
+        case resolvedText = "resolved_text"
+    }
+}
+
+struct TranslationReviewAcknowledgement: Codable, Equatable, Sendable {
+    var resultID: String
+    var segmentIndex: Int
+    var translatedText: String
+
+    enum CodingKeys: String, CodingKey {
+        case resultID = "result_id"
+        case segmentIndex = "segment_index"
+        case translatedText = "translated_text"
+    }
+}
+
+struct DerivedResultSummary: Equatable, Identifiable, Sendable {
+    var id: String
+    var createdAt: Date
+    var operation: PostprocessMode
+    var targetLanguage: String?
+    var glossarySHA256: String?
+    var directory: URL
+    var isCurrent: Bool
 }
 
 struct LoadedRun: Equatable, Sendable {
@@ -201,12 +244,77 @@ struct LoadedRun: Equatable, Sendable {
     var transcript: SegmentsDocument
     var conflicts: [MergeConflict]
     var segments: [TranscriptSegment]
+    var resultID: String? = nil
+    var derivedResults: [DerivedResultSummary] = []
+    var resultPostprocess: ManifestPostprocess? = nil
+    var resultOperation: DerivedOperation? = nil
+
+    var effectiveResultID: String { resultID ?? manifest.runID }
+
+    var effectivePostprocess: ManifestPostprocess? {
+        resultPostprocess ?? manifest.postprocess
+    }
+
+    var isTranslation: Bool {
+        effectivePostprocess?.mode == .translation
+    }
 
     var requiresReview: Bool {
         !conflicts.isEmpty || transcript.segments.contains { segment in
             let flags = segment.flags ?? []
             return flags.contains("uncertain") || flags.contains("conflict")
         }
+    }
+
+    func requiresReview(for record: LibraryRecord) -> Bool {
+        if isTranslation {
+            return transcript.segments.enumerated().contains { index, segment in
+                let flags = segment.flags ?? []
+                guard flags.contains(where: {
+                    $0.localizedCaseInsensitiveContains("uncertain")
+                        || $0.localizedCaseInsensitiveContains("conflict")
+                }) else { return false }
+                return !isTranslationAcknowledged(
+                    at: index,
+                    text: segment.text,
+                    record: record
+                )
+            }
+        }
+        return conflicts.contains {
+            correctionResolution(at: $0.segmentIndex, record: record) == nil
+        } || transcript.segments.enumerated().contains { index, segment in
+            let flags = segment.flags ?? []
+            return flags.contains(where: {
+                $0.localizedCaseInsensitiveContains("uncertain")
+                    || $0.localizedCaseInsensitiveContains("conflict")
+            }) && correctionResolution(at: index, record: record) == nil
+        }
+    }
+
+    func correctionResolution(
+        at segmentIndex: Int,
+        record: LibraryRecord
+    ) -> String? {
+        guard !isTranslation else { return nil }
+        guard resultID != nil else {
+            return record.conflictResolutions[segmentIndex]
+        }
+        return record.derivedCorrectionResolutions?.first {
+            $0.resultID == effectiveResultID && $0.segmentIndex == segmentIndex
+        }?.resolvedText
+    }
+
+    func isTranslationAcknowledged(
+        at segmentIndex: Int,
+        text: String,
+        record: LibraryRecord
+    ) -> Bool {
+        record.translationReviewAcknowledgements?.contains {
+            $0.resultID == effectiveResultID
+                && $0.segmentIndex == segmentIndex
+                && $0.translatedText == text
+        } == true
     }
 }
 
@@ -416,13 +524,48 @@ struct TranscriptionRequest: Equatable, Sendable {
     var glossaryURL: URL?
 }
 
+struct ExistingRunPostprocessRequest: Equatable, Sendable {
+    var sourceRunURL: URL
+    var profile: AppProfile
+    var postprocess: PostprocessChoice
+    var operation: PostprocessMode
+    var translationTargetLanguage: String?
+    var glossaryURL: URL?
+}
+
+struct ExistingRunPostprocessProgress: Equatable, Sendable {
+    var operation: PostprocessMode
+    var elapsedS: Double
+    var modelID: String?
+    var message: String?
+}
+
+struct ActiveExistingRunPostprocess: Equatable, Sendable {
+    var recordID: UUID
+    var operation: PostprocessMode
+    var progress: ExistingRunPostprocessProgress
+}
+
 @MainActor
 protocol TranscriptionRunning: AnyObject {
     func run(
         _ request: TranscriptionRequest,
         progress: @escaping @MainActor (RunProgressSnapshot) -> Void
     ) async throws -> URL
+    func postprocess(
+        _ request: ExistingRunPostprocessRequest,
+        progress: @escaping @MainActor (ExistingRunPostprocessProgress) -> Void
+    ) async throws -> URL
     func cancel()
+}
+
+extension TranscriptionRunning {
+    func postprocess(
+        _: ExistingRunPostprocessRequest,
+        progress _: @escaping @MainActor (ExistingRunPostprocessProgress) -> Void
+    ) async throws -> URL {
+        throw TranscriptionRunnerError.existingRunPostprocessUnavailable
+    }
 }
 
 @MainActor

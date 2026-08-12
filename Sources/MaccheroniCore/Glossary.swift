@@ -42,6 +42,16 @@ public struct Glossary: Codable, Equatable, Sendable {
         return Glossary(entries: entries, sha256: digest)
     }
 
+    /// Parses a glossary source and treats a valid source with no entries as absent.
+    ///
+    /// Comments and blank lines may remain in an operator-owned file after its
+    /// final entry is removed. Callers preparing an operation should use this
+    /// method so that such a file does not claim glossary injection or provenance.
+    public static func parseOptional(data: Data) throws -> Glossary? {
+        let glossary = try parse(data: data)
+        return glossary.entries.isEmpty ? nil : glossary
+    }
+
     public func payload(for mode: GlossaryInjectionMode) throws -> String {
         switch mode {
         case .freeTextContext:

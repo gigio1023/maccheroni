@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maccheroni.local/schemas/derived-manifest.schema.json",
+  "title": "Maccheroni existing-run derived artifact manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "derived_id",
+    "status",
+    "source",
+    "operation",
+    "timing",
+    "artifacts",
+    "failure",
+    "postprocess"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "derived_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "status": {
+      "enum": ["succeeded", "partial", "failed", "canceled"]
+    },
+    "source": { "$ref": "#/$defs/source" },
+    "operation": { "$ref": "#/$defs/operation" },
+    "timing": {
+      "$ref": "manifest.schema.json#/$defs/timing"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "manifest.schema.json#/$defs/artifact" }
+    },
+    "failure": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/failure" }
+      ]
+    },
+    "postprocess": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "manifest.schema.json#/$defs/postprocess" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "succeeded" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "failure": { "type": "null" },
+          "postprocess": {
+            "$ref": "manifest.schema.json#/$defs/postprocess"
+          }
+        },
+        "minProperties": 9
+      },
+      "else": {
+        "properties": {
+          "failure": { "$ref": "#/$defs/failure" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": { "const": "succeeded" },
+          "operation": {
+            "properties": { "mode": { "const": "correction" } },
+            "required": ["mode"]
+          }
+        },
+        "required": ["status", "operation"]
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "minItems": 2,
+            "maxItems": 2,
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {
+                    "kind": { "const": "postprocess_segments" },
+                    "path": { "const": "postprocess/segments.json" }
+                  },
+                  "required": ["kind", "path"]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "kind": { "const": "postprocess_conflicts" },
+                    "path": { "const": "postprocess/conflicts.json" }
+                  },
+                  "required": ["kind", "path"]
+                },
+                "minContains": 1,
+                "maxContains": 1
+              }
+            ]
+          },
+          "postprocess": {
+            "properties": {
+              "mode": { "const": "correction" },
+              "target_language": { "type": "null" },
+              "source_segments_sha256": { "type": "null" },
+              "batching": {
+                "$ref": "manifest.schema.json#/$defs/postprocess_batching"
+              }
+            },
+            "required": [
+              "mode",
+              "target_language",
+              "source_segments_sha256",
+              "batching"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": { "const": "succeeded" },
+          "operation": {
+            "properties": { "mode": { "const": "translation" } },
+            "required": ["mode"]
+          }
+        },
+        "required": ["status", "operation"]
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "minItems": 1,
+            "maxItems": 1,
+            "contains": {
+              "properties": {
+                "kind": { "const": "postprocess_translation" },
+                "path": { "const": "postprocess/translation.json" }
+              },
+              "required": ["kind", "path"]
+            }
+          },
+          "postprocess": {
+            "properties": { "mode": { "const": "translation" } },
+            "required": ["mode", "target_language", "source_segments_sha256"]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "failure": {
+      "oneOf": [
+        { "$ref": "manifest.schema.json#/$defs/failure" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "const": "SOURCE_INTEGRITY_ERROR" },
+            "message": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "manifest_sha256",
+        "segments_path",
+        "segments_sha256"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        },
+        "manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "segments_path": { "const": "merged/segments.json" },
+        "segments_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_name",
+        "mode",
+        "target_language",
+        "glossary_semantics",
+        "glossary_sha256",
+        "glossary_item_count"
+      ],
+      "properties": {
+        "profile_name": { "type": "string", "minLength": 1 },
+        "mode": { "enum": ["correction", "translation"] },
+        "target_language": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+        },
+        "glossary_semantics": { "const": "current-profile" },
+        "glossary_sha256": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/sha256" }
+          ]
+        },
+        "glossary_item_count": { "type": "integer", "minimum": 0 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "mode": { "const": "correction" } },
+            "required": ["mode"]
+          },
+          "then": {
+            "properties": { "target_language": { "type": "null" } }
+          },
+          "else": {
+            "properties": {
+              "target_language": {
+                "type": "string",
+                "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "glossary_sha256": { "type": "null" } },
+            "required": ["glossary_sha256"]
+          },
+          "then": {
+            "properties": { "glossary_item_count": { "const": 0 } }
+          },
+          "else": {
+            "properties": { "glossary_item_count": { "minimum": 1 } }
+          }
+        }
+      ]
+    }
+  }
+}

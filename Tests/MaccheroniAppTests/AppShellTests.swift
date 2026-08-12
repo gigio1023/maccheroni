@@ -1,5 +1,6 @@
 import AVFAudio
 import CryptoKit
+import Darwin
 import Foundation
 import MaccheroniCore
 import MaccheroniMerge
@@ -106,6 +107,233 @@ struct AppShellTests {
         }
         #expect(try appShellSHA256(of: fixture.rawURL) == rawHash)
         #expect(try appShellSHA256(of: fixture.inputURL) == inputHash)
+    }
+
+    @Test
+    func repositorySelectsFreshestDerivedManifestAndRefusesCorruptFreshestFallback() throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try appShellRunFixture(in: root)
+        let mergedHash = try appShellSHA256(of: fixture.segmentsURL)
+        let rawHash = try appShellSHA256(of: fixture.rawURL)
+        _ = try appShellWriteDerivedCorrection(
+            fixture: fixture,
+            id: "derived-newest-mtime",
+            finishedAt: "2026-08-12T01:00:00Z",
+            text: "Older by manifest"
+        )
+        let tiedEarlierID = try appShellWriteDerivedCorrection(
+            fixture: fixture,
+            id: "derived-a",
+            finishedAt: "2026-08-12T02:00:00Z",
+            text: "Tie loser"
+        )
+        let freshest = try appShellWriteDerivedCorrection(
+            fixture: fixture,
+            id: "derived-z",
+            finishedAt: "2026-08-12T02:00:00Z",
+            text: "Tie winner"
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 2_000_000_000)],
+            ofItemAtPath: fixture.runURL.appendingPathComponent(
+                "derived/derived-newest-mtime"
+            ).path
+        )
+
+        let loaded = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+
+        #expect(loaded.resultID == "derived-z")
+        #expect(loaded.transcript.segments[0].text == "Tie winner")
+        #expect(loaded.derivedResults.map(\.id) == [
+            "derived-z", "derived-a", "derived-newest-mtime",
+        ])
+        #expect(loaded.derivedResults.map(\.isCurrent) == [true, false, false])
+        #expect(loaded.resultOperation?.profileName == "ko-it-meeting")
+        #expect(loaded.resultOperation?.mode == .correction)
+        #expect(loaded.resultOperation?.glossarySemantics == .currentProfile)
+        #expect(loaded.resultOperation?.glossaryItemCount == 0)
+        #expect(FileManager.default.fileExists(atPath: tiedEarlierID.path))
+        #expect(try appShellSHA256(of: fixture.segmentsURL) == mergedHash)
+        #expect(try appShellSHA256(of: fixture.rawURL) == rawHash)
+
+        try Data("corrupt freshest".utf8).write(to: freshest)
+        #expect(throws: LibraryRepositoryError.self) {
+            try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+        }
+        #expect(try appShellSHA256(of: fixture.segmentsURL) == mergedHash)
+        #expect(try appShellSHA256(of: fixture.rawURL) == rawHash)
+    }
+
+    @Test
+    func repositoryDecodesTheExactDerivedArtifactBytesItVerified() throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try appShellRunFixture(in: root)
+        let segmentsURL = try appShellWriteDerivedCorrection(
+            fixture: fixture,
+            id: "verified-buffer",
+            finishedAt: "2026-08-12T03:00:00Z",
+            text: "Verified correction"
+        )
+        let verifiedBytes = try Data(contentsOf: segmentsURL)
+        var swapped = try JSONDecoder().decode(
+            SegmentsDocument.self,
+            from: verifiedBytes
+        )
+        swapped.segments[0].text = "Swapped after verification"
+        let swappedBytes = try JSONEncoder().encode(swapped)
+
+        let loaded = try LibraryRepository(
+            root: root,
+            onDerivedArtifactVerified: { url in
+                if url == segmentsURL {
+                    try swappedBytes.write(to: url)
+                }
+            }
+        ).loadRun(at: fixture.runURL)
+
+        #expect(loaded.transcript.segments[0].text == "Verified correction")
+        #expect(try Data(contentsOf: segmentsURL) == swappedBytes)
+    }
+
+    @Test @MainActor
+    func productionRunnerInvokesExistingRunCommandAndAcceptsItsDerivedPath() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try appShellRunFixture(in: root, runID: "runner-source")
+        let artifactURL = try appShellWriteDerivedCorrection(
+            fixture: fixture,
+            id: "runner-derived",
+            finishedAt: "2026-08-12T02:00:00Z",
+            text: "Runner result"
+        )
+        let derivedURL = artifactURL.deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let argumentsURL = root.appendingPathComponent("arguments.txt")
+        let executableURL = root.appendingPathComponent("maccheroni-fixture")
+        let script = """
+        #!/bin/sh
+        printf '%s\\n' "$@" > '\(argumentsURL.path)'
+        printf '%s\\n' '\(derivedURL.path)'
+        """
+        try Data(script.utf8).write(to: executableURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executableURL.path
+        )
+        let runner = try ProcessTranscriptionRunner(
+            executableURL: executableURL,
+            requestsRoot: root.appendingPathComponent("requests")
+        )
+        let profile = try #require(
+            try AppProfileRegistry.load().first(where: { $0.id == .koreanITMeeting })
+        )
+
+        let result = try await runner.postprocess(
+            ExistingRunPostprocessRequest(
+                sourceRunURL: fixture.runURL,
+                profile: profile,
+                postprocess: .local,
+                operation: .correction,
+                translationTargetLanguage: nil,
+                glossaryURL: nil
+            ),
+            progress: { _ in }
+        )
+
+        #expect(result == derivedURL)
+        let arguments = try String(contentsOf: argumentsURL, encoding: .utf8)
+            .split(whereSeparator: \.isNewline).map(String.init)
+        #expect(arguments.prefix(3) == [
+            "postprocess", fixture.runURL.path, "--profile",
+        ])
+        #expect(arguments.contains(profile.cliProfile))
+        #expect(arguments.contains("--profiles"))
+        #expect(!arguments.contains("run"))
+        #expect(!arguments.contains("--output-root"))
+        #expect(!arguments.contains("--glossary"))
+    }
+
+    @Test @MainActor
+    func lateCancellationReturnsASealedSuccessfulDerivedResult() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try appShellRunFixture(in: root, runID: "late-cancel-source")
+        let artifactURL = try appShellWriteDerivedCorrection(
+            fixture: fixture,
+            id: "late-cancel-derived",
+            finishedAt: "2026-08-12T04:00:00Z",
+            text: "Sealed before cancellation"
+        )
+        let derivedURL = artifactURL.deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let stagedURL = root.appendingPathComponent("staged-derived", isDirectory: true)
+        try FileManager.default.moveItem(at: derivedURL, to: stagedURL)
+        let sealedURL = root.appendingPathComponent("sealed")
+        let allowExitURL = root.appendingPathComponent("allow-exit")
+        let pidURL = root.appendingPathComponent("fixture-pid")
+        let executableURL = root.appendingPathComponent("late-cancel-fixture")
+        let script = """
+        #!/bin/sh
+        mv '\(stagedURL.path)' '\(derivedURL.path)'
+        printf '%s\\n' '\(derivedURL.path)'
+        printf '%s\\n' "$$" > '\(pidURL.path)'
+        : > '\(sealedURL.path)'
+        while [ ! -f '\(allowExitURL.path)' ]; do /bin/sleep 0.01; done
+        """
+        try Data(script.utf8).write(to: executableURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executableURL.path
+        )
+        let gate = AppShellPollGate()
+        let runner = try ProcessTranscriptionRunner(
+            executableURL: executableURL,
+            requestsRoot: root.appendingPathComponent("requests"),
+            pollWait: { await gate.wait() }
+        )
+        let profile = try #require(
+            try AppProfileRegistry.load().first(where: { $0.id == .koreanITMeeting })
+        )
+        let execution = Task { @MainActor in
+            try await runner.postprocess(
+                ExistingRunPostprocessRequest(
+                    sourceRunURL: fixture.runURL,
+                    profile: profile,
+                    postprocess: .local,
+                    operation: .correction,
+                    translationTargetLanguage: nil,
+                    glossaryURL: nil
+                ),
+                progress: { _ in }
+            )
+        }
+
+        for _ in 0 ..< 500 {
+            if FileManager.default.fileExists(atPath: sealedURL.path),
+               await gate.isWaiting()
+            {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(FileManager.default.fileExists(atPath: sealedURL.path))
+        #expect(await gate.isWaiting())
+        try Data().write(to: allowExitURL, options: .withoutOverwriting)
+        let fixturePID = try #require(Int32(
+            String(contentsOf: pidURL, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        ))
+        for _ in 0 ..< 500 {
+            if Darwin.kill(fixturePID, 0) != 0 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(Darwin.kill(fixturePID, 0) != 0)
+
+        runner.cancel()
+        await gate.resume()
+        #expect(try await execution.value == derivedURL)
     }
 
     @Test
@@ -440,6 +668,7 @@ struct AppShellTests {
             "A new setup selects Codex only when its CLI is signed in; otherwise it selects Local. Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio never leaves this Mac.",
             "Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.",
             "Batches Planned",
+            "Choose an M4A, WAV, or MP3 audio file.",
             "Check Again",
             "Checking availability…",
             "Choose Folder…",
@@ -465,6 +694,7 @@ struct AppShellTests {
             "MACCHERONI_LIBRARY_ROOT controls the recording and run paths for this launch.",
             "Model ID",
             "Operation",
+            "Post-processing could not start for this completed run.",
             "Output Estimate Formula",
             "Output Planning Budget",
             "Output Token Limit",
@@ -481,6 +711,14 @@ struct AppShellTests {
             "Translate",
             "Translate Into",
             "Use Default",
+            "Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.",
+            "A derived result manifest is invalid: %@",
+            "A derived result does not match its source run: %@",
+            "Source Run",
+            "Current Derived Result",
+            "Current Derived Post-processing",
+            "Glossary Semantics",
+            "Source Run Glossary",
         ]
         let catalogURL = try #require(appResourcesBundle.url(
             forResource: "Localizable",
@@ -492,7 +730,7 @@ struct AppShellTests {
         )
 
         #expect(catalog.sourceLanguage == "en")
-        #expect(catalog.strings.count == 269)
+        #expect(catalog.strings.count == 279)
         #expect(requiredFinalKeys.isSubset(of: Set(catalog.strings.keys)))
         for (key, entry) in catalog.strings {
             #expect(Set(entry.localizations.keys) == Set(locales), "locale parity: \(key)")
@@ -1007,24 +1245,29 @@ struct AppShellTests {
     }
 
     @Test @MainActor
-    func multiFileImportIndexesLaterReadableFilesAndAggregatesFailures() async throws {
+    func multiFileImportRejectsUnsupportedContainersBeforeStartingTheRunner() async throws {
         let root = try appShellTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let invalidURL = root.appendingPathComponent("broken.wav")
         try Data("not audio".utf8).write(to: invalidURL)
-        let readableURL = try appShellSyntheticCAF(
+        let cafURL = try appShellSyntheticCAF(
             in: root,
             name: "later.caf",
             frequency: 440
         )
-        let finalReadableURL = try appShellSyntheticCAF(
+        let aiffURL = try appShellSyntheticCAF(
             in: root,
             name: "final.aiff",
             frequency: 660
         )
+        let readableURL = try appShellSyntheticCAF(
+            in: root,
+            name: "supported.wav",
+            frequency: 880
+        )
         let repository = LibraryRepository(root: root)
         let runner = AppShellImmediateFailRunner {
-            #expect((try? repository.loadRecords().count) == 2)
+            #expect((try? repository.loadRecords().count) == 1)
         }
         let (defaults, suiteName) = try appShellIsolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -1036,23 +1279,25 @@ struct AppShellTests {
             defaults: defaults
         )
 
-        model.importAudio([invalidURL, readableURL, finalReadableURL])
+        model.importAudio([invalidURL, cafURL, aiffURL, readableURL])
         await appShellWait { model.canImportAudio }
 
-        #expect(model.records.count == 2)
-        #expect(Set(model.records.map(\.sourceURL)) == Set([readableURL, finalReadableURL]))
+        #expect(model.records.count == 1)
+        #expect(model.records.map(\.sourceURL) == [readableURL])
         // The import path standardizes the URL, so compare resolved paths.
         #expect(
             runner.requests.map { $0.sourceURL.resolvingSymlinksInPath() }
-                == [readableURL, finalReadableURL].map { $0.resolvingSymlinksInPath() }
+                == [readableURL].map { $0.resolvingSymlinksInPath() }
         )
         #expect(model.errorMessage?.contains("broken.wav") == true)
         #expect(model.errorMessage?.contains("later.caf") == true)
         #expect(model.errorMessage?.contains("final.aiff") == true)
+        #expect(model.errorMessage?.contains("M4A, WAV, or MP3") == true)
+        #expect(model.errorMessage?.contains("supported.wav") == true)
     }
 
     @Test @MainActor
-    func cafAndAIFFImportsUseTheSameRetryReadabilityCheck() throws {
+    func cafAndAIFFImportsAreNotEligibleForRetryAgainstThePreprocessorContract() throws {
         let root = try appShellTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let cafURL = try appShellSyntheticCAF(in: root, name: "source.caf", frequency: 440)
@@ -1074,15 +1319,15 @@ struct AppShellTests {
             defaults: defaults
         )
 
-        #expect(model.canRetryTranscription(cafRecord))
-        #expect(model.canRetryTranscription(aiffRecord))
+        #expect(!model.canRetryTranscription(cafRecord))
+        #expect(!model.canRetryTranscription(aiffRecord))
     }
 
     @Test @MainActor
     func staleBookmarkRefreshAlsoUpdatesTheInMemoryLibraryRecord() throws {
         let root = try appShellTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let movedURL = try appShellSyntheticCAF(in: root, name: "moved.aiff", frequency: 440)
+        let movedURL = try appShellSyntheticCAF(in: root, name: "moved.wav", frequency: 440)
         let staleBookmark = Data("stale bookmark".utf8)
         let refreshedBookmark = Data("refreshed bookmark".utf8)
         let bookmarkAccess = LibraryBookmarkAccess(
@@ -1090,7 +1335,7 @@ struct AppShellTests {
             create: { _ in refreshedBookmark }
         )
         let repository = LibraryRepository(root: root, bookmarkAccess: bookmarkAccess)
-        var record = appShellRecord(sourceURL: root.appendingPathComponent("old.aiff"))
+        var record = appShellRecord(sourceURL: root.appendingPathComponent("old.wav"))
         record.securityScopedBookmark = staleBookmark
         record.state = .failed
         try repository.saveRecords([record])
@@ -1179,6 +1424,124 @@ struct AppShellTests {
             _ = try model.loadGlossary(for: .koreanITMeeting)
         }
         #expect(try Data(contentsOf: glossaryURL) == invalidBytes)
+    }
+
+    @Test @MainActor
+    func commentOnlyGlossaryIsNoGlossaryWhileAnEntryIsPassedToTheRunner() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceURL = try appShellSyntheticCAF(
+            in: root,
+            name: "source.wav",
+            frequency: 440
+        )
+        var record = appShellRecord(sourceURL: sourceURL)
+        record.state = .failed
+        let repository = LibraryRepository(root: root)
+        try repository.saveRecords([record])
+        let runner = AppShellControllableRunner()
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: runner,
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+        model.select(.record(record.id))
+        try model.saveGlossary(
+            "# category: people\n# retained note\n",
+            for: record.profileID
+        )
+
+        model.retrySelectedTranscription()
+        await appShellWait { runner.isWaiting }
+        #expect(runner.latestRequest?.glossaryURL == nil)
+        runner.fail(with: AppShellFakeError.notImplemented)
+        await appShellWait { !model.isTranscribing }
+
+        try model.saveGlossary(
+            "# category: people\nMaccheroni\n",
+            for: record.profileID
+        )
+        model.retrySelectedTranscription()
+        await appShellWait { runner.isWaiting }
+        #expect(runner.latestRequest?.glossaryURL == model.glossaryURL(for: record.profileID))
+        runner.fail(with: AppShellFakeError.notImplemented)
+        await appShellWait { !model.isTranscribing }
+    }
+
+    @Test @MainActor
+    func existingRunPostprocessUsesRecordProfileAndPreservesCompletedRunOnFailure() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try appShellRunFixture(in: root, runID: "existing-run")
+        var record = appShellRecord(sourceURL: fixture.inputURL)
+        record.profileID = .italianDialogue
+        record.runURL = fixture.runURL
+        record.state = .done
+        let repository = LibraryRepository(root: root)
+        try repository.saveRecords([record])
+        let runner = AppShellControllableRunner()
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(AppProfileID.englishMeeting.rawValue, forKey: "selectedProfile")
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: runner,
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+        try model.saveGlossary(
+            "# category: terms\nMaccheroni\n",
+            for: record.profileID
+        )
+        model.select(.record(record.id))
+        let originalRun = try #require(model.selectedRun)
+
+        model.postprocessSelectedRun(
+            operation: .translation,
+            backend: .local,
+            targetLanguage: .italian
+        )
+        await appShellWait { runner.isPostprocessWaiting }
+
+        let request = try #require(runner.latestPostprocessRequest)
+        #expect(request.sourceRunURL == fixture.runURL)
+        #expect(request.profile.id == .italianDialogue)
+        #expect(request.profile.id != model.selectedProfileID)
+        #expect(request.postprocess == .local)
+        #expect(request.operation == .translation)
+        #expect(request.translationTargetLanguage == "it")
+        #expect(request.glossaryURL == model.glossaryURL(for: .italianDialogue))
+        #expect(model.canCancelActiveOperation)
+        #expect(model.selectedRun == originalRun)
+        #expect(model.records.first?.runURL == fixture.runURL)
+        #expect(model.records.first?.state == .done)
+
+        runner.failPostprocess(with: AppShellFakeError.notImplemented)
+        await appShellWait { !model.canCancelActiveOperation }
+
+        #expect(model.selectedRun == originalRun)
+        #expect(model.records.first?.runURL == fixture.runURL)
+        #expect(model.records.first?.state == .done)
+        #expect(model.existingRunPostprocessFailure(for: record.id) != nil)
+
+        runner.resetPostprocessRequest()
+        try Data("tampered source evidence".utf8).write(to: fixture.rawURL)
+        model.postprocessSelectedRun(
+            operation: .correction,
+            backend: .local
+        )
+        await appShellWait { !model.canCancelActiveOperation }
+        #expect(runner.latestPostprocessRequest == nil)
+        #expect(model.selectedRun == originalRun)
+        #expect(model.records.first?.state == .done)
+        #expect(model.existingRunPostprocessFailure(for: record.id)?.contains(
+            "integrity"
+        ) == true)
     }
 
     @Test @MainActor
@@ -1294,7 +1657,7 @@ struct AppShellTests {
     func launchReconcilesOrphanedTranscriptionIntoRetryableInterruptedState() throws {
         let root = try appShellTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let sourceURL = try appShellSyntheticCAF(in: root, name: "source.caf", frequency: 440)
+        let sourceURL = try appShellSyntheticCAF(in: root, name: "source.wav", frequency: 440)
         var record = appShellRecord(sourceURL: sourceURL)
         record.state = .transcribing
         let repository = LibraryRepository(root: root)
@@ -1321,7 +1684,7 @@ struct AppShellTests {
     func runnerAndFailurePersistenceErrorsAreBothSurfaced() async throws {
         let root = try appShellTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let sourceURL = try appShellSyntheticCAF(in: root, name: "source.caf", frequency: 440)
+        let sourceURL = try appShellSyntheticCAF(in: root, name: "source.wav", frequency: 440)
         var record = appShellRecord(sourceURL: sourceURL)
         record.state = .failed
         let repository = LibraryRepository(root: root)
@@ -1384,7 +1747,7 @@ struct AppShellTests {
     func missingDecodingAndIntegrityRunFailuresStayDistinct() throws {
         let root = try appShellTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let sourceURL = try appShellSyntheticCAF(in: root, name: "source.caf", frequency: 440)
+        let sourceURL = try appShellSyntheticCAF(in: root, name: "source.wav", frequency: 440)
         var record = appShellRecord(sourceURL: sourceURL)
         record.state = .done
         record.runURL = root.appendingPathComponent("missing-run", isDirectory: true)
@@ -1477,7 +1840,7 @@ struct AppShellTests {
     func recordingControlAvailabilityTurnsOffDuringTranscription() async throws {
         let root = try appShellTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let sourceURL = try appShellSyntheticCAF(in: root, name: "source.caf", frequency: 440)
+        let sourceURL = try appShellSyntheticCAF(in: root, name: "source.wav", frequency: 440)
         let record = appShellRecord(sourceURL: sourceURL)
         let repository = LibraryRepository(root: root)
         try repository.saveRecords([record])
@@ -1558,12 +1921,16 @@ private func appShellRunFixture(
 ) throws -> AppShellRunFixture {
     let runURL = root.appendingPathComponent(runID, isDirectory: true)
     let primaryURL = runURL.appendingPathComponent("primary", isDirectory: true)
+    let diarizationURL = runURL.appendingPathComponent("diarization", isDirectory: true)
     let mergedURL = runURL.appendingPathComponent("merged", isDirectory: true)
     try FileManager.default.createDirectory(at: primaryURL, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: diarizationURL, withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: mergedURL, withIntermediateDirectories: true)
 
     let inputURL = root.appendingPathComponent("original-\(runID).wav")
     let rawURL = primaryURL.appendingPathComponent("raw.txt")
+    let primarySegmentsURL = primaryURL.appendingPathComponent("segments.json")
+    let timelineURL = diarizationURL.appendingPathComponent("timeline.json")
     let segmentsURL = mergedURL.appendingPathComponent("segments.json")
     let conflictsURL = mergedURL.appendingPathComponent("conflicts.json")
     _ = try appShellSyntheticCAF(
@@ -1590,6 +1957,10 @@ private func appShellRunFixture(
         reason: "Fixture disagreement."
     )]
     try JSONEncoder().encode(transcript).write(to: segmentsURL)
+    try JSONEncoder().encode(transcript).write(to: primarySegmentsURL)
+    try JSONEncoder().encode([
+        TimelineSegment(speaker: "SPEAKER_00", startS: 0, endS: 2),
+    ]).write(to: timelineURL)
     try JSONEncoder().encode(conflicts).write(to: conflictsURL)
 
     let manifest = Manifest(
@@ -1601,7 +1972,14 @@ private func appShellRunFixture(
             sizeBytes: try Data(contentsOf: inputURL).count
         ),
         backend: BackendDescriptor(name: "fixture", version: "1"),
-        models: [],
+        models: [
+            ModelDescriptor(
+                role: .asr,
+                hfModelID: "fixture/asr",
+                revision: String(repeating: "a", count: 40),
+                quantization: "fixture"
+            ),
+        ],
         glossary: .absent,
         preprocessing: PreprocessingConfiguration(
             sampleRateHz: 16_000,
@@ -1618,7 +1996,14 @@ private func appShellRunFixture(
             chunksPlanned: 1,
             chunksCompleted: 1
         ),
-        chunkBoundaries: [],
+        chunkBoundaries: [
+            ChunkBoundary(
+                index: 0,
+                startS: 0,
+                endS: 2,
+                status: .succeeded
+            ),
+        ],
         timing: RunTiming(
             startedAt: "2026-08-03T00:00:00Z",
             finishedAt: "2026-08-03T00:00:01Z",
@@ -1628,6 +2013,8 @@ private func appShellRunFixture(
             Artifact(kind: "merged_segments", path: "merged/segments.json", sha256: try appShellSHA256(of: segmentsURL)),
             Artifact(kind: "merged_conflicts", path: "merged/conflicts.json", sha256: try appShellSHA256(of: conflictsURL)),
             Artifact(kind: "primary_raw", path: "primary/raw.txt", sha256: try appShellSHA256(of: rawURL)),
+            Artifact(kind: "primary_segments", path: "primary/segments.json", sha256: try appShellSHA256(of: primarySegmentsURL)),
+            Artifact(kind: "diarization_timeline", path: "diarization/timeline.json", sha256: try appShellSHA256(of: timelineURL)),
         ],
         failure: nil
     )
@@ -1735,10 +2122,117 @@ private func appShellWriteManifest(_ manifest: Manifest, to runURL: URL) throws 
     try JSONEncoder().encode(manifest).write(to: runURL.appendingPathComponent("manifest.json"))
 }
 
+@discardableResult
+private func appShellWriteDerivedCorrection(
+    fixture: AppShellRunFixture,
+    id: String,
+    finishedAt: String,
+    text: String
+) throws -> URL {
+    let verified = try RunIntegrityVerifier.verifyCompletedRun(at: fixture.runURL)
+    let directory = fixture.runURL.appendingPathComponent(
+        "derived/\(id)",
+        isDirectory: true
+    )
+    let postprocessDirectory = directory.appendingPathComponent(
+        "postprocess",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(
+        at: postprocessDirectory,
+        withIntermediateDirectories: true
+    )
+    var document = fixture.transcript
+    document.segments[0].text = text
+    let segmentsURL = postprocessDirectory.appendingPathComponent("segments.json")
+    let conflictsURL = postprocessDirectory.appendingPathComponent("conflicts.json")
+    try JSONEncoder().encode(document).write(to: segmentsURL)
+    try JSONEncoder().encode([PostprocessConflict]()).write(to: conflictsURL)
+    let batching = ManifestPostprocessBatching(
+        maximumPromptUTF8Bytes: 1_000,
+        maximumSegmentsPerBatch: 10,
+        maximumOutputTokens: 1_000,
+        outputTokenLimitStatus: .configured,
+        outputTokenPlanningBudget: 1_000,
+        outputTokensPerInputUTF8BytePermille: 500,
+        baseOutputTokenReserve: 100,
+        perSegmentOutputTokenReserve: 20,
+        batchesPlanned: 1,
+        maximumObservedPromptUTF8Bytes: 100,
+        maximumObservedInputTextUTF8Bytes: 20,
+        maximumObservedEstimatedOutputTokens: 130,
+        maximumObservedOutputTextUTF8Bytes: text.utf8.count,
+        maximumObservedResponseUTF8Bytes: text.utf8.count + 20,
+        maximumObservedAcceptedOutputTokenUpperBound: 130
+    )
+    let provenance = ManifestPostprocess(
+        backend: BackendDescriptor(name: "fixture", version: "1"),
+        modelID: "fixture/postprocess",
+        mode: .correction,
+        batching: batching
+    )
+    let manifest = DerivedManifest(
+        derivedID: id,
+        status: .succeeded,
+        source: verified.lineage,
+        operation: DerivedOperation(
+            profileName: "ko-it-meeting",
+            mode: .correction,
+            glossarySemantics: .currentProfile,
+            glossaryItemCount: 0
+        ),
+        timing: RunTiming(
+            startedAt: "2026-08-12T00:00:00Z",
+            finishedAt: finishedAt,
+            wallTimeS: 1
+        ),
+        artifacts: [
+            Artifact(
+                kind: "postprocess_segments",
+                path: "postprocess/segments.json",
+                sha256: try appShellSHA256(of: segmentsURL)
+            ),
+            Artifact(
+                kind: "postprocess_conflicts",
+                path: "postprocess/conflicts.json",
+                sha256: try appShellSHA256(of: conflictsURL)
+            ),
+        ],
+        failure: nil,
+        postprocess: provenance
+    )
+    try JSONEncoder().encode(manifest).write(
+        to: directory.appendingPathComponent("manifest.json")
+    )
+    return segmentsURL
+}
+
 private func appShellSHA256(of url: URL) throws -> String {
     SHA256.hash(data: try Data(contentsOf: url))
         .map { String(format: "%02x", $0) }
         .joined()
+}
+
+private actor AppShellPollGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var waiting = false
+
+    func wait() async {
+        waiting = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+        waiting = false
+    }
+
+    func isWaiting() -> Bool {
+        waiting
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+    }
 }
 
 private func appShellSyntheticCAF(
@@ -1797,9 +2291,12 @@ private final class AppShellFakeRunner: TranscriptionRunning {
 @MainActor
 private final class AppShellControllableRunner: TranscriptionRunning {
     private var continuation: CheckedContinuation<URL, any Error>?
+    private var postprocessContinuation: CheckedContinuation<URL, any Error>?
     private(set) var latestRequest: TranscriptionRequest?
+    private(set) var latestPostprocessRequest: ExistingRunPostprocessRequest?
 
     var isWaiting: Bool { continuation != nil }
+    var isPostprocessWaiting: Bool { postprocessContinuation != nil }
 
     func run(
         _ request: TranscriptionRequest,
@@ -1825,13 +2322,42 @@ private final class AppShellControllableRunner: TranscriptionRunning {
         continuation = nil
     }
 
+    func postprocess(
+        _ request: ExistingRunPostprocessRequest,
+        progress: @escaping @MainActor (ExistingRunPostprocessProgress) -> Void
+    ) async throws -> URL {
+        latestPostprocessRequest = request
+        progress(ExistingRunPostprocessProgress(
+            operation: request.operation,
+            elapsedS: 0.5,
+            modelID: request.postprocess.requestedModelID,
+            message: nil
+        ))
+        return try await withCheckedThrowingContinuation { continuation in
+            postprocessContinuation = continuation
+        }
+    }
+
+    func failPostprocess(with error: any Error) {
+        postprocessContinuation?.resume(throwing: error)
+        postprocessContinuation = nil
+    }
+
+    func resetPostprocessRequest() {
+        latestPostprocessRequest = nil
+    }
+
     func fail(with error: any Error) {
         continuation?.resume(throwing: error)
         continuation = nil
     }
 
     func cancel() {
-        fail(with: CancellationError())
+        if postprocessContinuation != nil {
+            failPostprocess(with: CancellationError())
+        } else {
+            fail(with: CancellationError())
+        }
     }
 }
 

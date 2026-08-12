@@ -540,5 +540,25 @@
 	<string>A new setup selects Codex only when its CLI is signed in; otherwise it selects Local. Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio never leaves this Mac.</string>
 	<key>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</key>
 	<string>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</string>
+	<key>Choose an M4A, WAV, or MP3 audio file.</key>
+	<string>Choose an M4A, WAV, or MP3 audio file.</string>
+	<key>Post-processing could not start for this completed run.</key>
+	<string>Post-processing could not start for this completed run.</string>
+	<key>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</key>
+	<string>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</string>
+	<key>A derived result manifest is invalid: %@</key>
+	<string>A derived result manifest is invalid: %@</string>
+	<key>A derived result does not match its source run: %@</key>
+	<string>A derived result does not match its source run: %@</string>
+	<key>Source Run</key>
+	<string>Source Run</string>
+	<key>Current Derived Result</key>
+	<string>Current Derived Result</string>
+	<key>Glossary Semantics</key>
+	<string>Glossary Semantics</string>
+	<key>Source Run Glossary</key>
+	<string>Source Run Glossary</string>
+	<key>Current Derived Post-processing</key>
+	<string>Current Derived Post-processing</string>
 	</dict>
 </plist>

@@ -13,12 +13,14 @@ struct MaccheroniCommand: AsyncParsableCommand {
 
         EXAMPLES:
           maccheroni help run
+          maccheroni postprocess Runs/meeting --profile ko-meeting
           maccheroni doctor --json
           maccheroni capabilities --json
         """,
         subcommands: [
             HelpCommand.self,
             RunCommand.self,
+            PostprocessCommand.self,
             DoctorCommand.self,
             CapabilitiesCommand.self,
         ]

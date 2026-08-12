@@ -16,9 +16,10 @@ struct TranscriptView: View {
     @State private var exportFilename = "transcript"
     @State private var isExporting = false
     @State private var exportError: String?
+    @State private var postprocessAction: ExistingRunAction?
 
     private var isTranslation: Bool {
-        run.manifest.postprocess?.mode == .translation
+        run.isTranslation
     }
 
     var body: some View {
@@ -32,9 +33,8 @@ struct TranscriptView: View {
                             displaySpeaker: displaySpeaker(item.segment.speaker),
                             correctedText: correctedText(item),
                             color: speakerColor(item.segment.speaker),
-                            isResolved: !isTranslation
-                                && record.conflictResolutions[item.index] != nil,
-                            allowsTextResolution: !isTranslation,
+                            isResolved: isResolved(item),
+                            allowsTextResolution: true,
                             play: { model.play(segment: item.segment) },
                             rename: {
                                 editingSpeaker = SpeakerEdit(speaker: item.segment.speaker)
@@ -65,6 +65,19 @@ struct TranscriptView: View {
                         }
                     }
                 }
+                Menu(appLocalized("Post-processing"), systemImage: "wand.and.stars") {
+                    Button {
+                        postprocessAction = ExistingRunAction(operation: .correction)
+                    } label: {
+                        Text(PostprocessOperationChoice.correction.title)
+                    }
+                    Button {
+                        postprocessAction = ExistingRunAction(operation: .translation)
+                    } label: {
+                        Text(PostprocessOperationChoice.translation.title)
+                    }
+                }
+                .disabled(!model.canPostprocess(record))
                 Button {
                     isInspectorPresented.toggle()
                 } label: {
@@ -90,12 +103,34 @@ struct TranscriptView: View {
         .sheet(item: $selectedConflict) { item in
             ConflictResolutionSheet(
                 item: item,
-                currentResolution: record.conflictResolutions[item.index],
+                currentResolution: isTranslation
+                    ? (isResolved(item) ? item.segment.text : nil)
+                    : run.correctionResolution(at: item.index, record: record),
+                isTranslation: isTranslation,
                 choose: { text in
-                    model.resolveConflict(at: item.index, with: text)
+                    if isTranslation {
+                        model.acknowledgeTranslation(at: item.index, text: text)
+                    } else {
+                        model.resolveConflict(at: item.index, with: text)
+                    }
                     selectedConflict = nil
                 },
                 cancel: { selectedConflict = nil }
+            )
+        }
+        .sheet(item: $postprocessAction) { action in
+            ExistingRunPostprocessSheet(
+                model: model,
+                operation: action.operation,
+                start: { backend, targetLanguage in
+                    model.postprocessSelectedRun(
+                        operation: action.operation,
+                        backend: backend,
+                        targetLanguage: targetLanguage
+                    )
+                    postprocessAction = nil
+                },
+                cancel: { postprocessAction = nil }
             )
         }
         .fileExporter(
@@ -126,9 +161,29 @@ struct TranscriptView: View {
                     .font(.largeTitle)
                 Text(appLocalized("\(run.transcript.segments.count) segments, \(run.transcript.numSpeakers) speakers"))
                     .foregroundStyle(.secondary)
+                if let active = model.activeExistingRunPostprocess,
+                   active.recordID == record.id
+                {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(PostprocessOperationChoice(active.operation).title)
+                        if let modelID = active.progress.modelID {
+                            Text(verbatim: modelID).foregroundStyle(.secondary)
+                        }
+                        Button(appLocalized("Cancel"), role: .cancel) {
+                            model.cancelTranscription()
+                        }
+                    }
+                    .font(.caption)
+                } else if let failure = model.existingRunPostprocessFailure(for: record.id) {
+                    Label(failure, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
             }
             Spacer()
-            if !run.conflicts.isEmpty {
+            if unresolvedConflictCount > 0 {
                 Label(appLocalized("\(unresolvedConflictCount) unresolved"), systemImage: "exclamationmark.bubble")
                     .font(.callout)
                     .foregroundStyle(unresolvedConflictCount == 0 ? Color.secondary : Color.orange)
@@ -138,7 +193,48 @@ struct TranscriptView: View {
     }
 
     private var unresolvedConflictCount: Int {
-        run.conflicts.filter { record.conflictResolutions[$0.segmentIndex] == nil }.count
+        if isTranslation {
+            return run.transcript.segments.enumerated().filter { index, segment in
+                let flags = segment.flags ?? []
+                return flags.contains(where: {
+                    $0.localizedCaseInsensitiveContains("uncertain")
+                        || $0.localizedCaseInsensitiveContains("conflict")
+                }) && !run.isTranslationAcknowledged(
+                    at: index,
+                    text: segment.text,
+                    record: record
+                )
+            }.count
+        }
+        let unresolvedConflictIndices = Set(run.conflicts.compactMap { conflict in
+            run.correctionResolution(
+                at: conflict.segmentIndex,
+                record: record
+            ) == nil
+                ? conflict.segmentIndex
+                : nil
+        })
+        let unresolvedFlagIndices = Set(run.transcript.segments.enumerated().compactMap {
+            index, segment in
+            let flags = segment.flags ?? []
+            return flags.contains(where: {
+                $0.localizedCaseInsensitiveContains("uncertain")
+                    || $0.localizedCaseInsensitiveContains("conflict")
+            }) && run.correctionResolution(at: index, record: record) == nil
+                ? index : nil
+        })
+        return unresolvedConflictIndices.union(unresolvedFlagIndices).count
+    }
+
+    private func isResolved(_ item: TranscriptSegment) -> Bool {
+        if isTranslation {
+            return run.isTranslationAcknowledged(
+                at: item.index,
+                text: item.segment.text,
+                record: record
+            )
+        }
+        return run.correctionResolution(at: item.index, record: record) != nil
     }
 
     private func displaySpeaker(_ raw: String) -> String {
@@ -147,7 +243,8 @@ struct TranscriptView: View {
 
     private func correctedText(_ item: TranscriptSegment) -> String {
         guard !isTranslation else { return item.segment.text }
-        return record.conflictResolutions[item.index] ?? item.segment.text
+        return run.correctionResolution(at: item.index, record: record)
+            ?? item.segment.text
     }
 
     private func speakerColor(_ speaker: String) -> Color {
@@ -370,6 +467,7 @@ private struct SpeakerRenamePopover: View {
 private struct ConflictResolutionSheet: View {
     let item: TranscriptSegment
     let currentResolution: String?
+    let isTranslation: Bool
     let choose: (String) -> Void
     let cancel: () -> Void
 
@@ -390,7 +488,9 @@ private struct ConflictResolutionSheet: View {
             }
 
             CandidateButton(
-                source: appLocalized("Primary Model"),
+                source: isTranslation
+                    ? appLocalized("Post-processing")
+                    : appLocalized("Primary Model"),
                 text: item.segment.text,
                 isSelected: currentResolution == item.segment.text,
                 choose: choose
@@ -405,7 +505,9 @@ private struct ConflictResolutionSheet: View {
                 )
             }
 
-            Text(appLocalized("Your selection is stored as a correction beside the immutable raw transcript."))
+            Text(isTranslation
+                ? appLocalized("Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.")
+                : appLocalized("Your selection is stored as a correction beside the immutable raw transcript."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -470,4 +572,69 @@ private struct TranscriptDataDocument: FileDocument {
 private struct SpeakerEdit: Identifiable {
     let speaker: String
     var id: String { speaker }
+}
+
+private struct ExistingRunAction: Identifiable {
+    let operation: PostprocessMode
+    var id: String { operation.rawValue }
+}
+
+private struct ExistingRunPostprocessSheet: View {
+    let operation: PostprocessMode
+    let start: (PostprocessChoice, AppLanguage?) -> Void
+    let cancel: () -> Void
+    @State private var backend: PostprocessChoice
+    @State private var targetLanguage: AppLanguage
+
+    init(
+        model: MaccheroniAppModel,
+        operation: PostprocessMode,
+        start: @escaping (PostprocessChoice, AppLanguage?) -> Void,
+        cancel: @escaping () -> Void
+    ) {
+        self.operation = operation
+        self.start = start
+        self.cancel = cancel
+        _backend = State(initialValue: model.selectedPostprocess == .none
+            ? .local
+            : model.selectedPostprocess)
+        _targetLanguage = State(initialValue: model.selectedTranslationTarget)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(PostprocessOperationChoice(operation).title)
+                .font(.title2)
+            Picker(appLocalized("Backend"), selection: $backend) {
+                Text(PostprocessChoice.codex.title).tag(PostprocessChoice.codex)
+                Text(PostprocessChoice.local.title).tag(PostprocessChoice.local)
+            }
+            .pickerStyle(.segmented)
+            if operation == .translation {
+                Picker(appLocalized("Target Language"), selection: $targetLanguage) {
+                    ForEach(AppLanguage.translationTargets) { language in
+                        Text(language.title).tag(language)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+            HStack {
+                Button(appLocalized("Cancel"), action: cancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button {
+                    start(
+                        backend,
+                        operation == .translation ? targetLanguage : nil
+                    )
+                } label: {
+                    Text(PostprocessOperationChoice(operation).title)
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 440)
+    }
 }

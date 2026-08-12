@@ -540,5 +540,25 @@
 	<string>Una configuración nueva selecciona Codex solo si su CLI ha iniciado sesión; de lo contrario selecciona Local. Codex recibe texto de transcripción limitado, el glosario completo del perfil activo y su hash, instrucciones de posprocesamiento y, al traducir, el idioma de destino. El audio nunca sale de este Mac.</string>
 	<key>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</key>
 	<string>El audio permanece en este Mac. La transcripción se ejecuta localmente; durante el posprocesamiento Codex recibe texto de transcripción limitado, el glosario completo del perfil activo y su hash, instrucciones de posprocesamiento y, al traducir, el idioma de destino.</string>
+	<key>Choose an M4A, WAV, or MP3 audio file.</key>
+	<string>Elige un archivo de audio M4A, WAV o MP3.</string>
+	<key>Post-processing could not start for this completed run.</key>
+	<string>No se pudo iniciar el posprocesamiento de esta ejecución completada.</string>
+	<key>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</key>
+	<string>Su aceptación se aplica únicamente a este texto traducido exacto. La transcripción de origen inmutable y la traducción permanecen sin cambios.</string>
+	<key>A derived result manifest is invalid: %@</key>
+	<string>El manifiesto de un resultado derivado no es válido: %@</string>
+	<key>A derived result does not match its source run: %@</key>
+	<string>Un resultado derivado no coincide con su ejecución de origen: %@</string>
+	<key>Source Run</key>
+	<string>Ejecución de origen</string>
+	<key>Current Derived Result</key>
+	<string>Resultado derivado actual</string>
+	<key>Glossary Semantics</key>
+	<string>Semántica del glosario</string>
+	<key>Source Run Glossary</key>
+	<string>Glosario de la ejecución de origen</string>
+	<key>Current Derived Post-processing</key>
+	<string>Posprocesamiento derivado actual</string>
 	</dict>
 </plist>

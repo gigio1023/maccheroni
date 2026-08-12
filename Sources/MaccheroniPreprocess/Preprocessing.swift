@@ -104,11 +104,65 @@ public struct PreprocessedAudio: Equatable, Sendable {
 
 /// Converts a supported source into a new PCM WAV artifact. The source URL is only opened for reading.
 public struct AudioPreprocessor: Sendable {
-    public static let supportedExtensions: Set<String> = ["m4a", "wav", "mp3"]
+    private enum InputContainer: String {
+        case m4a, mp3, wav
+    }
+
+    public static let supportedInputExtensions: Set<String> = ["m4a", "wav", "mp3"]
+    public static let supportedExtensions = supportedInputExtensions
     public static let targetSampleRate: Double = 16_000
     public static let targetChannels: AVAudioChannelCount = 1
 
     public init() {}
+
+    public static func supportsInputFile(_ url: URL) -> Bool {
+        guard url.isFileURL,
+              let expected = InputContainer(rawValue: url.pathExtension.lowercased()),
+              detectedContainer(at: url) == expected,
+              let file = try? AVAudioFile(forReading: url)
+        else {
+            return false
+        }
+        let sampleRate = file.processingFormat.sampleRate
+        guard sampleRate.isFinite, sampleRate > 0 else { return false }
+        let duration = Double(file.length) / sampleRate
+        return duration.isFinite && duration > 0
+    }
+
+    private static func detectedContainer(at url: URL) -> InputContainer? {
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: url)
+        } catch {
+            return nil
+        }
+        defer { try? handle.close() }
+        guard let header = try? handle.read(upToCount: 12), !header.isEmpty else {
+            return nil
+        }
+        let bytes = [UInt8](header)
+        if bytes.count >= 12,
+           bytes[0 ... 3] == ArraySlice("RIFF".utf8),
+           bytes[8 ... 11] == ArraySlice("WAVE".utf8)
+        {
+            return .wav
+        }
+        if bytes.count >= 8,
+           bytes[4 ... 7] == ArraySlice("ftyp".utf8)
+        {
+            return .m4a
+        }
+        if bytes.count >= 3, bytes[0 ... 2] == ArraySlice("ID3".utf8) {
+            return .mp3
+        }
+        if bytes.count >= 2,
+           bytes[0] == 0xFF,
+           bytes[1] & 0xE0 == 0xE0
+        {
+            return .mp3
+        }
+        return nil
+    }
 
     public func preprocess(
         inputURL: URL,
@@ -116,7 +170,7 @@ public struct AudioPreprocessor: Sendable {
         settings: PreprocessingSettings = .default
     ) throws -> PreprocessedAudio {
         let sourceExtension = inputURL.pathExtension.lowercased()
-        guard Self.supportedExtensions.contains(sourceExtension) else {
+        guard Self.supportsInputFile(inputURL) else {
             throw PreprocessError.unsupportedInputType(sourceExtension)
         }
         guard settings.targetPeak > 0, settings.targetPeak <= 1 else {

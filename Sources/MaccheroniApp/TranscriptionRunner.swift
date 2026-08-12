@@ -15,6 +15,7 @@ enum TranscriptionRunnerError: Error, LocalizedError {
     case resultMissing
     case resultInvalid
     case resultAmbiguous
+    case existingRunPostprocessUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -26,6 +27,8 @@ enum TranscriptionRunnerError: Error, LocalizedError {
             message
         case .resultMissing, .resultInvalid, .resultAmbiguous:
             appString("The transcription engine finished without a run directory.")
+        case .existingRunPostprocessUnavailable:
+            appString("Post-processing could not start for this completed run.")
         }
     }
 }
@@ -35,13 +38,17 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
     private let executableURL: URL
     private let requestsRoot: URL
     private let terminationTiming: ProcessTerminationTiming
+    private let pollWait: @Sendable () async throws -> Void
     private var process: Process?
     private var cancelRequested = false
 
     init(
         executableURL: URL? = nil,
         requestsRoot: URL = LibraryRepository.local.requestsRoot,
-        terminationTiming: ProcessTerminationTiming = .default
+        terminationTiming: ProcessTerminationTiming = .default,
+        pollWait: @escaping @Sendable () async throws -> Void = {
+            try await Task.sleep(for: .milliseconds(250))
+        }
     ) throws {
         guard let resolved = executableURL ?? Self.resolveExecutable(),
               FileManager.default.isExecutableFile(atPath: resolved.path)
@@ -51,6 +58,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
         self.executableURL = resolved
         self.requestsRoot = requestsRoot
         self.terminationTiming = terminationTiming
+        self.pollWait = pollWait
     }
 
     func run(
@@ -139,7 +147,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
                 ))
             }
             do {
-                try await Task.sleep(for: .milliseconds(250))
+                try await pollWait()
             } catch {
                 cancelRequested = true
                 await terminate(task, liveness: liveness)
@@ -201,6 +209,141 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
         return runURL
     }
 
+    func postprocess(
+        _ request: ExistingRunPostprocessRequest,
+        progress: @escaping @MainActor (ExistingRunPostprocessProgress) -> Void
+    ) async throws -> URL {
+        guard process == nil else {
+            throw TranscriptionRunnerError.launchFailed("another run is active")
+        }
+        _ = try RunIntegrityVerifier.verifyCompletedRun(at: request.sourceRunURL)
+        cancelRequested = false
+        let requestDirectory = try createRequestDirectory()
+        let profileURL = requestDirectory.appendingPathComponent("profiles.json")
+        try writeProfile(for: request, to: profileURL)
+        let stdoutURL = requestDirectory.appendingPathComponent("stdout.log")
+        let stderrURL = requestDirectory.appendingPathComponent("stderr.log")
+        try Data().write(to: stdoutURL, options: .withoutOverwriting)
+        try Data().write(to: stderrURL, options: .withoutOverwriting)
+        let stdout = try FileHandle(forWritingTo: stdoutURL)
+        let stderr = try FileHandle(forWritingTo: stderrURL)
+        defer {
+            try? stdout.close()
+            try? stderr.close()
+            process = nil
+        }
+
+        let launchedAt = Date()
+        let task = Process()
+        task.executableURL = executableURL
+        task.arguments = postprocessArguments(for: request, profileURL: profileURL)
+        task.environment = ProcessInfo.processInfo.environment.merging([
+            "HF_HUB_OFFLINE": "1",
+        ]) { current, _ in current }
+        task.standardOutput = stdout
+        task.standardError = stderr
+        do {
+            try task.run()
+        } catch {
+            throw TranscriptionRunnerError.launchFailed(error.localizedDescription)
+        }
+        process = task
+        let liveness = TranscriptionProcessLiveness(task)
+        progress(ExistingRunPostprocessProgress(
+            operation: request.operation,
+            elapsedS: 0,
+            modelID: request.postprocess.requestedModelID,
+            message: nil
+        ))
+
+        var cancellationInterruptedChild = false
+        while task.isRunning {
+            if cancelRequested || Task.isCancelled {
+                cancelRequested = true
+                cancellationInterruptedChild = true
+                await terminate(task, liveness: liveness)
+                break
+            }
+            progress(ExistingRunPostprocessProgress(
+                operation: request.operation,
+                elapsedS: max(0, Date().timeIntervalSince(launchedAt)),
+                modelID: request.postprocess.requestedModelID,
+                message: nil
+            ))
+            do {
+                try await pollWait()
+            } catch {
+                cancelRequested = true
+                if task.isRunning {
+                    cancellationInterruptedChild = true
+                    await terminate(task, liveness: liveness)
+                }
+                break
+            }
+        }
+        if !cancellationInterruptedChild { task.waitUntilExit() }
+        stdout.synchronizeFile()
+        stderr.synchronizeFile()
+        if cancellationInterruptedChild { throw CancellationError() }
+        guard task.terminationStatus == 0 else {
+            let message = try String(contentsOf: stderrURL, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw TranscriptionRunnerError.pipelineFailed(
+                message.isEmpty
+                    ? appString("The transcription engine exited with status \(task.terminationStatus).")
+                    : message
+            )
+        }
+        let output = try String(contentsOf: stdoutURL, encoding: .utf8)
+        let lines = output.split(whereSeparator: \.isNewline).map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
+        guard lines.count == 1, lines[0].hasPrefix("/") else {
+            throw TranscriptionRunnerError.resultInvalid
+        }
+        let derivedURL = URL(
+            fileURLWithPath: lines[0],
+            isDirectory: true
+        ).standardizedFileURL
+        let derivedRoot = request.sourceRunURL.appendingPathComponent(
+            "derived",
+            isDirectory: true
+        ).resolvingSymlinksInPath().standardizedFileURL
+        let resolvedDerived = derivedURL.resolvingSymlinksInPath().standardizedFileURL
+        let rootPrefix = derivedRoot.path.hasSuffix("/")
+            ? derivedRoot.path
+            : derivedRoot.path + "/"
+        guard resolvedDerived.path.hasPrefix(rootPrefix) else {
+            throw TranscriptionRunnerError.resultInvalid
+        }
+        let manifest: DerivedManifest
+        do {
+            manifest = try JSONDecoder().decode(
+                DerivedManifest.self,
+                from: Data(contentsOf: derivedURL.appendingPathComponent("manifest.json"))
+            )
+        } catch {
+            throw TranscriptionRunnerError.resultInvalid
+        }
+        guard manifest.derivedID == derivedURL.lastPathComponent,
+              manifest.status == .succeeded,
+              manifest.failure == nil,
+              manifest.source.runID == request.sourceRunURL.lastPathComponent,
+              manifest.operation.profileName == request.profile.cliProfile,
+              manifest.operation.mode == request.operation,
+              manifest.operation.targetLanguage == request.translationTargetLanguage
+        else {
+            throw TranscriptionRunnerError.resultInvalid
+        }
+        progress(ExistingRunPostprocessProgress(
+            operation: request.operation,
+            elapsedS: max(0, Date().timeIntervalSince(launchedAt)),
+            modelID: manifest.postprocess?.modelID,
+            message: nil
+        ))
+        return derivedURL
+    }
+
     func cancel() {
         cancelRequested = true
     }
@@ -223,6 +366,22 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
             "--profile", request.profile.cliProfile,
             "--profiles", profileURL.path,
             "--output-root", request.outputRoot.path,
+        ]
+        if let glossaryURL = request.glossaryURL {
+            values += ["--glossary", glossaryURL.path]
+        }
+        return values
+    }
+
+    private func postprocessArguments(
+        for request: ExistingRunPostprocessRequest,
+        profileURL: URL
+    ) -> [String] {
+        var values = [
+            "postprocess",
+            request.sourceRunURL.path,
+            "--profile", request.profile.cliProfile,
+            "--profiles", profileURL.path,
         ]
         if let glossaryURL = request.glossaryURL {
             values += ["--glossary", glossaryURL.path]
@@ -291,6 +450,57 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
                 || request.postprocessMode == .correction
                 ? nil
                 : request.translationTargetLanguage
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(Document(profiles: [profile]))
+            .write(to: url, options: .withoutOverwriting)
+    }
+
+    private func writeProfile(
+        for request: ExistingRunPostprocessRequest,
+        to url: URL
+    ) throws {
+        struct Diarization: Encodable {
+            var enabled = true
+            var backend: String
+        }
+        struct Profile: Encodable {
+            var name: String
+            var asrBackend: String
+            var languagePin: String
+            var diarization: Diarization
+            var postprocess: String
+            var postprocessMode: String
+            var targetLanguage: String?
+
+            enum CodingKeys: String, CodingKey {
+                case name, diarization, postprocess
+                case asrBackend = "asr_backend"
+                case languagePin = "language_pin"
+                case postprocessMode = "postprocess_mode"
+                case targetLanguage = "target_language"
+            }
+        }
+        struct Document: Encodable {
+            var schemaVersion = "1.0.0"
+            var profiles: [Profile]
+
+            enum CodingKeys: String, CodingKey {
+                case profiles
+                case schemaVersion = "schema_version"
+            }
+        }
+        let profile = Profile(
+            name: request.profile.cliProfile,
+            asrBackend: request.profile.asrBackend,
+            languagePin: request.profile.languagePin,
+            diarization: Diarization(backend: request.profile.diarizationBackend),
+            postprocess: request.postprocess.rawValue,
+            postprocessMode: request.operation.rawValue,
+            targetLanguage: request.operation == .translation
+                ? request.translationTargetLanguage
+                : nil
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

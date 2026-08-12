@@ -363,6 +363,22 @@ import Testing
         #expect(try glossary.payload(for: .freeTextContext) == "Giovanni Ferrero\n김마케로니\nQwen3-ASR # literal")
     }
 
+    @Test func zeroEntryGlossaryResolvesAsAbsent() throws {
+        let data = Data("\u{FEFF}# owner note\r\n\r\n  # category: terms  \r\n".utf8)
+
+        #expect(try Glossary.parse(data: data).entries.isEmpty)
+        #expect(try Glossary.parseOptional(data: data) == nil)
+    }
+
+    @Test func optionalGlossaryStillRejectsInvalidSourceBytes() {
+        #expect(throws: GlossaryError.containsNUL) {
+            try Glossary.parseOptional(data: Data("# note\0".utf8))
+        }
+        #expect(throws: GlossaryError.invalidUTF8) {
+            try Glossary.parseOptional(data: Data([0xFF]))
+        }
+    }
+
     @Test func absentGlossaryEncodesRequiredNullHash() throws {
         let encoded = try JSONEncoder().encode(ManifestGlossary.absent)
         let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
@@ -411,6 +427,91 @@ import Testing
 
         let glossary = try Glossary.parse(data: Data("e\u{301}\né\nE\n".utf8))
         #expect(glossary.entries == ["é", "E"])
+    }
+
+    @Test func derivedManifestRoundTripsExplicitSourceAndGlossaryLineage() throws {
+        let manifest = DerivedManifest(
+            derivedID: "20260812T120000Z-derived",
+            status: .succeeded,
+            source: DerivedSourceLineage(
+                runID: "source-run",
+                manifestSHA256: sha256,
+                segmentsPath: "merged/segments.json",
+                segmentsSHA256: sha256
+            ),
+            operation: DerivedOperation(
+                profileName: "ko-meeting",
+                mode: .translation,
+                targetLanguage: "en",
+                glossarySemantics: .currentProfile,
+                glossarySHA256: sha256,
+                glossaryItemCount: 2
+            ),
+            timing: RunTiming(
+                startedAt: "2026-08-12T12:00:00Z",
+                finishedAt: "2026-08-12T12:00:01Z",
+                wallTimeS: 1
+            ),
+            artifacts: [Artifact(
+                kind: "postprocess_translation",
+                path: "postprocess/translation.json",
+                sha256: sha256
+            )],
+            failure: nil,
+            postprocess: ManifestPostprocess(
+                backend: BackendDescriptor(name: "fixture", version: "1"),
+                modelID: "fixture/model",
+                glossarySHA256: sha256,
+                mode: .translation,
+                targetLanguage: "en",
+                sourceSegmentsSHA256: sha256
+            )
+        )
+
+        let data = try JSONEncoder().encode(manifest)
+        let object = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        #expect(object["derived_id"] as? String == manifest.derivedID)
+        let source = try #require(object["source"] as? [String: Any])
+        #expect(source["run_id"] as? String == "source-run")
+        #expect(source["manifest_sha256"] as? String == sha256)
+        let operation = try #require(object["operation"] as? [String: Any])
+        #expect(operation["glossary_semantics"] as? String == "current-profile")
+        #expect(operation["glossary_item_count"] as? Int == 2)
+        #expect(try JSONDecoder().decode(DerivedManifest.self, from: data) == manifest)
+    }
+
+    @Test func completedRunVerifierRejectsTypedIntegrityFailures() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "MaccheroniCoreIntegrity-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        do {
+            _ = try RunIntegrityVerifier.verifyCompletedRun(at: root)
+            Issue.record("expected missing manifest rejection")
+        } catch let error as RunIntegrityError {
+            #expect(error == .manifestMissing)
+        }
+
+        try Data("not-json".utf8).write(
+            to: root.appendingPathComponent("manifest.json")
+        )
+        do {
+            _ = try RunIntegrityVerifier.verifyCompletedRun(at: root)
+            Issue.record("expected invalid manifest rejection")
+        } catch let error as RunIntegrityError {
+            guard case .manifestInvalid = error else {
+                Issue.record("unexpected integrity error: \(error)")
+                return
+            }
+        }
     }
 
     @Test func adapterProtocolsCarryLanguageGlossaryAndSpeakerBounds() async throws {
