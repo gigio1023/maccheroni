@@ -41,6 +41,12 @@ Normalization and matching rules:
 null when the denominator is 0. Glossary-off and glossary-on runs use the same
 reference annotation.
 
+For an acceptance-pack ASR run, term recall is mandatory rather than optional.
+Use `check_run.py --kind acceptance-asr` for HiKE and
+`check_run.py --kind acceptance-full` for the AMI meeting. The latter also
+requires a diarization score. The score must retain its aggregate counts and
+every per-term count so the aggregate recall can be recalculated.
+
 ## Utterance omission
 
 Exclude noise and non-speech reference segments whose `scorable` value is

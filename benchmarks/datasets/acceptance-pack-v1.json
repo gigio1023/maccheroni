@@ -1,0 +1,192 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "korean-english-acceptance-v1",
+  "source_root_layout": {
+    "sources": "sources",
+    "prepared": "prepared"
+  },
+  "fixtures": [
+    {
+      "fixture_id": "hike-code-switch-v1",
+      "purpose": "Korean-English code-switched ASR and official-loanword glossary recall",
+      "license": {
+        "name": "Apache-2.0",
+        "url": "https://www.apache.org/licenses/LICENSE-2.0"
+      },
+      "source": {
+        "dataset_id": "thetaone-ai/HiKE",
+        "revision": "255609b24005e1fcce3f8b3a452260aaf2872cc9",
+        "url": "https://huggingface.co/datasets/thetaone-ai/HiKE/resolve/255609b24005e1fcce3f8b3a452260aaf2872cc9/data/test-00000-of-00001.parquet",
+        "files": [
+          {
+            "relative_path": "sources/hike/data/test-00000-of-00001.parquet",
+            "size_bytes": 235089121,
+            "sha256": "cc807d5e31c92df85a46445b28df2b239f7fb33943a35502161af61c1ee8b4d0"
+          }
+        ]
+      },
+      "selection": {
+        "algorithm_id": "maccheroni-acceptance-hike-v1",
+        "algorithm_version": 1,
+        "cs_level_order": [
+          "word",
+          "phrase",
+          "sentence"
+        ],
+        "quota_per_cs_level": 4,
+        "silence_between_items_s": 0.5,
+        "minimum_duration_s": 2.0,
+        "maximum_duration_s": 20.0,
+        "reference_text": "HiKE text_normalized exactly as released; no loanword replacement mapping is applied to CER or WER.",
+        "glossary_derivation": "Parse official loanwords JSON, retain English values with an exact normalized occurrence in the assembled text_normalized reference, deduplicate by NFKC casefold, then sort by that key.",
+        "pinned_subset": [
+          {
+            "sample_id": "0c47a000-1772-419a-b7d4-cf9178a90cc0",
+            "cs_level": "word",
+            "category": "academic",
+            "row_index": 226,
+            "source_audio_sha256": "eb10d470882b901ca90d96ce0bbc4289988991c633c2db57eeac7c881688205b",
+            "source_duration_s": 7.2475
+          },
+          {
+            "sample_id": "39294b8b-2497-403d-b517-ccb1f6bb5bfa",
+            "cs_level": "word",
+            "category": "business",
+            "row_index": 791,
+            "source_audio_sha256": "39cfee8983e78ef1f97238be2d4da58158f1d9e9384d17d2556a427364e5970d",
+            "source_duration_s": 10.08
+          },
+          {
+            "sample_id": "b5905871-7a2f-4e52-9236-291e781f21fd",
+            "cs_level": "word",
+            "category": "medical",
+            "row_index": 367,
+            "source_audio_sha256": "c8799c12e7c442396529e0d1d2069726f78697ede291110da7dcecc333369f4a",
+            "source_duration_s": 3.48
+          },
+          {
+            "sample_id": "33c43069-4dcd-4e26-8ea9-6d561bff464c",
+            "cs_level": "word",
+            "category": "everyday conversation",
+            "row_index": 517,
+            "source_audio_sha256": "3484cb35ba7276cc894434b99a4423c16692fbdd558678829764bac50930a17d",
+            "source_duration_s": 3.1475
+          },
+          {
+            "sample_id": "9ae7392c-eba8-4556-a948-6387191f3909",
+            "cs_level": "phrase",
+            "category": "academic",
+            "row_index": 141,
+            "source_audio_sha256": "12ab019c565eb281abcb06ba9776c506629b1dd3fa65b497a6953313bda8c9af",
+            "source_duration_s": 8.7
+          },
+          {
+            "sample_id": "5bb23641-691b-484a-a771-e17545b808be",
+            "cs_level": "phrase",
+            "category": "business",
+            "row_index": 829,
+            "source_audio_sha256": "d61fe0a8ef9a074c3641a6922bf5571f1c0c38aa9d0e3a23eee9ee91d531e19f",
+            "source_duration_s": 6.755
+          },
+          {
+            "sample_id": "929e5099-e14f-4cbc-9ff2-783b230a72a4",
+            "cs_level": "phrase",
+            "category": "medical",
+            "row_index": 42,
+            "source_audio_sha256": "a5aa835277487d2a9c43d05b1fd33ed1b43b659adaadcaad921af6b754c7508f",
+            "source_duration_s": 4.02
+          },
+          {
+            "sample_id": "40ce5e15-ec33-43a2-9f6a-2102eb534f21",
+            "cs_level": "phrase",
+            "category": "everyday conversation",
+            "row_index": 386,
+            "source_audio_sha256": "4b08b2979d552605ac8a26786b81d3ea2dff1402f04a08bbe5a4bf197990c07e",
+            "source_duration_s": 4.62
+          },
+          {
+            "sample_id": "ebb4c44f-7cd3-4bf1-b77c-5f6a77cd03a4",
+            "cs_level": "sentence",
+            "category": "academic",
+            "row_index": 221,
+            "source_audio_sha256": "3b939e71619d9f2347c60f73083a131418915d364833f5660dd8b62d5e1bc67b",
+            "source_duration_s": 13.815
+          },
+          {
+            "sample_id": "7bde6c38-df44-4a62-9afc-ad5f16cf944a",
+            "cs_level": "sentence",
+            "category": "business",
+            "row_index": 783,
+            "source_audio_sha256": "db8c62fcc215e567215a21e0474d5157dbbf7b7f7d0125c9cd2d1f29b55db178",
+            "source_duration_s": 6.96
+          },
+          {
+            "sample_id": "d1ac6ca7-4492-45a6-ab80-16de1b4a5924",
+            "cs_level": "sentence",
+            "category": "everyday conversation",
+            "row_index": 634,
+            "source_audio_sha256": "0024e2d740ebd436521972e7737fb1b463e9af1b8b4c7a671528ef4bf8399009",
+            "source_duration_s": 5.82
+          },
+          {
+            "sample_id": "49672583-2c66-418a-b7b6-39bf3b9e1637",
+            "cs_level": "sentence",
+            "category": "entertainment",
+            "row_index": 1110,
+            "source_audio_sha256": "89fff8986e8728e80e724ee4ee5b98949cf75683a90f4dbb78484a0d9c61de32",
+            "source_duration_s": 5.82
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "ami-in1009-ihm-mix-v1",
+      "purpose": "Long-form four-speaker English meeting ASR, diarization, and glossary recall",
+      "license": {
+        "name": "CC-BY-4.0",
+        "url": "https://creativecommons.org/licenses/by/4.0/"
+      },
+      "attribution": "AMI Meeting Corpus, AMI Consortium / University of Edinburgh and Idiap; manual annotations v1.6.2.",
+      "source": {
+        "meeting_id": "IN1009",
+        "meeting_kind": "natural non-scenario meeting",
+        "microphone_condition": "IHM-mix, one mono mix of the four near-field headset channels. It keeps a single waveform for diarization and is closer to a captured meeting mix than isolated headset channels. It is a clean-mix condition, not a far-field or room-microphone claim.",
+        "files": [
+          {
+            "relative_path": "sources/ami/IN1009.Mix-Headset.wav",
+            "url": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/IN1009/audio/IN1009.Mix-Headset.wav",
+            "size_bytes": 40203138,
+            "sha256": "7ee90aac9105734ab40d3085dcb4d0ad4ba06adc1c24facb2ad843529b489506"
+          },
+          {
+            "relative_path": "sources/ami/ami_public_manual_1.6.2.zip",
+            "url": "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip",
+            "size_bytes": 22887865,
+            "sha256": "b56e5babb2496b8795deeeda7e71178d7fbc9963f94276cf2a3f4b56ebbc9f9d"
+          }
+        ],
+        "archive_members": {
+          "corpusResources/meetings.xml": "8ab6cdcf03ed863e839418f31c7380392397a2eed892d73b9bc1b438c7ec520a",
+          "segments/IN1009.A.segments.xml": "5fe90897d8ada8dc945c6a9416fc9ab5a35fa8f52b26a0360ad45f91b93c47dd",
+          "segments/IN1009.B.segments.xml": "8c79567a930b72d5971aa2e742f23d9f4c916ba966084c58e6afacf9978cd617",
+          "segments/IN1009.C.segments.xml": "e36ec248d80dae18a48654c7740278790e1a83f08788b1616877c79900120e79",
+          "segments/IN1009.D.segments.xml": "9a107509712ee1427d0a78315520a8f3e598620aaf69924855a8d788d4b42998",
+          "words/IN1009.A.words.xml": "b8da842fbd878e881b72b9bf11f7a2e579649ab5a293b7fabaa941df721e9c0f",
+          "words/IN1009.B.words.xml": "cf9b070e0d278acb4ecc4283f7974d50011341a70dbc5b4205d62d29c6401c5f",
+          "words/IN1009.C.words.xml": "4c58f522b7e7133f22314aae85b56615684930bb29e6a11a42218900bf0052e8",
+          "words/IN1009.D.words.xml": "38990bdb875fca1a569b578f2801687172bbe3601c33fc72c99479830634b084"
+        }
+      },
+      "reference_derivation": {
+        "algorithm_id": "maccheroni-acceptance-ami-in1009-v1",
+        "algorithm_version": 1,
+        "text": "Map IN1009 local agents A-D to global speakers in meetings.xml. For every positive-duration manual segment, resolve its NITE word-ID range in the matching words XML. Emit nonempty lexical segments in time order for ASR, and every positive-duration manual segment for RTTM.",
+        "expected_lexical_segment_count": 274,
+        "expected_lexical_word_count": 2879,
+        "expected_rttm_turn_count": 290,
+        "expected_speaker_count": 4,
+        "glossary_derivation": "Count normalized Latin lexical tokens in the ASR reference. Keep tokens with at least 3 ASCII letters and 3 through 8 occurrences. Exclude the built-in stoplist and all single-character tokens. This derives the complete eligible meeting vocabulary by frequency rather than hand-selecting terms."
+      }
+    }
+  ]
+}
