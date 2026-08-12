@@ -63,7 +63,7 @@ Tutti i componenti esistono già nelle librerie. Mancava la loro combinazione in
   <img src="docs/assets/pipeline-light.drawio.svg" alt="Diagramma della pipeline: sul Mac, l'acquisizione alimenta la diarizzazione dell'intero file e i segmenti ASR da 120 secondi con iniezione del glossario per segmento; la fusione per timestamp, in cui la timeline decide i parlanti, alimenta la post-elaborazione opzionale sul dispositivo; l'unica cosa che lascia il Mac è la corsia opzionale di post-elaborazione remota verso un fornitore esterno tramite l'accesso Codex, solo testo" width="100%">
 </picture>
 
-I segmenti non riusciti vengono suddivisi di nuovo entro limiti tipizzati (minimo 30 s, profondità 3). Solo gli output con token di fine sequenza vengono promossi nella trascrizione canonica. Il percorso Codex facoltativo invia, tramite il tuo abbonamento ChatGPT/Codex, testo della trascrizione in blocchi limitati, glossario attivo e istruzioni: mai l’audio e mai i percorsi dei file.
+I segmenti non riusciti vengono suddivisi di nuovo entro limiti tipizzati (minimo 30 s, profondità 3). Solo gli output con token di fine sequenza vengono promossi nella trascrizione canonica. Il percorso Codex facoltativo invia, tramite il tuo abbonamento ChatGPT/Codex, testo della trascrizione in blocchi limitati, glossario attivo e istruzioni: mai l’audio e mai i percorsi dei file. La correzione tratta il glossario come contesto di supporto: un termine viene sostituito solo dove il segmento lo contiene plausibilmente, e ogni riparazione incerta viene contrassegnata per la revisione invece di essere applicata.
 
 ## Modelli
 
@@ -102,6 +102,8 @@ Nel campione di 78 minuti, la stabilità dei parlanti ai confini dei segmenti è
   <img src="docs/assets/leaf-cap-light.svg" alt="Grafico a barre: sullo stesso input di 600 secondi, i segmenti da 120 s producono 5 foglie canoniche con fine sequenza (superato), quelli da 240 e 300 s producono 0 foglie valide (errori tipizzati invalid_eos_output), e il recupero forzato da genitori di 240 s produce 5 figli validi da 120 s" width="100%">
 </picture>
 
+I guadagni della correzione si misurano, non si presumono. Un banco di confronto a quattro stati valuta l’output grezzo e quello corretto di un’esecuzione completata contro lo stesso riferimento, con e senza iniezione del glossario in decodifica, e conta ogni correzione applicata che ha allontanato un segmento dal riferimento. Una riparazione sbagliata ma sicura di sé non può nascondersi in una media.
+
 ## Installazione
 
 Non esistono ancora release preconfezionate: occorre compilare il progetto dal codice sorgente.
@@ -137,8 +139,8 @@ Sono inclusi profili per riunioni in coreano (`ko-meeting`, VibeVoice) e dialogh
 </p>
 
 - Trascrizione, VAD e diarizzazione vengono eseguite interamente in locale. I byte dell’audio non raggiungono mai alcun percorso di rete: lo garantiscono i test, non una semplice regola.
-- Il percorso facoltativo di post-elaborazione Codex invia solo testo e richiede il consenso per ogni esecuzione. Apre una sessione a turno singolo con `codex app-server` usando l’accesso salvato all’abbonamento ChatGPT. Il thread è temporaneo e di sola lettura, gli strumenti sono disabilitati e le richieste di approvazione vengono rifiutate. Il prompt contiene il testo dei segmenti, il glossario attivo e le istruzioni. Questo percorso non accetta l’autenticazione con chiave API. Scegliendo il modello MLX locale, anche il testo rimane sul dispositivo.
-- Prima di entrare nei manifest di esecuzione, i messaggi di errore vengono limitati in lunghezza e privati dei percorsi dei file.
+- Il percorso facoltativo di post-elaborazione Codex invia solo testo e richiede il consenso per ogni esecuzione. Apre una sessione a turno singolo con `codex app-server` usando l’accesso salvato all’abbonamento ChatGPT. Il thread è temporaneo e di sola lettura, i server MCP e gli strumenti facoltativi sono disabilitati e le richieste di approvazione vengono rifiutate. Il prompt contiene il testo dei segmenti, il glossario attivo e le istruzioni. Questo percorso non accetta l’autenticazione con chiave API. Scegliendo il modello MLX locale, anche il testo rimane sul dispositivo.
+- Prima di entrare nei manifest di esecuzione, i messaggi di errore del percorso Codex vengono limitati in lunghezza e privati dei percorsi dei file.
 
 ## Limiti
 
@@ -158,7 +160,7 @@ Issue e pull request mirate sono benvenute. I comandi di build e test, lo standa
 |---|---|
 | `Sources/` | Pacchetto Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
 | `Tests/` | 241 test basati su fixture in 22 suite |
-| `benchmarks/scripts/` | Runner e script di valutazione con verdetti derivati e test negativi |
+| `benchmarks/scripts/` | Runner, script di valutazione e il banco di confronto dei percorsi di correzione, con verdetti derivati e test negativi |
 | `docs/` | Sintesi della ricerca, analisi del codice sorgente, regole sui vincoli, contratti (schemi JSON), progettazione dell’interfaccia |
 | `scripts/` | Compilazione del bundle dell’app, compilazione dell’harness MOSS, configurazione del runtime di post-elaborazione |
 | [PROJECT.md](PROJECT.md) | Gerarchia degli intenti: principi, non-obiettivi, regole di giudizio e registro decisionale append-only |

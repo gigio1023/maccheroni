@@ -63,7 +63,7 @@ Toutes les briques existent dans les bibliothèques. Leur combinaison n’exista
   <img src="docs/assets/pipeline-light.drawio.svg" alt="Diagramme du pipeline : sur le Mac, la capture alimente la diarisation du fichier entier et les feuilles ASR de 120 secondes avec injection du glossaire par feuille ; la fusion par horodatage, où la timeline décide des locuteurs, alimente le post-traitement optionnel sur l'appareil ; la seule chose qui quitte le Mac est la voie opt-in de post-traitement distant vers un fournisseur externe via la connexion Codex, texte uniquement" width="100%">
 </picture>
 
-Les feuilles en échec sont redécoupées dans des limites typées (minimum de 30 s, profondeur 3), et seules les sorties terminées par un marqueur de fin de séquence sont intégrées à la transcription canonique. Le chemin Codex facultatif envoie, par votre propre abonnement ChatGPT/Codex, des blocs limités de texte transcrit, le glossaire actif et des instructions, jamais l’audio ni les chemins de fichiers.
+Les feuilles en échec sont redécoupées dans des limites typées (minimum de 30 s, profondeur 3), et seules les sorties terminées par un marqueur de fin de séquence sont intégrées à la transcription canonique. Le chemin Codex facultatif envoie, par votre propre abonnement ChatGPT/Codex, des blocs limités de texte transcrit, le glossaire actif et des instructions, jamais l’audio ni les chemins de fichiers. La correction traite le glossaire comme un contexte d’appui : un terme n’est substitué que là où le segment le contient plausiblement, et toute réparation incertaine est signalée pour relecture au lieu d’être appliquée.
 
 ## Modèles
 
@@ -102,6 +102,8 @@ Stabilité des locuteurs aux frontières des fragments sur l’échantillon de 7
   <img src="docs/assets/leaf-cap-light.svg" alt="Diagramme en barres : sur la même entrée de 600 secondes, les feuilles de 120 s produisent 5 feuilles canoniques avec fin de séquence (réussite), celles de 240 et 300 s produisent 0 feuille valide (échecs typés invalid_eos_output), et la récupération forcée depuis des parents de 240 s produit 5 enfants valides de 120 s" width="100%">
 </picture>
 
+Les gains de la correction sont mesurés, pas supposés. Un banc de comparaison à quatre états évalue la sortie brute et la sortie corrigée d’une exécution terminée contre la même référence, avec et sans injection du glossaire au décodage, et compte chaque correction appliquée qui a éloigné un segment de la référence. Une réparation fausse mais sûre d’elle ne peut pas se cacher dans une moyenne.
+
 ## Installation
 
 Il n’existe pas encore de version empaquetée : compilez depuis les sources.
@@ -137,8 +139,8 @@ Des profils sont fournis pour les réunions en coréen (`ko-meeting`, VibeVoice)
 </p>
 
 - La transcription, la VAD et la diarisation s’exécutent entièrement en local. Les octets audio n’empruntent jamais de chemin réseau ; des tests l’imposent, pas une simple règle.
-- Le chemin facultatif de post-traitement Codex n’envoie que du texte et nécessite une activation pour chaque exécution. Il ouvre une session `codex app-server` à un seul tour avec la connexion d’abonnement ChatGPT enregistrée. Le fil est éphémère et en lecture seule, les outils sont désactivés et les demandes d’approbation sont refusées. Le prompt contient le texte des segments, le glossaire actif et des instructions. Ce chemin n’accepte pas l’authentification par clé API. Choisir le modèle MLX local conserve même le texte sur l’appareil.
-- Les messages d’échec sont limités en longueur et leurs chemins sont masqués avant leur inscription dans les manifestes d’exécution.
+- Le chemin facultatif de post-traitement Codex n’envoie que du texte et nécessite une activation pour chaque exécution. Il ouvre une session `codex app-server` à un seul tour avec la connexion d’abonnement ChatGPT enregistrée. Le fil est éphémère et en lecture seule, les serveurs MCP et les outils facultatifs sont désactivés et les demandes d’approbation sont refusées. Le prompt contient le texte des segments, le glossaire actif et des instructions. Ce chemin n’accepte pas l’authentification par clé API. Choisir le modèle MLX local conserve même le texte sur l’appareil.
+- Les messages d’échec du chemin Codex sont limités en longueur et leurs chemins sont masqués avant leur inscription dans les manifestes d’exécution.
 
 ## Limites
 
@@ -158,7 +160,7 @@ Les signalements de problèmes et les pull requests ciblées sont les bienvenus.
 |---|---|
 | `Sources/` | Package Swift : Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
 | `Tests/` | 241 tests fondés sur des fixtures, répartis en 22 suites |
-| `benchmarks/scripts/` | Outils d’exécution et de notation avec verdicts dérivés et tests négatifs |
+| `benchmarks/scripts/` | Outils d’exécution et de notation et le banc de comparaison des chemins de correction, avec verdicts dérivés et tests négatifs |
 | `docs/` | Synthèse de recherche, audits des sources, politique de contraintes, contrats (schémas JSON), conception de l’interface |
 | `scripts/` | Compilation du bundle de l’application, compilation du harness MOSS, configuration de l’environnement de post-traitement |
 | [PROJECT.md](PROJECT.md) | Hiérarchie d’intention : piliers, non-objectifs, règles de décision et journal de décisions en ajout seul |

@@ -63,7 +63,7 @@ Todas as peças existem na camada de bibliotecas. A combinação não existia na
   <img src="docs/assets/pipeline-light.drawio.svg" alt="Diagrama do pipeline: no Mac, a captura alimenta a diarização do arquivo inteiro e as folhas ASR de 120 segundos com injeção de glossário por folha; a fusão por timestamps, em que a linha do tempo decide os falantes, alimenta o pós-processamento opcional no dispositivo; a única coisa que sai do Mac é a faixa opcional de pós-processamento remoto para um fornecedor externo via login do Codex, somente texto" width="100%">
 </picture>
 
-Os segmentos que falham são subdivididos dentro de limites tipados (mínimo de 30 s, profundidade 3). Somente saídas com fim de sequência são incorporadas à transcrição canônica. A via opcional do Codex envia, pela sua própria assinatura do ChatGPT/Codex, texto da transcrição em blocos limitados, o glossário ativo e instruções: nunca áudio ou caminhos de arquivos.
+Os segmentos que falham são subdivididos dentro de limites tipados (mínimo de 30 s, profundidade 3). Somente saídas com fim de sequência são incorporadas à transcrição canônica. A via opcional do Codex envia, pela sua própria assinatura do ChatGPT/Codex, texto da transcrição em blocos limitados, o glossário ativo e instruções: nunca áudio ou caminhos de arquivos. A correção trata o glossário como contexto de apoio: um termo só é substituído onde o segmento plausivelmente o contém, e todo reparo incerto é marcado para revisão em vez de aplicado.
 
 ## Modelos
 
@@ -102,6 +102,8 @@ A estabilidade dos falantes nos limites dos segmentos da amostra de 78 minutos f
   <img src="docs/assets/leaf-cap-light.svg" alt="Gráfico de barras: na mesma entrada de 600 segundos, folhas de 120 s produzem 5 folhas canônicas com fim de sequência (aprovado), folhas de 240 e 300 s produzem 0 folhas válidas (falhas tipadas invalid_eos_output), e a recuperação forçada de pais de 240 s produz 5 filhos válidos de 120 s" width="100%">
 </picture>
 
+Os ganhos da correção são medidos, não presumidos. Um arnês de comparação de quatro estados avalia a saída bruta e a corrigida de uma execução concluída contra a mesma referência, com e sem injeção do glossário na decodificação, e conta cada correção aplicada que afastou um segmento da referência. Um reparo errado, mas confiante, não consegue se esconder em uma média.
+
 ## Instalação
 
 Ainda não há versões empacotadas: compile o projeto a partir do código-fonte.
@@ -137,8 +139,8 @@ O projeto inclui perfis para reuniões em coreano (`ko-meeting`, VibeVoice) e di
 </p>
 
 - A transcrição, o VAD e a diarização são totalmente locais. Os bytes de áudio nunca chegam a nenhum caminho de rede: isso é garantido por testes, não por uma simples política.
-- A via opcional de pós-processamento com Codex envia somente texto e exige adesão a cada execução. Ela abre uma sessão de um único turno com `codex app-server` usando o login salvo da assinatura do ChatGPT. A thread é temporária e somente de leitura, as ferramentas ficam desativadas e as solicitações de aprovação são recusadas. O prompt contém o texto dos segmentos, o glossário ativo e as instruções. Essa via não aceita autenticação por chave de API. Se você escolher o modelo MLX local, até o texto permanecerá no dispositivo.
-- As mensagens de falha têm o comprimento limitado e os caminhos ocultados antes de entrarem nos manifestos de execução.
+- A via opcional de pós-processamento com Codex envia somente texto e exige adesão a cada execução. Ela abre uma sessão de um único turno com `codex app-server` usando o login salvo da assinatura do ChatGPT. A thread é temporária e somente de leitura, os servidores MCP e as ferramentas opcionais ficam desativados e as solicitações de aprovação são recusadas. O prompt contém o texto dos segmentos, o glossário ativo e as instruções. Essa via não aceita autenticação por chave de API. Se você escolher o modelo MLX local, até o texto permanecerá no dispositivo.
+- As mensagens de falha da via do Codex têm o comprimento limitado e os caminhos ocultados antes de entrarem nos manifestos de execução.
 
 ## Limitações
 
@@ -158,7 +160,7 @@ Issues e pull requests focados são bem-vindos. Os comandos de compilação e te
 |---|---|
 | `Sources/` | Pacote Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
 | `Tests/` | 241 testes baseados em fixtures, distribuídos em 22 suites |
-| `benchmarks/scripts/` | Executores e avaliadores com veredictos derivados e testes negativos |
+| `benchmarks/scripts/` | Executores, avaliadores e o arnês de comparação de vias de correção, com veredictos derivados e testes negativos |
 | `docs/` | Resumo da pesquisa, auditorias de código-fonte, política de restrições, contratos (esquemas JSON), design da interface |
 | `scripts/` | Compilação do bundle do aplicativo, compilação do harness MOSS, configuração do runtime de pós-processamento |
 | [PROJECT.md](PROJECT.md) | Hierarquia de intenções: pilares, objetivos excluídos, regras de decisão e registro de decisões somente de acréscimo |
