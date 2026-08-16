@@ -215,7 +215,9 @@
           "type": ["string", "null"],
           "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
         },
-        "glossary_semantics": { "const": "current-profile" },
+        "glossary_semantics": {
+          "enum": ["current-profile", "source-run"]
+        },
         "glossary_sha256": {
           "oneOf": [
             { "type": "null" },

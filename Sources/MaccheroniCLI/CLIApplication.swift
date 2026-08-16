@@ -484,6 +484,7 @@ public struct CLIDependencies: Sendable {
         PostprocessBackendID,
         TranslationRequest
     ) async throws -> TranslationResult
+    public var glossaryRevisionStoreRoot: @Sendable () -> URL
     public var postprocessDoctor: @Sendable (PostprocessBackendID) async -> [String]
     public var doctor: @Sendable (SelectedASRBackend, CLIProfile) async -> [String]
 
@@ -568,6 +569,7 @@ public struct CLIDependencies: Sendable {
         },
         postprocess: productionPostprocess,
         translate: productionTranslation,
+        glossaryRevisionStoreRoot: CLIApplication.defaultGlossaryRevisionStoreRoot,
         postprocessDoctor: productionPostprocessDoctorChecks,
         doctor: productionDoctorChecks
     )
@@ -599,17 +601,49 @@ public struct CLIApplication: Sendable {
         return "\(formatter.string(from: date))-\(suffix)"
     }
 
+    public static func defaultGlossaryRevisionStoreRoot() -> URL {
+        let environment = ProcessInfo.processInfo.environment
+        let libraryRoot: URL
+        if let configured = environment["MACCHERONI_LIBRARY_ROOT"],
+           !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           (configured as NSString).isAbsolutePath
+        {
+            libraryRoot = URL(
+                fileURLWithPath: configured,
+                isDirectory: true
+            ).standardizedFileURL
+        } else {
+            libraryRoot = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(
+                    "Library/Application Support/Maccheroni",
+                    isDirectory: true
+                )
+                .standardizedFileURL
+        }
+        return libraryRoot.appendingPathComponent(
+            "Glossaries/Revisions",
+            isDirectory: true
+        )
+    }
+
     public func execute(arguments: [String]) async throws -> String {
         let command = try CLICommand.parse(arguments)
         switch command {
         case let .run(audio, profile, profiles, outputRoot, glossary):
             return try await run(audio: audio, profileName: profile, profilesURL: profiles, outputRoot: outputRoot, glossaryURL: glossary)
-        case let .postprocess(run, profile, profiles, glossary):
+        case let .postprocess(
+            run,
+            profile,
+            profiles,
+            glossary,
+            glossarySemantics
+        ):
             return try await postprocessExistingRun(
                 runURL: run,
                 profileName: profile,
                 profilesURL: profiles,
-                glossaryURL: glossary
+                glossaryURL: glossary,
+                glossarySemantics: glossarySemantics
             )
         case let .doctor(profile, profiles):
             return try await doctor(profileName: profile, profilesURL: profiles)
@@ -620,13 +654,15 @@ public struct CLIApplication: Sendable {
         runPath: String,
         profileName: String,
         profilesPath: String?,
-        glossaryPath: String?
+        glossaryPath: String?,
+        glossarySemantics: DerivedGlossarySemantics = .currentProfile
     ) async throws -> String {
         try await postprocessExistingRun(
             runURL: URL(fileURLWithPath: runPath, isDirectory: true),
             profileName: profileName,
             profilesURL: profilesPath.map(URL.init(fileURLWithPath:)),
-            glossaryURL: glossaryPath.map(URL.init(fileURLWithPath:))
+            glossaryURL: glossaryPath.map(URL.init(fileURLWithPath:)),
+            glossarySemantics: glossarySemantics
         )
     }
 
@@ -660,8 +696,14 @@ public struct CLIApplication: Sendable {
         runURL: URL,
         profileName: String,
         profilesURL: URL?,
-        glossaryURL: URL?
+        glossaryURL: URL?,
+        glossarySemantics: DerivedGlossarySemantics
     ) async throws -> String {
+        if glossarySemantics == .sourceRun, glossaryURL != nil {
+            throw CLIError.usage(
+                "--glossary cannot be combined with --glossary-semantics source-run"
+            )
+        }
         let resolution = try resolveProfile(
             name: profileName,
             profilesURL: profilesURL
@@ -673,17 +715,30 @@ public struct CLIApplication: Sendable {
             )
         }
         let mode = profile.postprocessMode ?? .correction
-        let glossary = try resolvedGlossary(
-            cliURL: glossaryURL,
-            profile: profile,
-            profileDirectory: resolution.directory
-        )
         let source: VerifiedRunSource
         do {
             source = try RunIntegrityVerifier.verifyCompletedRun(at: runURL)
         } catch let error as RunIntegrityError {
             throw CLIError.sourceIntegrity(error)
         }
+        let revisionStore = GlossaryRevisionStore(
+            root: dependencies.glossaryRevisionStoreRoot()
+        )
+        let glossaryRevision: GlossaryRevision?
+        switch glossarySemantics {
+        case .currentProfile:
+            glossaryRevision = try resolvedGlossaryRevision(
+                cliURL: glossaryURL,
+                profile: profile,
+                profileDirectory: resolution.directory,
+                store: revisionStore
+            )
+        case .sourceRun:
+            glossaryRevision = try revisionStore.resolve(
+                source.manifest.glossary
+            )
+        }
+        let glossary = glossaryRevision?.glossary
 
         let started = now()
         let writer = try RunWriter(
@@ -699,7 +754,7 @@ public struct CLIApplication: Sendable {
             profileName: profile.name,
             mode: mode,
             targetLanguage: mode == .translation ? profile.targetLanguage : nil,
-            glossarySemantics: .currentProfile,
+            glossarySemantics: glossarySemantics,
             glossarySHA256: glossary?.sha256,
             glossaryItemCount: glossary?.entries.count ?? 0
         )
@@ -888,11 +943,15 @@ public struct CLIApplication: Sendable {
         else {
             throw CLIError.run("input basename is incompatible with the run schema")
         }
-        let glossary = try resolvedGlossary(
+        let glossaryRevision = try resolvedGlossaryRevision(
             cliURL: glossaryURL,
             profile: profile,
-            profileDirectory: resolution.directory
+            profileDirectory: resolution.directory,
+            store: GlossaryRevisionStore(
+                root: dependencies.glossaryRevisionStoreRoot()
+            )
         )
+        let glossary = glossaryRevision?.glossary
         let inputHash = try dependencies.inputSHA256(audio)
         let values = try audio.resourceValues(forKeys: [.fileSizeKey])
         let fileSize = values.fileSize ?? 0
@@ -2221,11 +2280,12 @@ public struct CLIApplication: Sendable {
         }
     }
 
-    private func resolvedGlossary(
+    private func resolvedGlossaryRevision(
         cliURL: URL?,
         profile: CLIProfile,
-        profileDirectory: URL
-    ) throws -> Glossary? {
+        profileDirectory: URL,
+        store: GlossaryRevisionStore
+    ) throws -> GlossaryRevision? {
         let profileURL = profile.glossaryPath.map { path -> URL in
             return (path as NSString).isAbsolutePath
                 ? URL(fileURLWithPath: path)
@@ -2233,7 +2293,9 @@ public struct CLIApplication: Sendable {
         }
         guard let url = cliURL ?? profileURL else { return nil }
         do {
-            return try Glossary.parseOptional(data: Data(contentsOf: url))
+            return try store.createRevision(from: Data(contentsOf: url))
+        } catch let error as GlossaryRevisionError {
+            throw error
         } catch let error as CLIError {
             throw error
         } catch {
@@ -2921,7 +2983,13 @@ private struct DiarizationWarningRecord: Codable {
 
 private enum CLICommand {
     case run(URL, String, URL?, URL?, URL?)
-    case postprocess(URL, String, URL?, URL?)
+    case postprocess(
+        URL,
+        String,
+        URL?,
+        URL?,
+        DerivedGlossarySemantics
+    )
     case doctor(String?, URL?)
 
     static func parse(_ arguments: [String]) throws -> CLICommand {
@@ -2955,7 +3023,12 @@ private enum CLICommand {
         case "run":
             allowed = ["--profile", "--profiles", "--output-root", "--glossary"]
         case "postprocess":
-            allowed = ["--profile", "--profiles", "--glossary"]
+            allowed = [
+                "--profile",
+                "--profiles",
+                "--glossary",
+                "--glossary-semantics",
+            ]
         case "doctor":
             allowed = ["--profile", "--profiles"]
         default:
@@ -2985,11 +3058,23 @@ private enum CLICommand {
                     "usage: maccheroni postprocess <run> --profile <name>"
                 )
             }
+            let glossarySemantics: DerivedGlossarySemantics
+            if let rawValue = values["--glossary-semantics"] {
+                guard let parsed = DerivedGlossarySemantics(rawValue: rawValue) else {
+                    throw CLIError.usage(
+                        "invalid glossary semantics: \(rawValue)"
+                    )
+                }
+                glossarySemantics = parsed
+            } else {
+                glossarySemantics = .currentProfile
+            }
             return .postprocess(
                 URL(fileURLWithPath: positional[0], isDirectory: true),
                 profile,
                 values["--profiles"].map(URL.init(fileURLWithPath:)),
-                values["--glossary"].map(URL.init(fileURLWithPath:))
+                values["--glossary"].map(URL.init(fileURLWithPath:)),
+                glossarySemantics
             )
         }
         guard positional.isEmpty else {

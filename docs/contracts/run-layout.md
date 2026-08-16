@@ -5,6 +5,11 @@ path is relative to the run root. The original audio is neither moved into nor
 overwritten by the run directory. The input SHA-256 in `manifest.json` confirms
 that the source file remains the same.
 
+Glossary revisions are not run artifacts. They live at
+`<library-root>/Glossaries/Revisions/<sha256>.txt` under the external local
+library described in `glossary-format.md`. Do not copy them into a source or
+derived run and do not commit them to the repository.
+
 ## Directory Structure
 
 ```text
@@ -94,11 +99,12 @@ legacy `postprocess/` files, or an earlier derived set.
   operation. Its `source` field records the source run ID, the source
   `manifest.json` SHA-256, and the verified `merged/segments.json` path and
   SHA-256. Its `operation` field records the profile used for the operation,
-  correction or translation mode, optional target language, current-profile
-  glossary semantics, and the parsed glossary hash and item count. Its
-  `postprocess` field carries the same backend, model, text-only, and bounded
-  batch evidence as a new-audio run. `artifacts` contains only files inside this
-  derived set.
+  correction or translation mode, optional target language, selected glossary
+  semantics, and the parsed glossary hash and item count. `current-profile`
+  means the current invocation profile or explicit override. `source-run`
+  means the revision named by the source manifest. Its `postprocess` field
+  carries the same backend, model, text-only, and bounded batch evidence as a
+  new-audio run. `artifacts` contains only files inside this derived set.
 
 ## Writing and Invariants
 
@@ -137,11 +143,16 @@ legacy `postprocess/` files, or an earlier derived set.
    if any check fails.
 10. An existing-run operation always reads the verified canonical
     `merged/segments.json`. It does not run preprocessing, VAD, ASR,
-    diarization, or merge. It uses the invocation profile's current glossary,
-    with an explicit `--glossary` taking precedence. Old manifests retain only
-    the original glossary hash and item count, so they cannot reconstruct the
-    original glossary bytes. A current glossary with zero parsed entries is no
-    glossary.
+    diarization, or merge. `current-profile` is the default: an explicit
+    `--glossary` takes precedence over the invocation profile path, and the
+    exact non-empty bytes are stored as a revision before use. `source-run`
+    resolves only the source manifest's glossary hash and item count. A source
+    manifest that records no glossary deliberately supplies none. A non-null
+    hash with no valid stored revision fails with the typed
+    revision-unavailable error before creating a derived set or calling a
+    backend. `source-run` cannot be combined with `--glossary`. Never fall back
+    between these semantics. A valid current file with zero parsed entries is
+    no glossary.
 11. Seal a derived manifest only after its output validates against the source
     structure and every new artifact hash verifies. A failed or canceled set may
     remain for audit but is not displayable as a result. Choose the freshest
@@ -200,6 +211,10 @@ checked.
   source, segment count, speakers, time ranges, languages, confidence, and all
   non-review flags. Translation must preserve exact index coverage and must not
   represent acoustic structure.
+- A successful derived manifest's glossary hash and item count must match the
+  exact revision bytes selected by `glossary_semantics`. A missing hash requires
+  a zero item count and means that the selected semantics deliberately supplied
+  no glossary.
 
 `benchmarks/scripts/scoring/check_contracts.py` validates schema examples and
 the applicable conditions above against run manifests.

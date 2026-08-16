@@ -1,5 +1,18 @@
 import ArgumentParser
 import Foundation
+import MaccheroniCore
+
+enum GlossarySemanticsArgument: String, CaseIterable, ExpressibleByArgument {
+    case currentProfile = "current-profile"
+    case sourceRun = "source-run"
+
+    var value: DerivedGlossarySemantics {
+        switch self {
+        case .currentProfile: .currentProfile
+        case .sourceRun: .sourceRun
+        }
+    }
+}
 
 enum CLICommandSurface {
     static func help(for topic: HelpTopic?) -> String {
@@ -70,7 +83,7 @@ struct PostprocessCommand: AsyncParsableCommand {
 
         PRIVACY:
           Audio is not read or sent to a post-processing backend. The selected backend
-          may receive transcript text and the current profile glossary.
+          may receive transcript text and the selected current profile or source run glossary.
 
         EXAMPLE:
           maccheroni postprocess Runs/meeting --profile ko-meeting --profiles profiles.json
@@ -92,6 +105,12 @@ struct PostprocessCommand: AsyncParsableCommand {
     )
     var glossary: String?
 
+    @Option(
+        name: .long,
+        help: "Choose the current profile or source run glossary."
+    )
+    var glossarySemantics = GlossarySemanticsArgument.currentProfile
+
     @Flag(name: .long, help: "Emit deterministic JSON instead of the derived path.")
     var json = false
 
@@ -100,7 +119,8 @@ struct PostprocessCommand: AsyncParsableCommand {
             runPath: runDirectory,
             profileName: profile,
             profilesPath: profiles,
-            glossaryPath: glossary
+            glossaryPath: glossary,
+            glossarySemantics: glossarySemantics.value
         )
         if json {
             try CLIOutput.write(try CLIOutput.postprocessJSON(
