@@ -2,6 +2,40 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>Speaker-labelled</key>
+	<string>Com falantes identificados</string>
+	<key>Corrected</key>
+	<string>Corrigida</string>
+	<key>Translated</key>
+	<string>Traduzida</string>
+	<key>Transcript layer: Speaker-labelled</key>
+	<string>Camada da transcrição: Com falantes identificados</string>
+	<key>Transcript layer: Corrected</key>
+	<string>Camada da transcrição: Corrigida</string>
+	<key>Transcript layer: Translated</key>
+	<string>Camada da transcrição: Traduzida</string>
+	<key>Copy Transcript</key>
+	<string>Copiar transcrição</string>
+	<key>Copy Selection</key>
+	<string>Copiar seleção</string>
+	<key>The transcript could not be copied.</key>
+	<string>Não foi possível copiar a transcrição.</string>
+	<key>Select this segment for copying.</key>
+	<string>Selecione este segmento para copiá-lo.</string>
+	<key>Remove this segment from the copy selection.</key>
+	<string>Remova este segmento da seleção para cópia.</string>
+	<key>Copied the speaker-labelled transcript.</key>
+	<string>A transcrição com falantes identificados foi copiada.</string>
+	<key>Copied the corrected transcript.</key>
+	<string>A transcrição corrigida foi copiada.</string>
+	<key>Copied the translated transcript.</key>
+	<string>A transcrição traduzida foi copiada.</string>
+	<key>Copied the speaker-labelled selection.</key>
+	<string>A seleção com falantes identificados foi copiada.</string>
+	<key>Copied the corrected selection.</key>
+	<string>A seleção corrigida foi copiada.</string>
+	<key>Copied the translated selection.</key>
+	<string>A seleção traduzida foi copiada.</string>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
 	<key>%@, %@</key>
