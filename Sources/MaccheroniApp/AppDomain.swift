@@ -530,6 +530,7 @@ struct ExistingRunPostprocessRequest: Equatable, Sendable {
     var postprocess: PostprocessChoice
     var operation: PostprocessMode
     var translationTargetLanguage: String?
+    var glossarySemantics: DerivedGlossarySemantics = .currentProfile
     var glossaryURL: URL?
 }
 

@@ -331,7 +331,8 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
               manifest.source.runID == request.sourceRunURL.lastPathComponent,
               manifest.operation.profileName == request.profile.cliProfile,
               manifest.operation.mode == request.operation,
-              manifest.operation.targetLanguage == request.translationTargetLanguage
+              manifest.operation.targetLanguage == request.translationTargetLanguage,
+              manifest.operation.glossarySemantics == request.glossarySemantics
         else {
             throw TranscriptionRunnerError.resultInvalid
         }
@@ -382,6 +383,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
             request.sourceRunURL.path,
             "--profile", request.profile.cliProfile,
             "--profiles", profileURL.path,
+            "--glossary-semantics", request.glossarySemantics.rawValue,
         ]
         if let glossaryURL = request.glossaryURL {
             values += ["--glossary", glossaryURL.path]

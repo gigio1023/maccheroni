@@ -43,10 +43,44 @@ or derived operation must record `provided: false`, a null glossary hash, zero
 items, `injection_mode: none`, and `applied: false`. It must not claim that the
 comment-only file reached a decoder or text post-processing backend.
 
+## Immutable Revisions
+
+The mutable editor projection and immutable revisions live under the local
+library root, outside the repository and outside every run directory:
+
+```text
+<library-root>/
+└── Glossaries/
+    ├── <profile>.txt
+    └── Revisions/
+        └── <sha256>.txt
+```
+
+`<profile>.txt` remains the operator-owned editable file. Before a non-empty
+glossary is used or an editor save replaces that file, store its exact bytes at
+`Revisions/<sha256>.txt`. The revision includes the original BOM, comments,
+whitespace, and line endings. Do not serialize the parsed entry list to create
+or repair a revision.
+
+Revision creation is create-only. If the path already exists, verify its bytes
+and reuse it; never replace or repair it. Saving unchanged bytes therefore
+creates no duplicate. Saving changed bytes creates a different path while the
+earlier revision remains resolvable. A valid zero-entry file remains editable
+at `<profile>.txt` but creates no revision because it has no glossary identity.
+
+Resolution accepts only a lowercase SHA-256 path, reads a regular file,
+recomputes the raw-byte digest, reparses the same bytes, and checks the recorded
+item count. Missing, unreadable, malformed, empty, hash-mismatched, or
+count-mismatched content fails with a typed revision-unavailable error. It must
+not fall back to a current profile or synthesize plausible bytes. Runs created
+before revision storage may therefore have valid historical hashes with no
+stored object; report that state as unavailable, not as a recovered original.
+
 ## Hash and Manifest
 
 Calculate `glossary.sha256` by applying SHA-256 to the input file's original
-bytes, not the normalized entry list. This value proves which file was used.
+bytes, not the normalized entry list. This value identifies the immutable
+revision and verifies its bytes when the object is available.
 `glossary.item_count` is the number of entries after parsing and duplicate
 removal. `glossary.injection_mode` is one of the following:
 

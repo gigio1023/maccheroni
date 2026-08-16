@@ -610,11 +610,27 @@ struct LibraryRepository: Sendable {
         let glossaryIsConsistent = manifest.operation.glossarySHA256 == nil
             ? manifest.operation.glossaryItemCount == 0
             : manifest.operation.glossaryItemCount > 0
+        // Switch rather than compare, so a new semantics case cannot be
+        // accepted here without a deliberate decision. Source-run semantics
+        // must carry exactly the glossary provenance the source manifest
+        // recorded; anything else would label bytes the source run never used.
+        let glossarySemanticsIsConsistent: Bool
+        switch manifest.operation.glossarySemantics {
+        case .currentProfile:
+            glossarySemanticsIsConsistent = true
+        case .sourceRun:
+            let sourceGlossary = source.manifest.glossary
+            glossarySemanticsIsConsistent = sourceGlossary.provided
+                ? manifest.operation.glossarySHA256 == sourceGlossary.sha256
+                    && manifest.operation.glossaryItemCount == sourceGlossary.itemCount
+                : manifest.operation.glossarySHA256 == nil
+                    && manifest.operation.glossaryItemCount == 0
+        }
         guard manifest.source == source.lineage,
               manifest.source.segmentsPath == "merged/segments.json",
               !manifest.operation.profileName
                 .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              manifest.operation.glossarySemantics == .currentProfile,
+              glossarySemanticsIsConsistent,
               glossaryIsConsistent,
               manifest.operation.glossarySHA256.map(isLowercaseSHA256) ?? true,
               let postprocess = manifest.postprocess,

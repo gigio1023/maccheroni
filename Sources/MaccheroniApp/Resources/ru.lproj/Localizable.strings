@@ -2,6 +2,40 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>Speaker-labelled</key>
+	<string>С обозначением говорящих</string>
+	<key>Corrected</key>
+	<string>Исправленная</string>
+	<key>Translated</key>
+	<string>Переведённая</string>
+	<key>Transcript layer: Speaker-labelled</key>
+	<string>Слой расшифровки: С обозначением говорящих</string>
+	<key>Transcript layer: Corrected</key>
+	<string>Слой расшифровки: Исправленная</string>
+	<key>Transcript layer: Translated</key>
+	<string>Слой расшифровки: Переведённая</string>
+	<key>Copy Transcript</key>
+	<string>Копировать расшифровку</string>
+	<key>Copy Selection</key>
+	<string>Копировать выбранное</string>
+	<key>The transcript could not be copied.</key>
+	<string>Не удалось скопировать расшифровку.</string>
+	<key>Select this segment for copying.</key>
+	<string>Выбрать этот сегмент для копирования.</string>
+	<key>Remove this segment from the copy selection.</key>
+	<string>Удалить этот сегмент из выбранного для копирования.</string>
+	<key>Copied the speaker-labelled transcript.</key>
+	<string>Расшифровка с обозначением говорящих скопирована.</string>
+	<key>Copied the corrected transcript.</key>
+	<string>Исправленная расшифровка скопирована.</string>
+	<key>Copied the translated transcript.</key>
+	<string>Переведённая расшифровка скопирована.</string>
+	<key>Copied the speaker-labelled selection.</key>
+	<string>Выбранные фрагменты слоя с обозначением говорящих скопированы.</string>
+	<key>Copied the corrected selection.</key>
+	<string>Выбранные фрагменты исправленного слоя скопированы.</string>
+	<key>Copied the translated selection.</key>
+	<string>Выбранные фрагменты переведённого слоя скопированы.</string>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
 	<key>%@, %@</key>

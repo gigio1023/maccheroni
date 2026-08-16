@@ -81,12 +81,14 @@ struct CLICommandSurfaceTests {
                 "--profile", "ko-meeting",
                 "--profiles", "profiles.json",
                 "--glossary", "current-terms.txt",
+                "--glossary-semantics", "source-run",
             ]) as? PostprocessCommand
         )
         #expect(parsedPostprocess.runDirectory == "runs/source-run")
         #expect(parsedPostprocess.profile == "ko-meeting")
         #expect(parsedPostprocess.profiles == "profiles.json")
         #expect(parsedPostprocess.glossary == "current-terms.txt")
+        #expect(parsedPostprocess.glossarySemantics.rawValue == "source-run")
         #expect(!parsedPostprocess.json)
 
         let parsedDoctor = try #require(
@@ -407,6 +409,7 @@ private enum Fixture {
                 "Create a derived result from a completed run.",
                 "Verifies the completed source run manifest",
                 "does not rerun audio",
+                "current profile or source run glossary",
                 "maccheroni postprocess",
             ]
         ),

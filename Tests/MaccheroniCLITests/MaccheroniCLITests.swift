@@ -998,6 +998,254 @@ struct MaccheroniCLITests {
     }
 
     @Test
+    func existingRunCanChooseItsArchivedGlossaryWhileCurrentProfileRemainsDefault() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let revisions = root.appendingPathComponent(
+            "library/Glossaries/Revisions",
+            isDirectory: true
+        )
+        var sourceDependencies = testDependencies()
+        sourceDependencies.glossaryRevisionStoreRoot = { revisions }
+        let input = try makeWAV(in: root, name: "source.wav")
+        let sourceGlossary = root.appendingPathComponent("source-terms.txt")
+        let sourceData = Data("\u{FEFF}# original\r\nMaccheroni v1\r\n".utf8)
+        try sourceData.write(to: sourceGlossary, options: .withoutOverwriting)
+        let parsedSource = try #require(try Glossary.parseOptional(data: sourceData))
+        let sourceProfiles = try profileFile(
+            in: root,
+            fileName: "source.json"
+        )
+        let sourcePath = try await testApplication(
+            runID: "source-run",
+            dependencies: sourceDependencies
+        ).execute(arguments: [
+            "run", input.path,
+            "--profile", "ko-meeting",
+            "--profiles", sourceProfiles.path,
+            "--output-root", root.appendingPathComponent("runs").path,
+            "--glossary", sourceGlossary.path,
+        ])
+        let sourceRun = URL(fileURLWithPath: sourcePath, isDirectory: true)
+        #expect(try Data(contentsOf: revisions.appendingPathComponent(
+            "\(parsedSource.sha256).txt"
+        )) == sourceData)
+
+        let currentGlossary = root.appendingPathComponent("current-terms.txt")
+        let currentData = Data("Maccheroni v2\n".utf8)
+        try currentData.write(to: currentGlossary, options: .withoutOverwriting)
+        let parsedCurrent = try #require(try Glossary.parseOptional(data: currentData))
+        let derivedProfiles = try profileFile(
+            in: root,
+            fileName: "derived.json",
+            glossaryPath: currentGlossary.lastPathComponent,
+            postprocess: "codex",
+            postprocessMode: .correction
+        )
+        let stages = StageInvocationRecorder()
+        var derivedDependencies = postprocessOnlyDependencies(recorder: stages)
+        derivedDependencies.glossaryRevisionStoreRoot = { revisions }
+        let app = testApplication(
+            runID: "derived-current",
+            dependencies: derivedDependencies
+        )
+
+        let currentPath = try await app.execute(arguments: [
+            "postprocess", sourceRun.path,
+            "--profile", "ko-meeting",
+            "--profiles", derivedProfiles.path,
+        ])
+        let currentManifest: DerivedManifest = try decode(
+            "manifest.json",
+            in: URL(fileURLWithPath: currentPath, isDirectory: true)
+        )
+        #expect(currentManifest.operation.glossarySemantics == .currentProfile)
+        #expect(currentManifest.operation.glossarySHA256 == parsedCurrent.sha256)
+
+        let sourceApp = testApplication(
+            runID: "derived-source",
+            dependencies: derivedDependencies
+        )
+        let archivedPath = try await sourceApp.execute(arguments: [
+            "postprocess", sourceRun.path,
+            "--profile", "ko-meeting",
+            "--profiles", derivedProfiles.path,
+            "--glossary-semantics", "source-run",
+        ])
+        let archivedManifest: DerivedManifest = try decode(
+            "manifest.json",
+            in: URL(fileURLWithPath: archivedPath, isDirectory: true)
+        )
+        #expect(archivedManifest.operation.glossarySemantics == .sourceRun)
+        #expect(archivedManifest.operation.glossarySHA256 == parsedSource.sha256)
+        #expect(archivedManifest.operation.glossaryItemCount == 1)
+        #expect(archivedManifest.postprocess?.glossarySHA256 == parsedSource.sha256)
+
+        let translationProfiles = try profileFile(
+            in: root,
+            fileName: "translation.json",
+            glossaryPath: currentGlossary.lastPathComponent,
+            postprocess: "local",
+            postprocessMode: .translation,
+            targetLanguage: "en"
+        )
+        let translationPath = try await testApplication(
+            runID: "translated-source",
+            dependencies: derivedDependencies
+        ).execute(arguments: [
+            "postprocess", sourceRun.path,
+            "--profile", "ko-meeting",
+            "--profiles", translationProfiles.path,
+            "--glossary-semantics", "source-run",
+        ])
+        let translationManifest: DerivedManifest = try decode(
+            "manifest.json",
+            in: URL(fileURLWithPath: translationPath, isDirectory: true)
+        )
+        #expect(translationManifest.operation.mode == .translation)
+        #expect(translationManifest.operation.glossarySemantics == .sourceRun)
+        #expect(translationManifest.operation.glossarySHA256 == parsedSource.sha256)
+        #expect(translationManifest.postprocess?.glossarySHA256 == parsedSource.sha256)
+        #expect(stages.stages == ["postprocess", "postprocess", "translate"])
+    }
+
+    @Test
+    func unavailableSourceRevisionFailsBeforeDerivedCreationOrBackendCall() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let revisions = root.appendingPathComponent(
+            "library/Glossaries/Revisions",
+            isDirectory: true
+        )
+        var sourceDependencies = testDependencies()
+        sourceDependencies.glossaryRevisionStoreRoot = { revisions }
+        let input = try makeWAV(in: root, name: "source.wav")
+        let glossary = root.appendingPathComponent("source-terms.txt")
+        let data = Data("Legacy term\n".utf8)
+        try data.write(to: glossary, options: .withoutOverwriting)
+        let parsed = try #require(try Glossary.parseOptional(data: data))
+        let sourceProfiles = try profileFile(in: root, fileName: "source.json")
+        let sourcePath = try await testApplication(
+            runID: "legacy-source",
+            dependencies: sourceDependencies
+        ).execute(arguments: [
+            "run", input.path,
+            "--profile", "ko-meeting",
+            "--profiles", sourceProfiles.path,
+            "--output-root", root.appendingPathComponent("runs").path,
+            "--glossary", glossary.path,
+        ])
+        let sourceRun = URL(fileURLWithPath: sourcePath, isDirectory: true)
+        try FileManager.default.removeItem(at: revisions.appendingPathComponent(
+            "\(parsed.sha256).txt"
+        ))
+        let profiles = try profileFile(
+            in: root,
+            fileName: "derived.json",
+            postprocess: "codex",
+            postprocessMode: .correction
+        )
+        let stages = StageInvocationRecorder()
+        var dependencies = postprocessOnlyDependencies(recorder: stages)
+        dependencies.glossaryRevisionStoreRoot = { revisions }
+
+        do {
+            _ = try await testApplication(
+                runID: "must-not-exist",
+                dependencies: dependencies
+            ).execute(arguments: [
+                "postprocess", sourceRun.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--glossary-semantics", "source-run",
+            ])
+            Issue.record("Expected a typed unavailable revision error")
+        } catch let error as GlossaryRevisionError {
+            #expect(error == .revisionUnavailable(
+                sha256: parsed.sha256,
+                reason: .missing
+            ))
+        }
+        #expect(stages.stages.isEmpty)
+        #expect(!FileManager.default.fileExists(
+            atPath: sourceRun.appendingPathComponent("derived").path
+        ))
+    }
+
+    @Test
+    func sourceRunSemanticsSupportsRecordedAbsenceAndRejectsExplicitOverride() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let revisions = root.appendingPathComponent(
+            "library/Glossaries/Revisions",
+            isDirectory: true
+        )
+        var sourceDependencies = testDependencies()
+        sourceDependencies.glossaryRevisionStoreRoot = { revisions }
+        let input = try makeWAV(in: root, name: "source.wav")
+        let sourceProfiles = try profileFile(in: root, fileName: "source.json")
+        let sourcePath = try await testApplication(
+            runID: "no-glossary-source",
+            dependencies: sourceDependencies
+        ).execute(arguments: [
+            "run", input.path,
+            "--profile", "ko-meeting",
+            "--profiles", sourceProfiles.path,
+            "--output-root", root.appendingPathComponent("runs").path,
+        ])
+        let sourceRun = URL(fileURLWithPath: sourcePath, isDirectory: true)
+        let profiles = try profileFile(
+            in: root,
+            fileName: "derived.json",
+            postprocess: "local",
+            postprocessMode: .translation,
+            targetLanguage: "en"
+        )
+        let override = root.appendingPathComponent("override.txt")
+        try Data("Current term\n".utf8).write(
+            to: override,
+            options: .withoutOverwriting
+        )
+        let stages = StageInvocationRecorder()
+        var dependencies = postprocessOnlyDependencies(recorder: stages)
+        dependencies.glossaryRevisionStoreRoot = { revisions }
+        let app = testApplication(
+            runID: "derived-absent",
+            dependencies: dependencies
+        )
+        let derivedPath = try await app.execute(arguments: [
+            "postprocess", sourceRun.path,
+            "--profile", "ko-meeting",
+            "--profiles", profiles.path,
+            "--glossary-semantics", "source-run",
+        ])
+        let manifest: DerivedManifest = try decode(
+            "manifest.json",
+            in: URL(fileURLWithPath: derivedPath, isDirectory: true)
+        )
+        #expect(manifest.operation.glossarySemantics == .sourceRun)
+        #expect(manifest.operation.glossarySHA256 == nil)
+        #expect(manifest.operation.glossaryItemCount == 0)
+
+        do {
+            _ = try await testApplication(
+                runID: "contradictory",
+                dependencies: dependencies
+            ).execute(arguments: [
+                "postprocess", sourceRun.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--glossary", override.path,
+                "--glossary-semantics", "source-run",
+            ])
+            Issue.record("Expected contradictory glossary options to fail")
+        } catch let error as CLIError {
+            #expect(error.code == "USAGE_ERROR")
+        }
+        #expect(stages.stages == ["translate"])
+    }
+
+    @Test
     func existingRunPostprocessRejectsAnySourceHashMismatchBeforeCreatingOrCallingBackend() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -2181,6 +2429,13 @@ private func fixtureStorageReport() -> StorageReport {
     )
 }
 
+private func cliTestGlossaryRevisionStoreRoot() -> URL {
+    FileManager.default.temporaryDirectory.appendingPathComponent(
+        "MaccheroniCLITests-GlossaryRevisions-\(ProcessInfo.processInfo.processIdentifier)",
+        isDirectory: true
+    )
+}
+
 private func testDependencies(
     failASRAtOrAfterS: Double? = nil,
     cancelASRAtOrAfterS: Double? = nil,
@@ -2489,6 +2744,7 @@ private func testDependencies(
                 manifestPostprocess: provenance
             )
         },
+        glossaryRevisionStoreRoot: cliTestGlossaryRevisionStoreRoot,
         postprocessDoctor: { backend in
             [
                 "postprocess_backend=\(backend.rawValue)-fixture",
@@ -2734,6 +2990,7 @@ private func mossTestDependencies(
         translate: { _, _ in
             throw CLIError.run("synthetic MOSS translation was not expected")
         },
+        glossaryRevisionStoreRoot: cliTestGlossaryRevisionStoreRoot,
         postprocessDoctor: { _ in ["check.postprocess=true"] },
         doctor: { _, _ in ["check.asr_doctor=true"] }
     )

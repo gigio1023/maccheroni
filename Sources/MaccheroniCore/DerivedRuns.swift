@@ -3,6 +3,7 @@ import Foundation
 
 public enum DerivedGlossarySemantics: String, Codable, Equatable, Sendable {
     case currentProfile = "current-profile"
+    case sourceRun = "source-run"
 }
 
 public struct DerivedSourceLineage: Codable, Equatable, Sendable {

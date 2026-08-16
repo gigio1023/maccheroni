@@ -209,6 +209,169 @@ struct TranscriptExportTests {
         #expect(TranscriptExporter.suggestedFilename(format: .markdown, record: fixture.record) == "Team_Review_ August.md")
         #expect(TranscriptExporter.suggestedFilename(format: .srt, record: fixture.record) == "Team_Review_ August.srt")
     }
+
+    @Test
+    func copyPayloadNamesTheExactDisplayedLayer() throws {
+        var fixture = exportFixture()
+
+        #expect(
+            try TranscriptExporter.copyText(
+                run: fixture.run,
+                record: fixture.record,
+                selectedSegmentIndices: []
+            ).hasPrefix("Transcript layer: Speaker-labelled\n\n")
+        )
+
+        fixture.run.manifest.postprocess = postprocessFixture(mode: .correction)
+        #expect(
+            try TranscriptExporter.copyText(
+                run: fixture.run,
+                record: fixture.record,
+                selectedSegmentIndices: []
+            ).hasPrefix("Transcript layer: Corrected\n\n")
+        )
+
+        fixture.run.resultID = "derived-translation"
+        fixture.run.resultPostprocess = postprocessFixture(mode: .translation)
+        fixture.run.resultOperation = derivedOperationFixture(mode: .translation)
+        #expect(
+            try TranscriptExporter.copyText(
+                run: fixture.run,
+                record: fixture.record,
+                selectedSegmentIndices: []
+            ).hasPrefix("Transcript layer: Translated\n\n")
+        )
+    }
+
+    @Test
+    func copySelectionUsesOriginalIndicesAndEmptySelectionCopiesEverything() throws {
+        var fixture = exportFixture()
+        fixture.record.conflictResolutions.removeValue(forKey: 1)
+
+        let selection = try TranscriptExporter.copyText(
+            run: fixture.run,
+            record: fixture.record,
+            selectedSegmentIndices: [1]
+        )
+
+        #expect(!selection.contains("Original text"))
+        #expect(selection.contains("Speaker 2:** Unresolved wording [CONFLICT]"))
+        #expect(!selection.contains("[UNCERTAIN]"))
+
+        let wholeTranscript = try TranscriptExporter.copyText(
+            run: fixture.run,
+            record: fixture.record,
+            selectedSegmentIndices: []
+        )
+        #expect(wholeTranscript.contains("Jina:** Original text [UNCERTAIN]"))
+        #expect(wholeTranscript.contains("Speaker 2:** Unresolved wording [CONFLICT]"))
+    }
+
+    @Test
+    func copyPayloadPreservesMarkersWithoutMutatingInputs() throws {
+        var fixture = exportFixture()
+        fixture.run.transcript.segments[0].flags = ["conflict", "uncertain"]
+        fixture.run.conflicts.append(
+            MergeConflict(
+                segmentIndex: 0,
+                kind: .asrDisagreement,
+                candidates: ["Original text", "Alternative text"],
+                reason: "The comparison backend disagreed."
+            )
+        )
+        let originalRun = fixture.run
+        let originalRecord = fixture.record
+
+        let payload = try TranscriptExporter.copyText(
+            run: fixture.run,
+            record: fixture.record,
+            selectedSegmentIndices: []
+        )
+
+        #expect(payload.contains("Original text [CONFLICT] [UNCERTAIN]"))
+        #expect(fixture.run == originalRun)
+        #expect(fixture.record == originalRecord)
+    }
+
+    @Test @MainActor
+    func copyCommandWritesOnceAndReportsLayerAndScope() throws {
+        let fixture = exportFixture()
+        let selectionClipboard = TranscriptClipboardSpy()
+        let selectionCommand = TranscriptCopyCommand(clipboard: selectionClipboard)
+
+        let selectionConfirmation = try selectionCommand.perform(
+            run: fixture.run,
+            record: fixture.record,
+            selectedSegmentIDs: [fixture.run.segments[1].id]
+        )
+
+        #expect(selectionClipboard.writeCount == 1)
+        let expectedSelection = try TranscriptExporter.copyText(
+            run: fixture.run,
+            record: fixture.record,
+            selectedSegmentIndices: [1]
+        )
+        #expect(selectionClipboard.writtenText == expectedSelection)
+        #expect(selectionConfirmation.layer == .speakerLabelled)
+        #expect(selectionConfirmation.scope == .selection(segmentCount: 1))
+        #expect(selectionConfirmation.message(locale: Locale(identifier: "en")) == "Copied the speaker-labelled selection.")
+
+        let staleClipboard = TranscriptClipboardSpy()
+        #expect(throws: TranscriptCopyError.staleSelection) {
+            try TranscriptCopyCommand(clipboard: staleClipboard).perform(
+                run: fixture.run,
+                record: fixture.record,
+                selectedSegmentIDs: [
+                    TranscriptSegmentID(runID: "another-result", index: 1),
+                ]
+            )
+        }
+        #expect(staleClipboard.writeCount == 0)
+
+        let transcriptClipboard = TranscriptClipboardSpy()
+        let transcriptConfirmation = try TranscriptCopyCommand(
+            clipboard: transcriptClipboard
+        ).perform(
+            run: fixture.run,
+            record: fixture.record,
+            selectedSegmentIDs: []
+        )
+
+        #expect(transcriptClipboard.writeCount == 1)
+        #expect(transcriptConfirmation.scope == .transcript)
+        #expect(transcriptConfirmation.message(locale: Locale(identifier: "en")) == "Copied the speaker-labelled transcript.")
+    }
+}
+
+@MainActor
+private final class TranscriptClipboardSpy: TranscriptClipboardWriting {
+    private(set) var writeCount = 0
+    private(set) var writtenText: String?
+
+    func write(_ text: String) -> Bool {
+        writeCount += 1
+        writtenText = text
+        return true
+    }
+}
+
+private func postprocessFixture(mode: PostprocessMode) -> ManifestPostprocess {
+    ManifestPostprocess(
+        backend: BackendDescriptor(name: "fixture", version: "1"),
+        modelID: "fixture-model",
+        mode: mode,
+        targetLanguage: mode == .translation ? "en" : nil
+    )
+}
+
+private func derivedOperationFixture(mode: PostprocessMode) -> DerivedOperation {
+    DerivedOperation(
+        profileName: "ko-it-meeting",
+        mode: mode,
+        targetLanguage: mode == .translation ? "en" : nil,
+        glossarySemantics: .currentProfile,
+        glossaryItemCount: 0
+    )
 }
 
 private func exportFixture() -> (run: LoadedRun, record: LibraryRecord) {

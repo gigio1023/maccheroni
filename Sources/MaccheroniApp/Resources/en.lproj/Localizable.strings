@@ -2,6 +2,40 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>Speaker-labelled</key>
+	<string>Speaker-labelled</string>
+	<key>Corrected</key>
+	<string>Corrected</string>
+	<key>Translated</key>
+	<string>Translated</string>
+	<key>Transcript layer: Speaker-labelled</key>
+	<string>Transcript layer: Speaker-labelled</string>
+	<key>Transcript layer: Corrected</key>
+	<string>Transcript layer: Corrected</string>
+	<key>Transcript layer: Translated</key>
+	<string>Transcript layer: Translated</string>
+	<key>Copy Transcript</key>
+	<string>Copy Transcript</string>
+	<key>Copy Selection</key>
+	<string>Copy Selection</string>
+	<key>The transcript could not be copied.</key>
+	<string>The transcript could not be copied.</string>
+	<key>Select this segment for copying.</key>
+	<string>Select this segment for copying.</string>
+	<key>Remove this segment from the copy selection.</key>
+	<string>Remove this segment from the copy selection.</string>
+	<key>Copied the speaker-labelled transcript.</key>
+	<string>Copied the speaker-labelled transcript.</string>
+	<key>Copied the corrected transcript.</key>
+	<string>Copied the corrected transcript.</string>
+	<key>Copied the translated transcript.</key>
+	<string>Copied the translated transcript.</string>
+	<key>Copied the speaker-labelled selection.</key>
+	<string>Copied the speaker-labelled selection.</string>
+	<key>Copied the corrected selection.</key>
+	<string>Copied the corrected selection.</string>
+	<key>Copied the translated selection.</key>
+	<string>Copied the translated selection.</string>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
 	<key>%@, %@</key>

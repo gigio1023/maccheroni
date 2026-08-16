@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0.0",
+  "derived_id": "derived-20260812T030000Z-3f9c1a2b",
+  "status": "succeeded",
+  "source": {
+    "run_id": "20260804T081710Z-cbf447",
+    "manifest_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "segments_path": "merged/segments.json",
+    "segments_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "operation": {
+    "profile_name": "ko-it-meeting",
+    "mode": "correction",
+    "target_language": null,
+    "glossary_semantics": "source-run",
+    "glossary_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+    "glossary_item_count": 7
+  },
+  "timing": {
+    "started_at": "2026-08-12T03:00:00Z",
+    "finished_at": "2026-08-12T03:00:05Z",
+    "wall_time_s": 5.0
+  },
+  "artifacts": [
+    {
+      "kind": "postprocess_segments",
+      "path": "postprocess/segments.json",
+      "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    {
+      "kind": "postprocess_conflicts",
+      "path": "postprocess/conflicts.json",
+      "sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+    }
+  ],
+  "failure": null,
+  "postprocess": {
+    "backend": {
+      "name": "codex-app-server",
+      "version": "codex-cli 0.146.0"
+    },
+    "model_id": "gpt-5.6-sol",
+    "model_revision": null,
+    "quantization": null,
+    "input_mode": "text-only",
+    "glossary_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+    "mode": "correction",
+    "target_language": null,
+    "source_segments_sha256": null,
+    "batching": {
+      "maximum_prompt_utf8_bytes": 16384,
+      "maximum_segments_per_batch": 32,
+      "maximum_output_tokens": null,
+      "output_token_limit_status": "service-managed-unavailable",
+      "output_token_planning_budget": 4096,
+      "output_tokens_per_input_utf8_byte_permille": 2000,
+      "base_output_token_reserve": 32,
+      "per_segment_output_token_reserve": 96,
+      "batches_planned": 1,
+      "maximum_observed_prompt_utf8_bytes": 412,
+      "maximum_observed_input_text_utf8_bytes": 96,
+      "maximum_observed_estimated_output_tokens": 320,
+      "maximum_observed_output_text_utf8_bytes": 101,
+      "maximum_observed_response_utf8_bytes": 188,
+      "maximum_observed_accepted_output_token_upper_bound": 353
+    }
+  }
+}

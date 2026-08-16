@@ -2,6 +2,40 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>Speaker-labelled</key>
+	<string>話者ラベル付き</string>
+	<key>Corrected</key>
+	<string>修正版</string>
+	<key>Translated</key>
+	<string>翻訳版</string>
+	<key>Transcript layer: Speaker-labelled</key>
+	<string>文字起こしレイヤー：話者ラベル付き</string>
+	<key>Transcript layer: Corrected</key>
+	<string>文字起こしレイヤー：修正版</string>
+	<key>Transcript layer: Translated</key>
+	<string>文字起こしレイヤー：翻訳版</string>
+	<key>Copy Transcript</key>
+	<string>文字起こしをコピー</string>
+	<key>Copy Selection</key>
+	<string>選択範囲をコピー</string>
+	<key>The transcript could not be copied.</key>
+	<string>文字起こしをコピーできませんでした。</string>
+	<key>Select this segment for copying.</key>
+	<string>コピー対象にこのセグメントを追加します。</string>
+	<key>Remove this segment from the copy selection.</key>
+	<string>このセグメントをコピー対象から外します。</string>
+	<key>Copied the speaker-labelled transcript.</key>
+	<string>話者ラベル付き文字起こしをコピーしました。</string>
+	<key>Copied the corrected transcript.</key>
+	<string>修正版の文字起こしをコピーしました。</string>
+	<key>Copied the translated transcript.</key>
+	<string>翻訳版の文字起こしをコピーしました。</string>
+	<key>Copied the speaker-labelled selection.</key>
+	<string>話者ラベル付きレイヤーの選択範囲をコピーしました。</string>
+	<key>Copied the corrected selection.</key>
+	<string>修正版レイヤーの選択範囲をコピーしました。</string>
+	<key>Copied the translated selection.</key>
+	<string>翻訳版レイヤーの選択範囲をコピーしました。</string>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
 	<key>%@, %@</key>
