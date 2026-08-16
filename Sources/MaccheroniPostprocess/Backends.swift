@@ -491,6 +491,20 @@ public struct LocalPostprocessRuntime: Sendable {
         )
     }
 
+    public static func resolveModelSnapshotURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        let huggingFaceHome = environment["HF_HOME"].map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        } ?? home.appendingPathComponent(".cache/huggingface", isDirectory: true)
+        return environment["MACCHERONI_POSTPROCESS_MODEL_PATH"].map(URL.init(fileURLWithPath:))
+            ?? huggingFaceHome.appendingPathComponent(
+                "hub/models--mlx-community--gemma-4-12B-it-qat-4bit/snapshots/e70c6b3ba0979b3357dcd2f223ad8bde7787a6b6",
+                isDirectory: true
+            )
+    }
+
     static func localRuntime(environment: [String: String], home: URL) -> LocalPostprocessRuntime {
         let benchmarkCache = environment["MACCHERONI_BENCHMARK_CACHE"].map {
             URL(fileURLWithPath: $0, isDirectory: true)
@@ -498,14 +512,7 @@ public struct LocalPostprocessRuntime: Sendable {
             "Library/Caches/Maccheroni/benchmarks",
             isDirectory: true
         )
-        let huggingFaceHome = environment["HF_HOME"].map {
-            URL(fileURLWithPath: $0, isDirectory: true)
-        } ?? home.appendingPathComponent(".cache/huggingface", isDirectory: true)
-        let cache = environment["MACCHERONI_POSTPROCESS_MODEL_PATH"].map(URL.init(fileURLWithPath:))
-            ?? huggingFaceHome.appendingPathComponent(
-                "hub/models--mlx-community--gemma-4-12B-it-qat-4bit/snapshots/e70c6b3ba0979b3357dcd2f223ad8bde7787a6b6",
-                isDirectory: true
-            )
+        let cache = resolveModelSnapshotURL(environment: environment, home: home)
         let runner = environment["MACCHERONI_POSTPROCESS_RUNNER"].map(URL.init(fileURLWithPath:))
             ?? postprocessResourcesBundle.url(
                 forResource: "maccheroni_postprocess_runner",

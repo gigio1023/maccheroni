@@ -1,5 +1,6 @@
 import Foundation
 import MaccheroniCore
+import MaccheroniStorage
 
 enum CLIOutputError: Error, LocalizedError {
     case malformedDoctorLine(String)
@@ -23,6 +24,7 @@ enum CLIOutputError: Error, LocalizedError {
 
 enum CLIOutput {
     static let schemaVersion = "1.0.0"
+    static let doctorSchemaVersion = "1.1.0"
 
     static let commandCapabilities = [
         CommandCapability(
@@ -50,7 +52,7 @@ enum CLIOutput {
             name: "doctor",
             summary: "Inspect local profile and dependency readiness.",
             sideEffect: "None; performs read-only local checks.",
-            output: "key=value diagnostics or a JSON readiness envelope on stdout.",
+            output: "Volume-aware key=value diagnostics or a typed JSON readiness envelope on stdout.",
             supportsJSON: true
         ),
         CommandCapability(
@@ -80,12 +82,14 @@ enum CLIOutput {
 
     static func doctorJSON(
         diagnostics: String,
+        storage: StorageReport = .empty,
         ready: Bool = true
     ) throws -> String {
         try encode(DoctorEnvelope(
             command: "doctor",
             ready: ready,
-            schemaVersion: schemaVersion,
+            schemaVersion: doctorSchemaVersion,
+            storage: storage,
             values: try doctorValues(from: diagnostics)
         ))
     }
@@ -214,10 +218,11 @@ private struct DoctorEnvelope: Codable {
     var command: String
     var ready: Bool
     var schemaVersion: String
+    var storage: StorageReport
     var values: [String: String]
 
     enum CodingKeys: String, CodingKey {
-        case command, ready, values
+        case command, ready, storage, values
         case schemaVersion = "schema_version"
     }
 }

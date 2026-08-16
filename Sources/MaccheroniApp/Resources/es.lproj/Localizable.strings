@@ -594,5 +594,43 @@
 	<string>Glosario de la ejecución de origen</string>
 	<key>Current Derived Post-processing</key>
 	<string>Posprocesamiento derivado actual</string>
+	<key>Free Space</key>
+	<string>Espacio libre</string>
+	<key>Unavailable</key>
+	<string>No disponible</string>
+	<key>Stale Bookmark</key>
+	<string>Marcador obsoleto</string>
+	<key>Library Metadata</key>
+	<string>Metadatos de la biblioteca</string>
+	<key>Request Logs</key>
+	<string>Registros de solicitudes</string>
+	<key>ASR Model Cache</key>
+	<string>Caché del modelo ASR</string>
+	<key>VAD Model Cache</key>
+	<string>Caché del modelo VAD</string>
+	<key>Diarization Model Cache</key>
+	<string>Caché del modelo de diarización</string>
+	<key>Post-processing Model Cache</key>
+	<string>Caché del modelo de posprocesamiento</string>
+	<key>Temporary Work</key>
+	<string>Trabajo temporal</string>
+	<key>Available</key>
+	<string>Disponible</string>
+	<key>Not Created</key>
+	<string>Aún no creado</string>
+	<key>Unmounted</key>
+	<string>No montado</string>
+	<key>Unreadable</key>
+	<string>No se puede leer</string>
+	<key>Bookmark Unavailable</key>
+	<string>Marcador no disponible</string>
+	<key>Volume Readiness</key>
+	<string>Estado de los volúmenes</string>
+	<key>Storage Role</key>
+	<string>Función de almacenamiento</string>
+	<key>Model Cache on %@</key>
+	<string>Caché del modelo en %@</string>
+	<key>A configured storage folder is no longer available. Choose the folder again in Settings.</key>
+	<string>Una carpeta de almacenamiento configurada ya no está disponible. Vuelva a elegirla en Ajustes.</string>
 	</dict>
 </plist>

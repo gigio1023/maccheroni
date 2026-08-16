@@ -3,6 +3,7 @@ import Foundation
 import MaccheroniCore
 import MaccheroniMerge
 import MaccheroniPostprocess
+import MaccheroniStorage
 
 enum LibraryRepositoryError: Error, LocalizedError {
     case unsafeArtifactPath(String)
@@ -30,6 +31,14 @@ enum LibraryRepositoryError: Error, LocalizedError {
     }
 }
 
+private enum LibraryStorageAccessError: Error, LocalizedError {
+    case configuredBookmarkUnavailable
+
+    var errorDescription: String? {
+        appString("A configured storage folder is no longer available. Choose the folder again in Settings.")
+    }
+}
+
 private struct VerifiedDerivedResult {
     var directory: URL
     var manifest: DerivedManifest
@@ -43,28 +52,24 @@ private struct VerifiedArtifactData {
 }
 
 enum LibraryStorageSettings {
-    static let recordingsDirectoryKey = "maccheroni.storage.recordingsDirectory"
-    static let runsDirectoryKey = "maccheroni.storage.runsDirectory"
+    static let recordingsDirectoryKey = StoragePreferenceKeys.recordingsDirectory
+    static let runsDirectoryKey = StoragePreferenceKeys.runsDirectory
+    static let recordingsBookmarkKey = StoragePreferenceKeys.recordingsBookmark
+    static let runsBookmarkKey = StoragePreferenceKeys.runsBookmark
     static let localPostprocessModelKey = "maccheroni.postprocess.localModel"
-    static let libraryRootEnvironmentKey = "MACCHERONI_LIBRARY_ROOT"
+    static let libraryRootEnvironmentKey = StoragePreferenceKeys.libraryRootEnvironment
 
     static func defaultLibraryRoot(
         applicationSupportDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support", isDirectory: true)
     ) -> URL {
-        applicationSupportDirectory
-            .appendingPathComponent("Maccheroni", isDirectory: true)
-            .standardizedFileURL
+        LibraryStorageConfiguration.defaultLibraryRoot(
+            applicationSupportDirectory: applicationSupportDirectory
+        )
     }
 
     static func normalizedDirectoryURL(storedPath: String?) -> URL? {
-        guard let storedPath,
-              !storedPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              (storedPath as NSString).isAbsolutePath
-        else {
-            return nil
-        }
-        return URL(fileURLWithPath: storedPath, isDirectory: true).standardizedFileURL
+        LibraryStorageConfiguration.normalizedDirectoryURL(storedPath: storedPath)
     }
 
     static func environmentLibraryRoot(
@@ -82,6 +87,24 @@ struct LibraryBookmarkResolution: Sendable {
 struct LibraryBookmarkAccess: Sendable {
     var resolve: @Sendable (Data) throws -> LibraryBookmarkResolution
     var create: @Sendable (URL) throws -> Data
+    var startAccessing: @Sendable (URL) -> Bool
+    var stopAccessing: @Sendable (URL) -> Void
+
+    init(
+        resolve: @escaping @Sendable (Data) throws -> LibraryBookmarkResolution,
+        create: @escaping @Sendable (URL) throws -> Data,
+        startAccessing: @escaping @Sendable (URL) -> Bool = {
+            $0.startAccessingSecurityScopedResource()
+        },
+        stopAccessing: @escaping @Sendable (URL) -> Void = {
+            $0.stopAccessingSecurityScopedResource()
+        }
+    ) {
+        self.resolve = resolve
+        self.create = create
+        self.startAccessing = startAccessing
+        self.stopAccessing = stopAccessing
+    }
 
     static let system = LibraryBookmarkAccess(
         resolve: { bookmark in
@@ -100,7 +123,59 @@ struct LibraryBookmarkAccess: Sendable {
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             )
+        },
+        startAccessing: { $0.startAccessingSecurityScopedResource() },
+        stopAccessing: { $0.stopAccessingSecurityScopedResource() }
+    )
+}
+
+private struct ResolvedConfiguredRoot {
+    var url: URL
+    var bookmarkAvailable: Bool
+}
+
+final class LibraryStorageAccessLease: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stopAccessing: (@Sendable () -> Void)?
+
+    init(stopAccessing: @escaping @Sendable () -> Void) {
+        self.stopAccessing = stopAccessing
+    }
+
+    func end() {
+        let action = lock.withLock {
+            let action = stopAccessing
+            stopAccessing = nil
+            return action
         }
+        action?()
+    }
+
+    deinit {
+        end()
+    }
+}
+
+private func resolvedConfiguredRoot(
+    _ storedURL: URL,
+    bookmark: Data?,
+    access: LibraryBookmarkAccess
+) -> ResolvedConfiguredRoot {
+    guard let bookmark else {
+        return ResolvedConfiguredRoot(
+            url: storedURL.standardizedFileURL,
+            bookmarkAvailable: true
+        )
+    }
+    guard let resolution = try? access.resolve(bookmark) else {
+        return ResolvedConfiguredRoot(
+            url: storedURL.standardizedFileURL,
+            bookmarkAvailable: false
+        )
+    }
+    return ResolvedConfiguredRoot(
+        url: resolution.url.standardizedFileURL,
+        bookmarkAvailable: true
     )
 }
 
@@ -108,6 +183,10 @@ struct LibraryRepository: Sendable {
     let root: URL
     let runsRoot: URL
     let recordingsRoot: URL
+    let runsBookmark: Data?
+    let recordingsBookmark: Data?
+    private let configuredBookmarksAvailable: Bool
+    private let invalidRootIDs: Set<String>
     private let bookmarkAccess: LibraryBookmarkAccess
     private let onDerivedArtifactVerified: @Sendable (URL) throws -> Void
 
@@ -119,6 +198,10 @@ struct LibraryRepository: Sendable {
         root: URL,
         runsRoot: URL? = nil,
         recordingsRoot: URL? = nil,
+        runsBookmark: Data? = nil,
+        recordingsBookmark: Data? = nil,
+        configuredBookmarksAvailable: Bool = true,
+        invalidRootIDs: Set<String> = [],
         bookmarkAccess: LibraryBookmarkAccess = .system,
         onDerivedArtifactVerified: @escaping @Sendable (URL) throws -> Void = { _ in }
     ) {
@@ -130,19 +213,24 @@ struct LibraryRepository: Sendable {
         self.recordingsRoot = (recordingsRoot
             ?? standardizedRoot.appendingPathComponent("Recordings", isDirectory: true))
             .standardizedFileURL
+        self.runsBookmark = runsBookmark
+        self.recordingsBookmark = recordingsBookmark
+        self.configuredBookmarksAvailable = configuredBookmarksAvailable
+        self.invalidRootIDs = invalidRootIDs
         self.bookmarkAccess = bookmarkAccess
         self.onDerivedArtifactVerified = onDerivedArtifactVerified
     }
 
     static var local: LibraryRepository {
-        resolve(
+        let preferences = LibraryStoragePreferences(defaults: .standard)
+        return resolve(
             applicationSupportDirectory: FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support", isDirectory: true),
             environment: ProcessInfo.processInfo.environment,
-            recordingsPath: UserDefaults.standard.string(
-                forKey: LibraryStorageSettings.recordingsDirectoryKey
-            ),
-            runsPath: UserDefaults.standard.string(forKey: LibraryStorageSettings.runsDirectoryKey)
+            recordingsPath: preferences.recordingsPath,
+            runsPath: preferences.runsPath,
+            recordingsBookmark: preferences.recordingsBookmark,
+            runsBookmark: preferences.runsBookmark
         )
     }
 
@@ -150,24 +238,80 @@ struct LibraryRepository: Sendable {
         applicationSupportDirectory: URL,
         environment: [String: String],
         recordingsPath: String?,
-        runsPath: String?
+        runsPath: String?,
+        recordingsBookmark: Data? = nil,
+        runsBookmark: Data? = nil,
+        bookmarkAccess: LibraryBookmarkAccess = .system
     ) -> LibraryRepository {
-        let defaultRoot = LibraryStorageSettings.defaultLibraryRoot(
-            applicationSupportDirectory: applicationSupportDirectory
+        let configuration = LibraryStorageConfiguration(
+            applicationSupportDirectory: applicationSupportDirectory,
+            environment: environment,
+            preferences: LibraryStoragePreferences(
+                recordingsPath: recordingsPath,
+                runsPath: runsPath,
+                recordingsBookmark: recordingsBookmark,
+                runsBookmark: runsBookmark
+            )
         )
-        if let overriddenRoot = LibraryStorageSettings.environmentLibraryRoot(
-            environment: environment
-        ) {
-            return LibraryRepository(root: overriddenRoot)
-        }
+        let resolvedRecordings = configuration.isRootConfigurationValid("library.recordings")
+            ? resolvedConfiguredRoot(
+                configuration.recordingsURL,
+                bookmark: configuration.recordingsBookmark,
+                access: bookmarkAccess
+            )
+            : ResolvedConfiguredRoot(
+                url: configuration.recordingsURL,
+                bookmarkAvailable: false
+            )
+        let resolvedRuns = configuration.isRootConfigurationValid("library.runs")
+            ? resolvedConfiguredRoot(
+                configuration.runsURL,
+                bookmark: configuration.runsBookmark,
+                access: bookmarkAccess
+            )
+            : ResolvedConfiguredRoot(
+                url: configuration.runsURL,
+                bookmarkAvailable: false
+            )
         return LibraryRepository(
-            root: defaultRoot,
-            runsRoot: LibraryStorageSettings.normalizedDirectoryURL(storedPath: runsPath),
-            recordingsRoot: LibraryStorageSettings.normalizedDirectoryURL(storedPath: recordingsPath)
+            root: configuration.root,
+            runsRoot: resolvedRuns.url,
+            recordingsRoot: resolvedRecordings.url,
+            runsBookmark: configuration.runsBookmark,
+            recordingsBookmark: configuration.recordingsBookmark,
+            configuredBookmarksAvailable: resolvedRecordings.bookmarkAvailable
+                && resolvedRuns.bookmarkAvailable,
+            invalidRootIDs: configuration.invalidRootIDs,
+            bookmarkAccess: bookmarkAccess
+        )
+    }
+
+    var storageConfiguration: LibraryStorageConfiguration {
+        LibraryStorageConfiguration(
+            root: root,
+            recordingsURL: recordingsRoot,
+            runsURL: runsRoot,
+            recordingsBookmark: recordingsBookmark,
+            runsBookmark: runsBookmark,
+            invalidRootIDs: invalidRootIDs
         )
     }
 
     func prepareDirectories() throws {
+        guard configuredBookmarksAvailable else {
+            throw LibraryStorageAccessError.configuredBookmarkUnavailable
+        }
+        var accesses: [LibraryStorageAccessLease] = []
+        do {
+            if let access = try beginAccessingRecordingsRoot() { accesses.append(access) }
+            if let access = try beginAccessingRunsRoot() { accesses.append(access) }
+        } catch {
+            accesses.forEach { $0.end() }
+            throw error
+        }
+        defer {
+            accesses.forEach { $0.end() }
+        }
         for directory in [root, runsRoot, recordingsRoot, requestsRoot, glossariesRoot] {
             try FileManager.default.createDirectory(
                 at: directory,
@@ -201,6 +345,57 @@ struct LibraryRepository: Sendable {
 
     func bookmark(for url: URL) throws -> Data {
         try bookmarkAccess.create(url)
+    }
+
+    func beginAccessingRecordingsRoot() throws -> LibraryStorageAccessLease? {
+        try beginAccessing(root: recordingsRoot, bookmark: recordingsBookmark)
+    }
+
+    func beginAccessingRunsRoot() throws -> LibraryStorageAccessLease? {
+        try beginAccessing(root: runsRoot, bookmark: runsBookmark)
+    }
+
+    func beginAccessingRunnerRoots() throws -> [LibraryStorageAccessLease] {
+        var accesses: [LibraryStorageAccessLease] = []
+        do {
+            if let access = try beginAccessingRecordingsRoot() { accesses.append(access) }
+            if let access = try beginAccessingRunsRoot() { accesses.append(access) }
+            return accesses
+        } catch {
+            accesses.forEach { $0.end() }
+            throw error
+        }
+    }
+
+    func beginAccessingOriginal(
+        _ url: URL,
+        bookmark: Data?
+    ) throws -> LibraryStorageAccessLease? {
+        guard bookmark != nil else { return nil }
+        guard bookmarkAccess.startAccessing(url) else {
+            throw LibraryStorageAccessError.configuredBookmarkUnavailable
+        }
+        let bookmarkAccess = bookmarkAccess
+        return LibraryStorageAccessLease {
+            bookmarkAccess.stopAccessing(url)
+        }
+    }
+
+    private func beginAccessing(
+        root: URL,
+        bookmark: Data?
+    ) throws -> LibraryStorageAccessLease? {
+        guard configuredBookmarksAvailable else {
+            throw LibraryStorageAccessError.configuredBookmarkUnavailable
+        }
+        guard bookmark != nil else { return nil }
+        guard bookmarkAccess.startAccessing(root) else {
+            throw LibraryStorageAccessError.configuredBookmarkUnavailable
+        }
+        let bookmarkAccess = bookmarkAccess
+        return LibraryStorageAccessLease {
+            bookmarkAccess.stopAccessing(root)
+        }
     }
 
     func resolveOriginal(for record: LibraryRecord) throws -> URL {
@@ -238,6 +433,8 @@ struct LibraryRepository: Sendable {
     }
 
     func loadRun(at runURL: URL) throws -> LoadedRun {
+        let runsAccess = try beginAccessingRunsRoot()
+        defer { runsAccess?.end() }
         let manifestURL = runURL.appendingPathComponent("manifest.json")
         let manifest = try JSONDecoder().decode(
             Manifest.self,

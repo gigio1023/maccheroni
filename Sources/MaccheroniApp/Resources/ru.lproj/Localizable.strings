@@ -594,5 +594,43 @@
 	<string>Глоссарий исходного запуска</string>
 	<key>Current Derived Post-processing</key>
 	<string>Текущая производная постобработка</string>
+	<key>Free Space</key>
+	<string>Свободное место</string>
+	<key>Unavailable</key>
+	<string>Недоступно</string>
+	<key>Stale Bookmark</key>
+	<string>Устаревшая закладка</string>
+	<key>Library Metadata</key>
+	<string>Метаданные библиотеки</string>
+	<key>Request Logs</key>
+	<string>Журналы запросов</string>
+	<key>ASR Model Cache</key>
+	<string>Кэш модели ASR</string>
+	<key>VAD Model Cache</key>
+	<string>Кэш модели VAD</string>
+	<key>Diarization Model Cache</key>
+	<string>Кэш модели диаризации</string>
+	<key>Post-processing Model Cache</key>
+	<string>Кэш модели постобработки</string>
+	<key>Temporary Work</key>
+	<string>Временные рабочие данные</string>
+	<key>Available</key>
+	<string>Доступно</string>
+	<key>Not Created</key>
+	<string>Ещё не создано</string>
+	<key>Unmounted</key>
+	<string>Не смонтировано</string>
+	<key>Unreadable</key>
+	<string>Невозможно прочитать</string>
+	<key>Bookmark Unavailable</key>
+	<string>Закладка недоступна</string>
+	<key>Volume Readiness</key>
+	<string>Состояние томов</string>
+	<key>Storage Role</key>
+	<string>Роль хранилища</string>
+	<key>Model Cache on %@</key>
+	<string>Кэш модели на %@</string>
+	<key>A configured storage folder is no longer available. Choose the folder again in Settings.</key>
+	<string>Настроенная папка хранилища больше недоступна. Выберите её снова в настройках.</string>
 	</dict>
 </plist>

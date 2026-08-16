@@ -594,5 +594,43 @@
 	<string>ソース実行の用語集</string>
 	<key>Current Derived Post-processing</key>
 	<string>現在の派生後処理</string>
+	<key>Free Space</key>
+	<string>空き容量</string>
+	<key>Unavailable</key>
+	<string>利用不可</string>
+	<key>Stale Bookmark</key>
+	<string>古いブックマーク</string>
+	<key>Library Metadata</key>
+	<string>ライブラリのメタデータ</string>
+	<key>Request Logs</key>
+	<string>リクエストログ</string>
+	<key>ASR Model Cache</key>
+	<string>ASR モデルキャッシュ</string>
+	<key>VAD Model Cache</key>
+	<string>VAD モデルキャッシュ</string>
+	<key>Diarization Model Cache</key>
+	<string>話者分離モデルキャッシュ</string>
+	<key>Post-processing Model Cache</key>
+	<string>後処理モデルキャッシュ</string>
+	<key>Temporary Work</key>
+	<string>一時作業領域</string>
+	<key>Available</key>
+	<string>利用可能</string>
+	<key>Not Created</key>
+	<string>未作成</string>
+	<key>Unmounted</key>
+	<string>マウント解除</string>
+	<key>Unreadable</key>
+	<string>読み取り不可</string>
+	<key>Bookmark Unavailable</key>
+	<string>ブックマークを利用できません</string>
+	<key>Volume Readiness</key>
+	<string>ボリュームの状態</string>
+	<key>Storage Role</key>
+	<string>ストレージの役割</string>
+	<key>Model Cache on %@</key>
+	<string>%@ のモデルキャッシュ</string>
+	<key>A configured storage folder is no longer available. Choose the folder again in Settings.</key>
+	<string>設定済みのストレージフォルダを利用できなくなりました。設定でもう一度フォルダを選択してください。</string>
 	</dict>
 </plist>

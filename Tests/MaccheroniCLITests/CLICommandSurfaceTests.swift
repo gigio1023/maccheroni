@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import MaccheroniStorage
 import Testing
 @testable import MaccheroniCLI
 
@@ -143,11 +144,13 @@ struct CLICommandSurfaceTests {
         ) == postprocess)
 
         let doctor = try CLIOutput.doctorJSON(
-            diagnostics: "zeta=last\nalpha=one=two"
+            diagnostics: "zeta=last\nalpha=one=two",
+            storage: Fixture.storage
         )
         #expect(doctor == Fixture.doctorJSON)
         #expect(try CLIOutput.doctorJSON(
-            diagnostics: "zeta=last\nalpha=one=two"
+            diagnostics: "zeta=last\nalpha=one=two",
+            storage: Fixture.storage
         ) == doctor)
 
         let capabilities = try CLIOutput.capabilitiesJSON()
@@ -168,13 +171,21 @@ struct CLICommandSurfaceTests {
 
         let doctorObject = try jsonObject(doctor)
         #expect(Set(doctorObject.keys) == [
-            "command", "ready", "schema_version", "values",
+            "command", "ready", "schema_version", "storage", "values",
         ])
         #expect(doctorObject["ready"] as? Bool == true)
+        #expect(doctorObject["schema_version"] as? String == "1.1.0")
         #expect(doctorObject["values"] as? [String: String] == [
             "alpha": "one=two",
             "zeta": "last",
         ])
+        let storage = try #require(doctorObject["storage"] as? [String: Any])
+        #expect(storage["observable"] as? Bool == true)
+        let volumes = try #require(storage["volumes"] as? [[String: Any]])
+        #expect(volumes.count == 1)
+        #expect(volumes[0]["name"] as? String == "Archive")
+        #expect(volumes[0]["available_bytes"] as? Int == 987)
+        #expect(volumes[0]["roles"] as? [String] == ["recordings", "runs"])
 
         let privateDoctor = try CLIOutput.doctorJSON(
             diagnostics: "asr_error=missing /Users/private/model.bin"
@@ -435,8 +446,42 @@ private enum Fixture {
         + "\"schema_version\":\"1.0.0\"}"
     static let doctorJSON =
         "{\"command\":\"doctor\",\"ready\":true,"
-        + "\"schema_version\":\"1.0.0\","
+        + "\"schema_version\":\"1.1.0\","
+        + "\"storage\":{\"observable\":true,\"roots\":["
+        + "{\"bookmark_status\":\"none\",\"id\":\"recordings\","
+        + "\"role\":\"recordings\",\"status\":\"available\","
+        + "\"volume_id\":\"archive\"},{\"bookmark_status\":\"none\","
+        + "\"id\":\"runs\",\"role\":\"runs\",\"status\":\"available\","
+        + "\"volume_id\":\"archive\"}],\"volumes\":[{"
+        + "\"available_bytes\":987,\"capacity_status\":\"available\","
+        + "\"id\":\"archive\",\"name\":\"Archive\","
+        + "\"roles\":[\"recordings\",\"runs\"]}]},"
         + "\"values\":{\"alpha\":\"one=two\",\"zeta\":\"last\"}}"
+
+    static let storage = StorageReport(
+        volumes: [StorageVolume(
+            id: "archive",
+            name: "Archive",
+            roles: [.recordings, .runs],
+            availableBytes: 987
+        )],
+        roots: [
+            StorageRootObservation(
+                id: "recordings",
+                role: .recordings,
+                status: .available,
+                bookmarkStatus: .none,
+                volumeID: "archive"
+            ),
+            StorageRootObservation(
+                id: "runs",
+                role: .runs,
+                status: .available,
+                bookmarkStatus: .none,
+                volumeID: "archive"
+            ),
+        ]
+    )
     static let capabilitiesJSON =
         "{\"command\":\"capabilities\",\"commands\":["
         + "{\"name\":\"help\",\"output\":\"Human-readable usage on stdout.\","
@@ -448,7 +493,7 @@ private enum Fixture {
         + "{\"name\":\"postprocess\",\"output\":\"Derived directory path or a JSON derived_path envelope on stdout.\","
         + "\"side_effect\":\"Creates a derived artifact directory under a verified completed run.\","
         + "\"summary\":\"Correct or translate a completed run without ASR.\",\"supports_json\":true},"
-        + "{\"name\":\"doctor\",\"output\":\"key=value diagnostics or a JSON readiness envelope on stdout.\","
+        + "{\"name\":\"doctor\",\"output\":\"Volume-aware key=value diagnostics or a typed JSON readiness envelope on stdout.\","
         + "\"side_effect\":\"None; performs read-only local checks.\","
         + "\"summary\":\"Inspect local profile and dependency readiness.\",\"supports_json\":true},"
         + "{\"name\":\"capabilities\",\"output\":\"Command inventory as text or JSON on stdout.\","

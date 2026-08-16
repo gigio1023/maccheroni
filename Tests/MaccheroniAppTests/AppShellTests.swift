@@ -1040,6 +1040,113 @@ struct AppShellTests {
     }
 
     @Test @MainActor
+    func configuredStorageScopesRemainActiveThroughRecordingAndRunnerCleanup() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let recordingsRoot = root.appendingPathComponent("Recordings", isDirectory: true)
+        let runsRoot = root.appendingPathComponent("Runs", isDirectory: true)
+        let recordingDirectory = recordingsRoot.appendingPathComponent(
+            "scoped-recording",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: recordingDirectory,
+            withIntermediateDirectories: true
+        )
+        let microphoneURL = recordingDirectory.appendingPathComponent("microphone.caf")
+        let systemURL = recordingDirectory.appendingPathComponent("system-audio.caf")
+        let combinedURL = recordingDirectory.appendingPathComponent("combined.wav")
+        try Data("microphone".utf8).write(to: microphoneURL)
+        try Data("system".utf8).write(to: systemURL)
+        try Data("combined".utf8).write(to: combinedURL)
+        let artifacts = RecordingArtifacts(
+            directory: recordingDirectory,
+            microphoneURL: microphoneURL,
+            systemAudioURL: systemURL,
+            combinedURL: combinedURL,
+            startedAt: Date(timeIntervalSince1970: 1_722_686_400),
+            stoppedAt: Date(timeIntervalSince1970: 1_722_686_405)
+        )
+        let access = AppShellStorageAccessRecorder()
+        let repository = LibraryRepository(
+            root: root.appendingPathComponent("Library", isDirectory: true),
+            runsRoot: runsRoot,
+            recordingsRoot: recordingsRoot,
+            runsBookmark: Data("runs".utf8),
+            recordingsBookmark: Data("recordings".utf8),
+            bookmarkAccess: LibraryBookmarkAccess(
+                resolve: { _ in throw AppShellFakeError.notImplemented },
+                create: { _ in Data() },
+                startAccessing: { access.start($0) },
+                stopAccessing: { access.stop($0) }
+            )
+        )
+        let runner = AppShellControllableRunner()
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: runner,
+            recorder: AppShellSuccessfulRecorder(artifacts: artifacts),
+            defaults: defaults
+        )
+
+        #expect(access.activeCount(for: recordingsRoot) == 0)
+        #expect(access.activeCount(for: runsRoot) == 0)
+        model.startRecording()
+        await appShellWait { model.isRecording }
+        #expect(access.activeCount(for: recordingsRoot) == 1)
+
+        model.stopRecordingAndTranscribe()
+        await appShellWait { runner.isWaiting }
+        #expect(access.activeCount(for: recordingsRoot) == 2)
+        #expect(access.activeCount(for: runsRoot) == 1)
+
+        runner.fail(with: AppShellFakeError.notImplemented)
+        await appShellWait { model.canImportAudio }
+        #expect(access.activeCount(for: recordingsRoot) == 0)
+        #expect(access.activeCount(for: runsRoot) == 0)
+    }
+
+    @Test @MainActor
+    func failedRecordingScopeStartIsShownBeforeRecorderStarts() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let access = AppShellStorageAccessRecorder()
+        let repository = LibraryRepository(
+            root: root,
+            recordingsBookmark: Data("recordings".utf8),
+            bookmarkAccess: LibraryBookmarkAccess(
+                resolve: { _ in throw AppShellFakeError.notImplemented },
+                create: { _ in Data() },
+                startAccessing: { access.start($0) },
+                stopAccessing: { access.stop($0) }
+            )
+        )
+        let recorder = AppShellFakeRecorder()
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: recorder,
+            defaults: defaults
+        )
+        access.allowsStart = false
+
+        model.startRecording()
+        await appShellWait { model.canStartRecording }
+
+        #expect(recorder.startCount == 0)
+        #expect(model.errorMessage == appString(
+            "A configured storage folder is no longer available. Choose the folder again in Settings."
+        ))
+        #expect(access.activeCount(for: repository.recordingsRoot) == 0)
+    }
+
+    @Test @MainActor
     func retryOfFailedAppRecordingRemixesPreservedChannelsIntoANewWAV() async throws {
         let root = try appShellTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -2697,6 +2804,35 @@ private final class AppShellFinalizationFailingRecorder: RecordingControlling {
     }
 
     func cancel() async {}
+}
+
+private final class AppShellStorageAccessRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var activeCounts: [String: Int] = [:]
+    private var storedAllowsStart = true
+
+    var allowsStart: Bool {
+        get { lock.withLock { storedAllowsStart } }
+        set { lock.withLock { storedAllowsStart = newValue } }
+    }
+
+    func start(_ url: URL) -> Bool {
+        lock.withLock {
+            guard storedAllowsStart else { return false }
+            activeCounts[url.path, default: 0] += 1
+            return true
+        }
+    }
+
+    func stop(_ url: URL) {
+        lock.withLock {
+            activeCounts[url.path, default: 0] -= 1
+        }
+    }
+
+    func activeCount(for url: URL) -> Int {
+        lock.withLock { activeCounts[url.path, default: 0] }
+    }
 }
 
 private enum AppShellFakeError: Error {

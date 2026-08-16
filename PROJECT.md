@@ -415,6 +415,14 @@ not deleted.
   missing or invalid non-null revision fails as typed unavailable without substituting
   current content or reconstructing bytes. Runs made before this storage contract
   commonly have no revision and must be shown as unavailable rather than recovered.
+- D41 [inference] Report storage readiness as observed per-volume facts (decided
+  2026-08-12). Resolve the configured library, recording, run, model-cache, and
+  backend work roots through one shared computation, group roles with Foundation's
+  volume identity, and expose a localized volume name, roles, and available bytes in
+  the App and doctor schema 1.1.0. Preserve missing, unmounted, unreadable, stale, and
+  unavailable-bookmark states instead of substituting another volume. A measured zero
+  bytes is still observable. Do not infer a minimum, headroom, quota, retention
+  formula, or sufficiency verdict until a maintainer adopts that execution policy.
 
 ## Project-wide Done Criteria
 
