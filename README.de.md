@@ -38,7 +38,7 @@ Unsichere Korrekturen werden gekennzeichnet und niemals stillschweigend ersetzt.
 <p align="center">
   <img src="docs/assets/screenshots/transcript.png" alt="Maccheroni-Transkriptansicht: zwei Sprecher mit globalen Labels und Evidenz-Chips pro Segment, daneben ein Run-Inspektor mit Run-Status, gepinnten Modellrevisionen und dem Glossareintrag" width="100%">
 </p>
-<p align="center"><em>Jeder Lauf behält seine Evidenz: Der Inspektor zeigt die exakt gepinnten Modelle, den Status des Laufs und ob das Glossar den Decoder erreicht hat.</em></p>
+<p align="center"><em>Jeder Lauf behält seine Evidenz: Der Inspektor zeigt die exakt gepinnten Modelle, den Status des Laufs und ob das Glossar den Decoder erreicht hat. Die angezeigte Ebene — roh, korrigiert oder übersetzt — wird mit einer Herkunftskopfzeile in die Zwischenablage kopiert.</em></p>
 
 ## Warum es dieses Projekt gibt
 
@@ -93,7 +93,7 @@ Alle Ergebnisse stammen aus öffentlichen oder synthetischen Fixtures. Auswertun
 | Italienischer synthetischer Dialog mit 2 Sprechern (10 min), Glossar mit 9 Begriffen | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverse-Beispiel (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-Koreanisch und Italienisch sind die ersten beiden Sprachprofile; neue Sprach-Fixtures kommen in diese Tabelle, sobald sie gemessen sind.
+Koreanisch und Italienisch sind die ersten beiden Sprachprofile. Als nächstes Fixture-Set ist ein festgeschriebenes koreanisch-englisches Acceptance-Pack vorbereitet — HiKE-Codeswitching-Ausschnitte und ein AMI-Meeting mit vier Sprechern — und neue Messungen erscheinen in dieser Tabelle, sobald sie vorliegen.
 
 Stabilität der Sprecher an Abschnittsgrenzen im 78-Minuten-Beispiel: 1.0 für beide Referenzsprecher. Eine feste Matrix von 600 Sekunden zeigte, dass MOSS-Blätter über 120 s ihre Zeitstempelstruktur vollständig verlieren. Deshalb liegt die Obergrenze für produktive Blätter bei 120 s. Einzelheiten stehen unter [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 
@@ -104,6 +104,8 @@ Stabilität der Sprecher an Abschnittsgrenzen im 78-Minuten-Beispiel: 1.0 für b
 
 Korrekturgewinne werden gemessen, nicht angenommen. Ein Vergleichs-Harness mit vier Zuständen bewertet die rohe und die korrigierte Ausgabe eines abgeschlossenen Laufs gegen dieselbe Referenz, mit und ohne Glossar-Injektion zur Dekodierzeit, und zählt jede angewendete Korrektur, die ein Segment von der Referenz entfernt hat. Eine selbstbewusst falsche Korrektur kann sich nicht in einem Durchschnitt verstecken.
 
+Ein abgeschlossener Lauf ist nicht eingefroren. `maccheroni postprocess` und die App leiten neue Korrektur- oder Übersetzungssätze aus den versiegelten Segmenten ab, ohne die ASR erneut auszuführen, und jede Glossar-Speicherung bleibt als inhaltsadressierte Revision erhalten, sodass eine spätere Ableitung genau die Glossar-Bytes wiederverwenden kann, die der ursprüngliche Lauf aufgezeichnet hat.
+
 ## Installation
 
 Es gibt noch keine paketierten Releases. Baue das Projekt aus dem Quellcode.
@@ -113,17 +115,18 @@ Voraussetzungen: Apple-Silicon-Mac, macOS 26, Xcode 26, [uv](https://docs.astral
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 241 tests
+swift build && swift test          # 315 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-Die App gibt ihren Bundle-Pfad aus, wenn Build, Ressourcen-Allowlist-Inventur und strenge Codesign-Prüfungen erfolgreich sind. Modellgewichte werden bei der ersten Nutzung heruntergeladen. Die ausführbare Datei enthält weder Modellgewichte noch Python-Umgebungen; `maccheroni doctor` prüft Laufzeitumgebungen und festgeschriebene Snapshots.
+Die App gibt ihren Bundle-Pfad aus, wenn Build, Ressourcen-Allowlist-Inventur und strenge Codesign-Prüfungen erfolgreich sind. Modellgewichte werden bei der ersten Nutzung heruntergeladen. Die ausführbare Datei enthält weder Modellgewichte noch Python-Umgebungen; `maccheroni doctor` prüft Laufzeitumgebungen, festgeschriebene Snapshots und die Speicherbereitschaft je konfiguriertem Volume.
 
-Die ausführbare Datei bietet vier Produktbefehle:
+Die ausführbare Datei bietet fünf Produktbefehle:
 
 ```bash
-.build/debug/maccheroni help [help|run|doctor|capabilities]
+.build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni postprocess Runs/meeting --profile ko-meeting
 .build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
 .build/debug/maccheroni capabilities [--json]
 ```
@@ -159,7 +162,7 @@ Issues und gezielte Pull Requests sind willkommen. Build- und Testbefehle, der V
 | Pfad | Inhalt |
 |---|---|
 | `Sources/` | Swift-Paket: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 241 fixturebasierte Tests in 22 Suites |
+| `Tests/` | 315 fixturebasierte Tests in 24 Suites |
 | `benchmarks/scripts/` | Runner, Scorer und der Vergleichs-Harness für Korrekturpfade, mit abgeleiteten Urteilen und Negativtests |
 | `docs/` | Forschungsübersicht, Quellcodeprüfungen, Richtlinie für Beschränkungen, Verträge (JSON-Schemas), UI-Design |
 | `scripts/` | App-Bundle-Build, MOSS-Harness-Build, Einrichtung der Nachbearbeitungslaufzeit |

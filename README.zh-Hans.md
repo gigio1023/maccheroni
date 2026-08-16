@@ -37,7 +37,7 @@
 <p align="center">
   <img src="docs/assets/screenshots/transcript.png" alt="Maccheroni 转写视图：两位说话人带全局标签和每段证据标记，旁边的检查器显示运行状态、固定的模型 revision 和词汇表记录" width="100%">
 </p>
-<p align="center"><em>每次运行都保留证据：检查器显示固定的模型、运行状态，以及词汇表是否送达解码器。</em></p>
+<p align="center"><em>每次运行都保留证据：检查器显示固定的模型、运行状态，以及词汇表是否送达解码器。当前显示的图层（原始、修正或翻译）可连同来源标头一起复制到剪贴板。</em></p>
 
 ## 项目缘起
 
@@ -92,7 +92,7 @@ Maccheroni 是一款个人工具：一个可配置的工作台，用一台 Mac �
 | 意大利语双人合成音频（10分钟），9个术语 | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverse 样本（78分钟） | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-韩语和意大利语是最早的两个语言配置;新的语言测试样本在完成测量后会加入此表。
+韩语和意大利语是最早的两个语言配置。作为下一组测试样本，已准备好固定的韩英验收包（HiKE 语码转换片段和四人 AMI 会议），新的测量结果一经得出即加入此表。
 
 在78分钟样本中，两位参考说话人的 chunk 边界稳定性都是1.0。固定的600秒 matrix 显示，超过120秒的 MOSS leaf 会完全丢失 timestamp 结构，因此生产环境的 leaf 上限设为120秒。详情见 [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md)。
 
@@ -103,6 +103,8 @@ Maccheroni 是一款个人工具：一个可配置的工作台，用一台 Mac �
 
 Correction 的收益靠测量而不是假设。四状态对比 harness 用同一份参照转写评估已完成 run 的原始输出和修正输出，并对比 decode 时是否注入术语表，逐条统计让 segment 偏离参照的修正。一次自信却错误的修正无法藏进平均值。
 
+完成的运行并未被冻结。`maccheroni postprocess` 和应用可以在不重新运行 ASR 的情况下，从封存的分段派生新的修正集或翻译集；每次保存词汇表都会作为内容寻址的修订保留，因此之后的派生可以精确复用原始运行记录的词汇表字节。
+
 ## 安装
 
 目前尚无打包release，请从源码build。
@@ -112,17 +114,18 @@ Correction 的收益靠测量而不是假设。四状态对比 harness 用同一
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 241 tests
+swift build && swift test          # 315 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-build、resource allowlist inventory 和 strict codesign 检查全部通过后，应用会输出 bundle path。模型 weight 会在首次使用时下载。可执行文件不包含模型 weight 或 Python 环境；`maccheroni doctor` 用于验证 runtime 和固定的 snapshot。
+build、resource allowlist inventory 和 strict codesign 检查全部通过后，应用会输出 bundle path。模型 weight 会在首次使用时下载。可执行文件不包含模型 weight 或 Python 环境；`maccheroni doctor` 用于验证 runtime、固定的 snapshot，以及每个已配置卷的存储就绪状态。
 
-可执行文件提供四个产品命令：
+可执行文件提供五个产品命令：
 
 ```bash
-.build/debug/maccheroni help [help|run|doctor|capabilities]
+.build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni postprocess Runs/meeting --profile ko-meeting
 .build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
 .build/debug/maccheroni capabilities [--json]
 ```
@@ -158,7 +161,7 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 | 路径 | 内容 |
 |---|---|
 | `Sources/` | Swift 包：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
-| `Tests/` | 分布于22个 suite 的241项 fixture test |
+| `Tests/` | 分布于24个 suite 的315项 fixture test |
 | `benchmarks/scripts/` | 带有 derived verdict 和 negative test 的 runner、scorer 与 correction 路径对比 harness |
 | `docs/` | 调研 digest、source audit、constraint policy、契约（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |

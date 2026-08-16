@@ -38,7 +38,7 @@ Uncertain corrections are flagged, never silently substituted. Speaker labels co
 <p align="center">
   <img src="docs/assets/screenshots/transcript.png" alt="Maccheroni transcript view: two speakers with global labels and per-segment evidence chips, next to a run inspector listing run status, pinned model revisions, and the glossary record" width="100%">
 </p>
-<p align="center"><em>Every run keeps its evidence: the inspector shows the exact pinned models, the run status, and whether the glossary reached the decoder.</em></p>
+<p align="center"><em>Every run keeps its evidence: the inspector shows the exact pinned models, the run status, and whether the glossary reached the decoder. The displayed layer — raw, corrected, or translated — copies to the clipboard with a provenance header.</em></p>
 
 ## Why this exists
 
@@ -93,7 +93,7 @@ All from public or synthetic fixtures; evaluation IDs and artifact hashes are re
 | Italian 2-speaker synthetic (10 min), 9-term glossary | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverse sample (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-Korean and Italian are the first two language profiles; new language fixtures join this table as they are measured.
+Korean and Italian are the first two language profiles. A pinned Korean-English acceptance pack — HiKE code-switching excerpts and a four-speaker AMI meeting — is prepared as the next fixture set, and new measurements join this table as they land.
 
 Chunk-boundary speaker stability on the 78-minute sample: 1.0 for both reference speakers. A fixed 600-second matrix showed that MOSS leaves above 120 s lose timestamp structure entirely, which is why the production leaf cap is 120 s — details in [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 
@@ -104,6 +104,8 @@ Chunk-boundary speaker stability on the 78-minute sample: 1.0 for both reference
 
 Correction gains are measured, not assumed. A four-state comparison harness scores a completed run's raw and corrected output against one reference — with and without decode-time glossary injection — and counts every applied correction that moved a segment away from the reference, so a confidently wrong repair can never hide inside an average.
 
+A completed run is not frozen. `maccheroni postprocess` and the app derive new correction or translation sets from the sealed segments without re-running ASR, and every glossary save is kept as a content-addressed revision, so a later derivation can reuse exactly the glossary bytes the original run recorded.
+
 ## Install
 
 There are no packaged releases yet — build from source.
@@ -113,17 +115,18 @@ Requirements: Apple Silicon Mac, macOS 26, Xcode 26, [uv](https://docs.astral.sh
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 241 tests
+swift build && swift test          # 315 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-The app prints its bundle path when the build, resource-allowlist inventory, and strict codesign checks all pass. Model weights download on first use. The executable does not bundle model weights or Python environments; `maccheroni doctor` verifies runtimes and pinned snapshots.
+The app prints its bundle path when the build, resource-allowlist inventory, and strict codesign checks all pass. Model weights download on first use. The executable does not bundle model weights or Python environments; `maccheroni doctor` verifies runtimes, pinned snapshots, and storage readiness per configured volume.
 
-The executable provides four product commands:
+The executable provides five product commands:
 
 ```bash
-.build/debug/maccheroni help [help|run|doctor|capabilities]
+.build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni postprocess Runs/meeting --profile ko-meeting
 .build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
 .build/debug/maccheroni capabilities [--json]
 ```
@@ -159,7 +162,7 @@ Issues and focused pull requests are welcome. Build and test commands, the verif
 | Path | What it is |
 |---|---|
 | `Sources/` | Swift package: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 241 fixture-based tests across 22 suites |
+| `Tests/` | 315 fixture-based tests across 24 suites |
 | `benchmarks/scripts/` | Runners, scorers, and the correction-path comparison harness, with derived verdicts and negative tests |
 | `docs/` | Research digest, source audits, constraint policy, contracts (JSON schemas), UI design |
 | `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |

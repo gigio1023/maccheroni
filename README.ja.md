@@ -37,7 +37,7 @@
 <p align="center">
   <img src="docs/assets/screenshots/transcript.png" alt="Maccheroniのトランスクリプト画面: グローバルラベル付きの2人の話者とセグメントごとのエビデンスチップ、隣にrunステータス、固定されたモデルrevision、glossary記録を表示するインスペクタ" width="100%">
 </p>
-<p align="center"><em>各runはエビデンスを保持します。インスペクタには固定された正確なモデル、runのステータス、glossaryがデコーダに届いたかどうかが表示されます。</em></p>
+<p align="center"><em>各runはエビデンスを保持します。インスペクタには固定された正確なモデル、runのステータス、glossaryがデコーダに届いたかどうかが表示されます。表示中のレイヤー（raw・修正済み・翻訳済み）は、provenanceヘッダー付きでクリップボードにコピーできます。</em></p>
 
 ## このプロジェクトを作った理由
 
@@ -92,7 +92,7 @@ Maccheroniは個人用ツールです。1台のMacで混在言語の会話を話
 | イタリア語の2話者合成音声（10分）、9語の用語集 | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverseサンプル（78分） | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-韓国語とイタリア語が最初の2つの言語プロファイルです。新しい言語フィクスチャは測定でき次第この表に追加します。
+韓国語とイタリア語が最初の2つの言語プロファイルです。次のフィクスチャセットとして、固定した韓英acceptance pack（HiKEのコードスイッチング抜粋と4話者のAMI会議）を準備済みで、新しい測定結果は得られ次第この表に追加します。
 
 78分のサンプルでは、chunk境界での話者安定性が両方の基準話者について1.0でした。固定した600秒のmatrixでは、120秒を超えるMOSS leafがtimestamp構造を完全に失いました。このためproduction leafの上限を120秒に設定しています。詳細は[docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md)にあります。
 
@@ -103,6 +103,8 @@ Maccheroniは個人用ツールです。1台のMacで混在言語の会話を話
 
 Correctionの改善幅は仮定ではなく測定で確認します。4-state比較harnessが完了したrunのraw出力とcorrected出力を同じ参照文字起こしと照合し、decode時の用語集注入の有無も比較して、参照から遠ざかった修正を一つずつ数えます。自信を持って間違えた修正が平均の中に隠れることはありません。
 
+完了したrunは凍結されません。`maccheroni postprocess`とアプリは、ASRを再実行せずに封印されたセグメントから新しい修正セットや翻訳セットを導出します。glossaryの保存はすべてcontent-addressedなrevisionとして保持されるため、後の導出では元のrunが記録したglossaryのバイト列をそのまま再利用できます。
+
 ## インストール
 
 パッケージreleaseはまだありません。ソースからbuildしてください。
@@ -112,17 +114,18 @@ Correctionの改善幅は仮定ではなく測定で確認します。4-state比
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 241 tests
+swift build && swift test          # 315 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-build、resource allowlist inventory、strict codesignの各チェックに合格すると、アプリがbundle pathを表示します。モデルweightは初回使用時にダウンロードされます。実行ファイルにはモデルweightもPython環境も含まれません。`maccheroni doctor`はruntimeと固定snapshotを検証します。
+build、resource allowlist inventory、strict codesignの各チェックに合格すると、アプリがbundle pathを表示します。モデルweightは初回使用時にダウンロードされます。実行ファイルにはモデルweightもPython環境も含まれません。`maccheroni doctor`はruntimeと固定snapshot、設定済みボリュームごとのストレージ準備状態を検証します。
 
-実行ファイルには4つの製品コマンドがあります。
+実行ファイルには5つの製品コマンドがあります。
 
 ```bash
-.build/debug/maccheroni help [help|run|doctor|capabilities]
+.build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni postprocess Runs/meeting --profile ko-meeting
 .build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
 .build/debug/maccheroni capabilities [--json]
 ```
@@ -158,7 +161,7 @@ Issueと対象を絞ったpull requestを歓迎します。Buildとtestのコマ
 | パス | 内容 |
 |---|---|
 | `Sources/` | Swiftパッケージ：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
-| `Tests/` | 22 suite、241件のfixtureベースtest |
+| `Tests/` | 24 suite、315件のfixtureベースtest |
 | `benchmarks/scripts/` | Derived verdictとnegative testを備えたrunner、scorer、correction経路比較harness |
 | `docs/` | 調査digest、source audit、constraint policy、契約（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |

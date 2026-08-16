@@ -21,7 +21,7 @@ For the optional local post-processing model, run
 
 ## Testing
 
-Swift — 241 fixture-based tests in 22 suites:
+Swift — 315 fixture-based tests in 24 suites:
 
 ```bash
 swift test                                        # everything
