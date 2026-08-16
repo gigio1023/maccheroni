@@ -1,3 +1,4 @@
+import Accessibility
 import AppKit
 import MaccheroniCore
 import MaccheroniMerge
@@ -64,12 +65,38 @@ struct TranscriptView: View {
             }
         }
         .navigationTitle(record.displayName)
+        .onCopyCommand {
+            guard !run.segments.isEmpty else { return [] }
+            do {
+                let payload = try TranscriptCopyCommand(
+                    clipboard: SystemTranscriptClipboard.shared
+                ).payload(
+                    run: run,
+                    record: record,
+                    selectedSegmentIDs: selectedSegmentIDs
+                )
+                showCopyFeedback(
+                    TranscriptCopyFeedback(
+                        message: payload.confirmation.message(),
+                        isError: false
+                    )
+                )
+                return [NSItemProvider(object: payload.text as NSString)]
+            } catch {
+                showCopyFeedback(
+                    TranscriptCopyFeedback(
+                        message: appString("The transcript could not be copied."),
+                        isError: true
+                    )
+                )
+                return []
+            }
+        }
         .toolbar {
             ToolbarItemGroup {
                 Button(action: copyTranscript) {
                     Label(copyButtonTitle, systemImage: "doc.on.doc")
                 }
-                .keyboardShortcut("c", modifiers: .command)
                 .disabled(run.segments.isEmpty)
                 .help(copyButtonTitle)
                 Menu(appLocalized("Export"), systemImage: "square.and.arrow.up") {
@@ -325,6 +352,7 @@ struct TranscriptView: View {
         copyFeedbackGeneration += 1
         let generation = copyFeedbackGeneration
         withAnimation { copyFeedback = feedback }
+        AccessibilityNotification.Announcement(feedback.message).post()
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
             guard generation == copyFeedbackGeneration else { return }
@@ -413,34 +441,55 @@ final class SystemTranscriptClipboard: TranscriptClipboardWriting {
     }
 }
 
+struct TranscriptCopyPayload: Equatable, Sendable {
+    let text: String
+    let confirmation: TranscriptCopyConfirmation
+}
+
 @MainActor
 struct TranscriptCopyCommand {
     let clipboard: any TranscriptClipboardWriting
+
+    func payload(
+        run: LoadedRun,
+        record: LibraryRecord,
+        selectedSegmentIDs: Set<TranscriptSegmentID>
+    ) throws -> TranscriptCopyPayload {
+        let selectedSegments = run.segments.filter { selectedSegmentIDs.contains($0.id) }
+        guard selectedSegmentIDs.isEmpty || selectedSegments.count == selectedSegmentIDs.count else {
+            throw TranscriptCopyError.staleSelection
+        }
+        let selectedIndices = Set(selectedSegments.map(\.index))
+        let text = try TranscriptExporter.copyText(
+            run: run,
+            record: record,
+            selectedSegmentIndices: selectedIndices
+        )
+        return TranscriptCopyPayload(
+            text: text,
+            confirmation: TranscriptCopyConfirmation(
+                layer: TranscriptDisplayLayer.displayed(in: run),
+                scope: selectedSegmentIDs.isEmpty
+                    ? .transcript
+                    : .selection(segmentCount: selectedSegments.count)
+            )
+        )
+    }
 
     func perform(
         run: LoadedRun,
         record: LibraryRecord,
         selectedSegmentIDs: Set<TranscriptSegmentID>
     ) throws -> TranscriptCopyConfirmation {
-        let selectedSegments = run.segments.filter { selectedSegmentIDs.contains($0.id) }
-        guard selectedSegmentIDs.isEmpty || selectedSegments.count == selectedSegmentIDs.count else {
-            throw TranscriptCopyError.staleSelection
-        }
-        let selectedIndices = Set(selectedSegments.map(\.index))
-        let payload = try TranscriptExporter.copyText(
+        let payload = try payload(
             run: run,
             record: record,
-            selectedSegmentIndices: selectedIndices
+            selectedSegmentIDs: selectedSegmentIDs
         )
-        guard clipboard.write(payload) else {
+        guard clipboard.write(payload.text) else {
             throw TranscriptCopyError.clipboardWriteFailed
         }
-        return TranscriptCopyConfirmation(
-            layer: TranscriptDisplayLayer.displayed(in: run),
-            scope: selectedSegmentIDs.isEmpty
-                ? .transcript
-                : .selection(segmentCount: selectedSegments.count)
-        )
+        return payload.confirmation
     }
 }
 
@@ -521,13 +570,22 @@ private struct TranscriptSegmentRow: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                     }
+
+                    Button(action: select) {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .help(appLocalized("Select this segment for copying."))
+                    .accessibilityLabel(isSelected
+                        ? appLocalized("Remove this segment from the copy selection.")
+                        : appLocalized("Select this segment for copying."))
                 }
 
                 TranscriptSegmentBody(
                     correctedText: correctedText,
                     flags: item.segment.flags ?? [],
-                    isSelected: isSelected,
-                    select: select
+                    play: play
                 )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -573,11 +631,10 @@ private struct TranscriptSegmentRow: View {
 private struct TranscriptSegmentBody: View {
     let correctedText: String
     let flags: [String]
-    let isSelected: Bool
-    let select: () -> Void
+    let play: () -> Void
 
     var body: some View {
-        Button(action: select) {
+        Button(action: play) {
             VStack(alignment: .leading, spacing: 7) {
                 Text(correctedText)
                     .font(.body)
@@ -594,11 +651,8 @@ private struct TranscriptSegmentBody: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(isSelected
-            ? appLocalized("Remove this segment from the copy selection.")
-            : appLocalized("Select this segment for copying."))
-        .accessibilityValue(correctedText)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityLabel(correctedText)
+        .accessibilityHint(appLocalized("Play this segment from the source audio."))
     }
 }
 
