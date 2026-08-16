@@ -1,3 +1,5 @@
+import Accessibility
+import AppKit
 import MaccheroniCore
 import MaccheroniMerge
 import SwiftUI
@@ -17,9 +19,16 @@ struct TranscriptView: View {
     @State private var isExporting = false
     @State private var exportError: String?
     @State private var postprocessAction: ExistingRunAction?
+    @State private var selectedSegmentIDs: Set<TranscriptSegmentID> = []
+    @State private var copyFeedback: TranscriptCopyFeedback?
+    @State private var copyFeedbackGeneration = 0
 
     private var isTranslation: Bool {
         run.isTranslation
+    }
+
+    private var displayLayer: TranscriptDisplayLayer {
+        TranscriptDisplayLayer.displayed(in: run)
     }
 
     var body: some View {
@@ -34,8 +43,10 @@ struct TranscriptView: View {
                             correctedText: correctedText(item),
                             color: speakerColor(item.segment.speaker),
                             isResolved: isResolved(item),
+                            isSelected: selectedSegmentIDs.contains(item.id),
                             allowsTextResolution: true,
                             play: { model.play(segment: item.segment) },
+                            select: { toggleSelection(of: item.id) },
                             rename: {
                                 editingSpeaker = SpeakerEdit(speaker: item.segment.speaker)
                                 speakerDraft = displaySpeaker(item.segment.speaker)
@@ -54,8 +65,40 @@ struct TranscriptView: View {
             }
         }
         .navigationTitle(record.displayName)
+        .onCopyCommand {
+            guard !run.segments.isEmpty else { return [] }
+            do {
+                let payload = try TranscriptCopyCommand(
+                    clipboard: SystemTranscriptClipboard.shared
+                ).payload(
+                    run: run,
+                    record: record,
+                    selectedSegmentIDs: selectedSegmentIDs
+                )
+                showCopyFeedback(
+                    TranscriptCopyFeedback(
+                        message: payload.confirmation.message(),
+                        isError: false
+                    )
+                )
+                return [NSItemProvider(object: payload.text as NSString)]
+            } catch {
+                showCopyFeedback(
+                    TranscriptCopyFeedback(
+                        message: appString("The transcript could not be copied."),
+                        isError: true
+                    )
+                )
+                return []
+            }
+        }
         .toolbar {
             ToolbarItemGroup {
+                Button(action: copyTranscript) {
+                    Label(copyButtonTitle, systemImage: "doc.on.doc")
+                }
+                .disabled(run.segments.isEmpty)
+                .help(copyButtonTitle)
                 Menu(appLocalized("Export"), systemImage: "square.and.arrow.up") {
                     ForEach(TranscriptExportFormat.allCases) { format in
                         Button {
@@ -152,6 +195,10 @@ struct TranscriptView: View {
         } message: {
             Text(exportError ?? "")
         }
+        .onChange(of: run.effectiveResultID) {
+            selectedSegmentIDs.removeAll()
+            copyFeedback = nil
+        }
     }
 
     private var transcriptHeader: some View {
@@ -161,6 +208,20 @@ struct TranscriptView: View {
                     .font(.largeTitle)
                 Text(appLocalized("\(run.transcript.segments.count) segments, \(run.transcript.numSpeakers) speakers"))
                     .foregroundStyle(.secondary)
+                Label(displayLayer.title, systemImage: "square.stack.3d.up")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                if let copyFeedback {
+                    Label(
+                        copyFeedback.message,
+                        systemImage: copyFeedback.isError
+                            ? "exclamationmark.triangle.fill"
+                            : "checkmark.circle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(copyFeedback.isError ? Color.red : Color.secondary)
+                    .transition(.opacity)
+                }
                 if let active = model.activeExistingRunPostprocess,
                    active.recordID == record.id
                 {
@@ -247,6 +308,58 @@ struct TranscriptView: View {
             ?? item.segment.text
     }
 
+    private var copyButtonTitle: LocalizedStringResource {
+        selectedSegmentIDs.isEmpty
+            ? appLocalized("Copy Transcript")
+            : appLocalized("Copy Selection")
+    }
+
+    private func toggleSelection(of id: TranscriptSegmentID) {
+        if selectedSegmentIDs.contains(id) {
+            selectedSegmentIDs.remove(id)
+        } else {
+            selectedSegmentIDs.insert(id)
+        }
+        copyFeedback = nil
+    }
+
+    private func copyTranscript() {
+        do {
+            let confirmation = try TranscriptCopyCommand(
+                clipboard: SystemTranscriptClipboard.shared
+            ).perform(
+                run: run,
+                record: record,
+                selectedSegmentIDs: selectedSegmentIDs
+            )
+            showCopyFeedback(
+                TranscriptCopyFeedback(
+                    message: confirmation.message(),
+                    isError: false
+                )
+            )
+        } catch {
+            showCopyFeedback(
+                TranscriptCopyFeedback(
+                    message: appString("The transcript could not be copied."),
+                    isError: true
+                )
+            )
+        }
+    }
+
+    private func showCopyFeedback(_ feedback: TranscriptCopyFeedback) {
+        copyFeedbackGeneration += 1
+        let generation = copyFeedbackGeneration
+        withAnimation { copyFeedback = feedback }
+        AccessibilityNotification.Announcement(feedback.message).post()
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard generation == copyFeedbackGeneration else { return }
+            withAnimation { copyFeedback = nil }
+        }
+    }
+
     private func speakerColor(_ speaker: String) -> Color {
         let palette: [Color] = [.blue, .purple, .teal, .pink, .indigo, .brown, .green]
         var hash: UInt64 = 14_695_981_039_346_656_037
@@ -278,14 +391,123 @@ struct TranscriptView: View {
     }
 }
 
+enum TranscriptCopyScope: Equatable, Sendable {
+    case transcript
+    case selection(segmentCount: Int)
+}
+
+struct TranscriptCopyConfirmation: Equatable, Sendable {
+    let layer: TranscriptDisplayLayer
+    let scope: TranscriptCopyScope
+
+    func message(locale: Locale? = nil) -> String {
+        switch (layer, scope) {
+        case (.speakerLabelled, .transcript):
+            appString("Copied the speaker-labelled transcript.", locale: locale)
+        case (.corrected, .transcript):
+            appString("Copied the corrected transcript.", locale: locale)
+        case (.translated, .transcript):
+            appString("Copied the translated transcript.", locale: locale)
+        case (.speakerLabelled, .selection):
+            appString("Copied the speaker-labelled selection.", locale: locale)
+        case (.corrected, .selection):
+            appString("Copied the corrected selection.", locale: locale)
+        case (.translated, .selection):
+            appString("Copied the translated selection.", locale: locale)
+        }
+    }
+}
+
+enum TranscriptCopyError: Error, Equatable {
+    case staleSelection
+    case clipboardWriteFailed
+}
+
+@MainActor
+protocol TranscriptClipboardWriting: AnyObject {
+    func write(_ text: String) -> Bool
+}
+
+@MainActor
+final class SystemTranscriptClipboard: TranscriptClipboardWriting {
+    static let shared = SystemTranscriptClipboard()
+
+    private init() {}
+
+    func write(_ text: String) -> Bool {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        return pasteboard.setString(text, forType: .string)
+    }
+}
+
+struct TranscriptCopyPayload: Equatable, Sendable {
+    let text: String
+    let confirmation: TranscriptCopyConfirmation
+}
+
+@MainActor
+struct TranscriptCopyCommand {
+    let clipboard: any TranscriptClipboardWriting
+
+    func payload(
+        run: LoadedRun,
+        record: LibraryRecord,
+        selectedSegmentIDs: Set<TranscriptSegmentID>
+    ) throws -> TranscriptCopyPayload {
+        let selectedSegments = run.segments.filter { selectedSegmentIDs.contains($0.id) }
+        guard selectedSegmentIDs.isEmpty || selectedSegments.count == selectedSegmentIDs.count else {
+            throw TranscriptCopyError.staleSelection
+        }
+        let selectedIndices = Set(selectedSegments.map(\.index))
+        let text = try TranscriptExporter.copyText(
+            run: run,
+            record: record,
+            selectedSegmentIndices: selectedIndices
+        )
+        return TranscriptCopyPayload(
+            text: text,
+            confirmation: TranscriptCopyConfirmation(
+                layer: TranscriptDisplayLayer.displayed(in: run),
+                scope: selectedSegmentIDs.isEmpty
+                    ? .transcript
+                    : .selection(segmentCount: selectedSegments.count)
+            )
+        )
+    }
+
+    func perform(
+        run: LoadedRun,
+        record: LibraryRecord,
+        selectedSegmentIDs: Set<TranscriptSegmentID>
+    ) throws -> TranscriptCopyConfirmation {
+        let payload = try payload(
+            run: run,
+            record: record,
+            selectedSegmentIDs: selectedSegmentIDs
+        )
+        guard clipboard.write(payload.text) else {
+            throw TranscriptCopyError.clipboardWriteFailed
+        }
+        return payload.confirmation
+    }
+}
+
+private struct TranscriptCopyFeedback: Equatable {
+    let message: String
+    let isError: Bool
+}
+
 private struct TranscriptSegmentRow: View {
     let item: TranscriptSegment
     let displaySpeaker: String
     let correctedText: String
     let color: Color
     let isResolved: Bool
+    let isSelected: Bool
     let allowsTextResolution: Bool
     let play: () -> Void
+    let select: () -> Void
     let rename: () -> Void
     let inspectConflict: () -> Void
 
@@ -348,6 +570,16 @@ private struct TranscriptSegmentRow: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                     }
+
+                    Button(action: select) {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .help(appLocalized("Select this segment for copying."))
+                    .accessibilityLabel(isSelected
+                        ? appLocalized("Remove this segment from the copy selection.")
+                        : appLocalized("Select this segment for copying."))
                 }
 
                 TranscriptSegmentBody(
@@ -361,7 +593,10 @@ private struct TranscriptSegmentRow: View {
         .padding(14)
         .background(rowBackground, in: .rect(cornerRadius: 10))
         .overlay {
-            if item.conflict != nil || isUncertain {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+            } else if item.conflict != nil || isUncertain {
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(isResolved ? Color.secondary.opacity(0.25) : Color.orange.opacity(0.55))
             }
@@ -372,6 +607,9 @@ private struct TranscriptSegmentRow: View {
     private var rowBackground: Color {
         if item.conflict != nil || isUncertain {
             return Color.orange.opacity(isResolved ? 0.035 : 0.075)
+        }
+        if isSelected {
+            return Color.accentColor.opacity(0.1)
         }
         return Color(nsColor: .controlBackgroundColor)
     }

@@ -18,6 +18,37 @@ enum TranscriptExportError: Error, Equatable, LocalizedError {
     }
 }
 
+enum TranscriptDisplayLayer: Equatable, Sendable {
+    case speakerLabelled
+    case corrected
+    case translated
+
+    static func displayed(in run: LoadedRun) -> TranscriptDisplayLayer {
+        let operation = run.resultOperation?.mode ?? run.effectivePostprocess?.mode
+        return switch operation {
+        case .correction: .corrected
+        case .translation: .translated
+        case nil: .speakerLabelled
+        }
+    }
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .speakerLabelled: appLocalized("Speaker-labelled")
+        case .corrected: appLocalized("Corrected")
+        case .translated: appLocalized("Translated")
+        }
+    }
+
+    func copyHeader(locale: Locale? = nil) -> String {
+        switch self {
+        case .speakerLabelled: appString("Transcript layer: Speaker-labelled", locale: locale)
+        case .corrected: appString("Transcript layer: Corrected", locale: locale)
+        case .translated: appString("Transcript layer: Translated", locale: locale)
+        }
+    }
+}
+
 enum TranscriptExporter {
     static func correctedSegmentsDocument(
         run: LoadedRun,
@@ -72,8 +103,43 @@ enum TranscriptExporter {
 
     static func markdown(run: LoadedRun, record: LibraryRecord) throws -> String {
         let document = try correctedSegmentsDocument(run: run, record: record)
-        let body = document.segments.enumerated().map { index, segment in
-            "[\(markdownTimestamp(segment.startS) ?? "Unknown time") – \(markdownTimestamp(segment.endS) ?? "Unknown time")] **\(segment.speaker):** \(segment.text)\(unresolvedMarkers(for: index, run: run, record: record))"
+        return markdown(
+            document: document,
+            run: run,
+            record: record,
+            selectedSegmentIndices: nil
+        )
+    }
+
+    static func copyText(
+        run: LoadedRun,
+        record: LibraryRecord,
+        selectedSegmentIndices: Set<Int>,
+        locale: Locale? = nil
+    ) throws -> String {
+        let document = try correctedSegmentsDocument(run: run, record: record)
+        let selectedIndices = selectedSegmentIndices.isEmpty
+            ? nil
+            : selectedSegmentIndices
+        let body = markdown(
+            document: document,
+            run: run,
+            record: record,
+            selectedSegmentIndices: selectedIndices
+        )
+        let header = TranscriptDisplayLayer.displayed(in: run).copyHeader(locale: locale)
+        return body.isEmpty ? header + "\n" : header + "\n\n" + body
+    }
+
+    private static func markdown(
+        document: SegmentsDocument,
+        run: LoadedRun,
+        record: LibraryRecord,
+        selectedSegmentIndices: Set<Int>?
+    ) -> String {
+        let body = document.segments.enumerated().compactMap { index, segment in
+            guard selectedSegmentIndices?.contains(index) ?? true else { return nil }
+            return "[\(markdownTimestamp(segment.startS) ?? "Unknown time") – \(markdownTimestamp(segment.endS) ?? "Unknown time")] **\(segment.speaker):** \(segment.text)\(unresolvedMarkers(for: index, run: run, record: record))"
         }.joined(separator: "\n\n")
         return body.isEmpty ? "" : body + "\n"
     }

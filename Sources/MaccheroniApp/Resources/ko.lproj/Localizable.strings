@@ -2,6 +2,40 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>Speaker-labelled</key>
+	<string>화자 레이블 포함</string>
+	<key>Corrected</key>
+	<string>교정본</string>
+	<key>Translated</key>
+	<string>번역본</string>
+	<key>Transcript layer: Speaker-labelled</key>
+	<string>전사문 레이어: 화자 레이블 포함</string>
+	<key>Transcript layer: Corrected</key>
+	<string>전사문 레이어: 교정본</string>
+	<key>Transcript layer: Translated</key>
+	<string>전사문 레이어: 번역본</string>
+	<key>Copy Transcript</key>
+	<string>전사문 복사</string>
+	<key>Copy Selection</key>
+	<string>선택 항목 복사</string>
+	<key>The transcript could not be copied.</key>
+	<string>전사문을 복사할 수 없습니다.</string>
+	<key>Select this segment for copying.</key>
+	<string>복사할 세그먼트로 선택합니다.</string>
+	<key>Remove this segment from the copy selection.</key>
+	<string>이 세그먼트를 복사 선택 항목에서 제거합니다.</string>
+	<key>Copied the speaker-labelled transcript.</key>
+	<string>화자 레이블이 포함된 전사문을 복사했습니다.</string>
+	<key>Copied the corrected transcript.</key>
+	<string>교정 전사문을 복사했습니다.</string>
+	<key>Copied the translated transcript.</key>
+	<string>번역 전사문을 복사했습니다.</string>
+	<key>Copied the speaker-labelled selection.</key>
+	<string>화자 레이블이 포함된 선택 항목을 복사했습니다.</string>
+	<key>Copied the corrected selection.</key>
+	<string>교정본에서 선택한 항목을 복사했습니다.</string>
+	<key>Copied the translated selection.</key>
+	<string>번역본에서 선택한 항목을 복사했습니다.</string>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
 	<key>%@, %@</key>

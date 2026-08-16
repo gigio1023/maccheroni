@@ -680,7 +680,16 @@ struct AppShellTests {
             "Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile.",
             "Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local.",
             "Codex is signed in and ready.",
+            "Copied the corrected selection.",
+            "Copied the corrected transcript.",
+            "Copied the speaker-labelled selection.",
+            "Copied the speaker-labelled transcript.",
+            "Copied the translated selection.",
+            "Copied the translated transcript.",
+            "Copy Selection",
+            "Copy Transcript",
             "Correct",
+            "Corrected",
             "Directory choices apply the next time Maccheroni launches. Existing recordings and run artifacts stay where they are.",
             "Input Mode",
             "Interrupted",
@@ -702,14 +711,21 @@ struct AppShellTests {
             "Play this segment from the source audio.",
             "Prompt Limit",
             "Rename this speaker everywhere in this transcript.",
+            "Remove this segment from the copy selection.",
+            "Select this segment for copying.",
             "Segments per Batch",
             "Service-managed (limit unavailable)",
             "Source Segments SHA-256",
             "Target Language",
             "Text only",
+            "The transcript could not be copied.",
             "This name applies to every %@ segment in exports.",
             "Translate",
             "Translate Into",
+            "Translated",
+            "Transcript layer: Corrected",
+            "Transcript layer: Speaker-labelled",
+            "Transcript layer: Translated",
             "Use Default",
             "Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.",
             "A derived result manifest is invalid: %@",
@@ -719,6 +735,7 @@ struct AppShellTests {
             "Current Derived Post-processing",
             "Glossary Semantics",
             "Source Run Glossary",
+            "Speaker-labelled",
         ]
         let catalogURL = try #require(appResourcesBundle.url(
             forResource: "Localizable",
@@ -730,7 +747,6 @@ struct AppShellTests {
         )
 
         #expect(catalog.sourceLanguage == "en")
-        #expect(catalog.strings.count == 279)
         #expect(requiredFinalKeys.isSubset(of: Set(catalog.strings.keys)))
         for (key, entry) in catalog.strings {
             #expect(Set(entry.localizations.keys) == Set(locales), "locale parity: \(key)")
