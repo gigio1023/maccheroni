@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError
+from referencing import Registry
+from referencing.jsonschema import DRAFT202012
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -63,6 +65,10 @@ def _validate_manifest_semantics(document: dict[str, object]) -> None:
             raise ValueError(f"chunk {expected_index}: end_s must be greater than start_s")
         expected_index += 1
 
+    _validate_postprocess_semantics(document)
+
+
+def _validate_postprocess_semantics(document: dict[str, object]) -> None:
     postprocess = document.get("postprocess")
     if not postprocess or not postprocess.get("batching"):
         return
@@ -197,6 +203,31 @@ def _validate_translation_semantics(
             raise ValueError(f"translation manifest maximum is stale: {manifest_key}")
 
 
+def _validate_derived_semantics(manifest: dict[str, object]) -> None:
+    operation = manifest["operation"]
+    glossary_sha256 = operation["glossary_sha256"]
+    glossary_item_count = int(operation["glossary_item_count"])
+    if glossary_sha256 is None and glossary_item_count != 0:
+        raise ValueError(
+            "a derived manifest without a glossary hash must record zero items"
+        )
+    if glossary_sha256 is not None and glossary_item_count <= 0:
+        raise ValueError(
+            "a derived manifest with a glossary hash must record a positive item count"
+        )
+    if manifest["status"] == "succeeded":
+        postprocess = manifest.get("postprocess")
+        if not postprocess:
+            raise ValueError(
+                "a successful derived manifest must record postprocess provenance"
+            )
+        if postprocess["glossary_sha256"] != glossary_sha256:
+            raise ValueError(
+                "derived postprocess glossary provenance must match the operation"
+            )
+    _validate_postprocess_semantics(manifest)
+
+
 def _expect_schema_failure(
     validator: Draft202012Validator, document: dict[str, object], message: str
 ) -> None:
@@ -226,11 +257,24 @@ def main() -> int:
     translation_schema = _load(
         REPOSITORY_ROOT / "docs/contracts/translation.schema.json"
     )
+    derived_schema = _load(
+        REPOSITORY_ROOT / "docs/contracts/derived-manifest.schema.json"
+    )
     Draft202012Validator.check_schema(segments_schema)
     Draft202012Validator.check_schema(manifest_schema)
     Draft202012Validator.check_schema(translation_schema)
+    Draft202012Validator.check_schema(derived_schema)
 
     checker = FormatChecker()
+    registry = Registry().with_resources(
+        [
+            (str(manifest_schema["$id"]), DRAFT202012.create_resource(manifest_schema)),
+            (str(derived_schema["$id"]), DRAFT202012.create_resource(derived_schema)),
+        ]
+    )
+    derived_validator = Draft202012Validator(
+        derived_schema, format_checker=checker, registry=registry
+    )
     segments_validator = Draft202012Validator(segments_schema, format_checker=checker)
     manifest_validator = Draft202012Validator(manifest_schema, format_checker=checker)
     translation_validator = Draft202012Validator(
@@ -411,6 +455,44 @@ def main() -> int:
         "non-contiguous translation batch indices passed semantic validation",
     )
 
+    derived = _load(SCRIPT_DIR / "fixtures/derived-manifest.example.json")
+    derived_validator.validate(derived)
+    _validate_derived_semantics(derived)
+
+    hashless_glossary = deepcopy(derived)
+    hashless_glossary["operation"]["glossary_sha256"] = None
+    hashless_glossary["postprocess"]["glossary_sha256"] = None
+    _expect_schema_failure(
+        derived_validator,
+        hashless_glossary,
+        "a missing glossary hash with a nonzero item count passed schema validation",
+    )
+    _expect_semantic_failure(
+        lambda: _validate_derived_semantics(hashless_glossary),
+        "a missing glossary hash with a nonzero item count passed semantic validation",
+    )
+
+    countless_glossary = deepcopy(derived)
+    countless_glossary["operation"]["glossary_item_count"] = 0
+    _expect_schema_failure(
+        derived_validator,
+        countless_glossary,
+        "a glossary hash with a zero item count passed schema validation",
+    )
+    _expect_semantic_failure(
+        lambda: _validate_derived_semantics(countless_glossary),
+        "a glossary hash with a zero item count passed semantic validation",
+    )
+
+    diverging_provenance = deepcopy(derived)
+    diverging_provenance["postprocess"]["glossary_sha256"] = "7" * 64
+    derived_validator.validate(diverging_provenance)
+    _expect_semantic_failure(
+        lambda: _validate_derived_semantics(diverging_provenance),
+        "diverging operation and postprocess glossary provenance passed "
+        "semantic validation",
+    )
+
     print("PASS segments.schema.json: schema + example + semantic checks")
     print(
         "PASS manifest.schema.json: base + legacy correction + bounded translation "
@@ -420,6 +502,10 @@ def main() -> int:
         "PASS translation.schema.json: two bounded batches + exact coverage + "
         "reproducible byte/token ledger + forbidden speaker field + duplicate, "
         "missing, reordered and renumbered index guards"
+    )
+    print(
+        "PASS derived-manifest.schema.json: schema + example + glossary "
+        "hash/count and operation/postprocess provenance guards"
     )
     return 0
 

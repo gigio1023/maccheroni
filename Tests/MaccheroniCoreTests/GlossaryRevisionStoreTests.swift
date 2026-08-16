@@ -107,6 +107,39 @@ import Testing
     }
 
     @Test
+    func unsearchableRevisionsDirectoryReportsUnreadableNotMissing() throws {
+        let root = try temporaryDirectory()
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: root.path
+            )
+            try? FileManager.default.removeItem(at: root)
+        }
+        let store = GlossaryRevisionStore(root: root)
+        let data = Data("Maccheroni\n".utf8)
+        let glossary = try Glossary.parse(data: data)
+        _ = try store.createRevision(from: data)
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o000],
+            ofItemAtPath: root.path
+        )
+        do {
+            _ = try store.resolve(
+                sha256: glossary.sha256,
+                expectedItemCount: 1
+            )
+            Issue.record("Expected an unreadable revision error")
+        } catch let error as GlossaryRevisionError {
+            #expect(error == .revisionUnavailable(
+                sha256: glossary.sha256,
+                reason: .unreadable
+            ))
+        }
+    }
+
+    @Test
     func manifestResolutionChecksRecordedItemCountAndAbsentState() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

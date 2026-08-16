@@ -130,19 +130,19 @@ public struct GlossaryRevisionStore: Sendable {
         expectedItemCount: Int? = nil
     ) throws -> GlossaryRevision {
         let url = try revisionURL(for: sha256)
-        guard Self.pathEntryExists(url) else {
-            throw GlossaryRevisionError.revisionUnavailable(
-                sha256: sha256,
-                reason: .missing
-            )
-        }
         let attributes: [FileAttributeKey: Any]
         do {
             attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         } catch {
+            // Only a confirmed absent entry is "missing"; a probe the file
+            // system refuses (for example an unsearchable parent directory)
+            // must surface as unreadable so the actionable cause is named.
+            let nsError = error as NSError
+            let isConfirmedAbsent = nsError.domain == NSCocoaErrorDomain
+                && nsError.code == CocoaError.fileReadNoSuchFile.rawValue
             throw GlossaryRevisionError.revisionUnavailable(
                 sha256: sha256,
-                reason: Self.pathEntryExists(url) ? .unreadable : .missing
+                reason: isConfirmedAbsent ? .missing : .unreadable
             )
         }
         guard attributes[.type] as? FileAttributeType == .typeRegular else {

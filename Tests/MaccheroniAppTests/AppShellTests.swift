@@ -2296,12 +2296,42 @@ func loadingAcceptsADerivedResultThatUsedTheSourceRunGlossary() throws {
     )
 }
 
+@Test
+func loadingRejectsASourceRunDerivedResultWithForeignGlossaryProvenance() throws {
+    let root = try appShellTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fixture = try appShellRunFixture(in: root)
+
+    _ = try appShellWriteDerivedCorrection(
+        fixture: fixture,
+        id: "derived-foreign-glossary",
+        finishedAt: "2026-08-12T03:00:00Z",
+        text: "Corrected with bytes the source run never used",
+        glossarySemantics: .sourceRun,
+        glossarySHA256: String(repeating: "a", count: 64),
+        glossaryItemCount: 3
+    )
+
+    do {
+        _ = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+        Issue.record("Expected the foreign source-run glossary provenance to be rejected")
+    } catch let error as LibraryRepositoryError {
+        guard case let .derivedLineageMismatch(id) = error else {
+            Issue.record("Unexpected error: \(error)")
+            return
+        }
+        #expect(id == "derived-foreign-glossary")
+    }
+}
+
 private func appShellWriteDerivedCorrection(
     fixture: AppShellRunFixture,
     id: String,
     finishedAt: String,
     text: String,
-    glossarySemantics: DerivedGlossarySemantics = .currentProfile
+    glossarySemantics: DerivedGlossarySemantics = .currentProfile,
+    glossarySHA256: String? = nil,
+    glossaryItemCount: Int = 0
 ) throws -> URL {
     let verified = try RunIntegrityVerifier.verifyCompletedRun(at: fixture.runURL)
     let directory = fixture.runURL.appendingPathComponent(
@@ -2342,6 +2372,7 @@ private func appShellWriteDerivedCorrection(
     let provenance = ManifestPostprocess(
         backend: BackendDescriptor(name: "fixture", version: "1"),
         modelID: "fixture/postprocess",
+        glossarySHA256: glossarySHA256,
         mode: .correction,
         batching: batching
     )
@@ -2353,7 +2384,8 @@ private func appShellWriteDerivedCorrection(
             profileName: "ko-it-meeting",
             mode: .correction,
             glossarySemantics: glossarySemantics,
-            glossaryItemCount: 0
+            glossarySHA256: glossarySHA256,
+            glossaryItemCount: glossaryItemCount
         ),
         timing: RunTiming(
             startedAt: "2026-08-12T00:00:00Z",
