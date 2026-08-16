@@ -38,7 +38,7 @@ As correções incertas são marcadas e nunca substituídas silenciosamente. Os 
 <p align="center">
   <img src="docs/assets/screenshots/transcript.png" alt="Visão de transcrição do Maccheroni: dois falantes com rótulos globais e chips de evidência por segmento, ao lado de um inspetor que mostra o status da execução, as revisões fixadas dos modelos e o registro do glossário" width="100%">
 </p>
-<p align="center"><em>Cada execução guarda sua evidência: o inspetor mostra os modelos fixados exatos, o status da execução e se o glossário chegou ao decodificador.</em></p>
+<p align="center"><em>Cada execução guarda sua evidência: o inspetor mostra os modelos fixados exatos, o status da execução e se o glossário chegou ao decodificador. A camada exibida — bruta, corrigida ou traduzida — é copiada para a área de transferência com um cabeçalho de procedência.</em></p>
 
 ## Por que este projeto existe
 
@@ -93,7 +93,7 @@ Todos vêm de fixtures públicas ou sintéticas. Os IDs de avaliação e hashes 
 | Conversa sintética em italiano com 2 falantes (10 min), glossário de 9 termos | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | Amostra do VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-Coreano e italiano são os dois primeiros perfis de idioma; novos fixtures de idiomas entram nesta tabela à medida que são medidos.
+Coreano e italiano são os dois primeiros perfis de idioma. Como próximo conjunto de fixtures está preparado um pacote de aceitação coreano-inglês fixado — trechos HiKE com alternância de código e uma reunião AMI com quatro falantes — e novas medições entram nesta tabela à medida que chegam.
 
 A estabilidade dos falantes nos limites dos segmentos da amostra de 78 minutos foi 1.0 para ambos os falantes de referência. Uma matriz fixa de 600 segundos mostrou que segmentos MOSS com mais de 120 s perdem completamente a estrutura dos timestamps. Por isso, o limite de produção é 120 s; os detalhes estão em [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 
@@ -104,6 +104,8 @@ A estabilidade dos falantes nos limites dos segmentos da amostra de 78 minutos f
 
 Os ganhos da correção são medidos, não presumidos. Um arnês de comparação de quatro estados avalia a saída bruta e a corrigida de uma execução concluída contra a mesma referência, com e sem injeção do glossário na decodificação, e conta cada correção aplicada que afastou um segmento da referência. Um reparo errado, mas confiante, não consegue se esconder em uma média.
 
+Uma execução concluída não fica congelada. `maccheroni postprocess` e o aplicativo derivam novos conjuntos de correção ou tradução a partir dos segmentos selados sem executar o ASR novamente, e cada salvamento do glossário é mantido como uma revisão endereçada por conteúdo, de modo que uma derivação posterior pode reutilizar exatamente os bytes do glossário registrados pela execução original.
+
 ## Instalação
 
 Ainda não há versões empacotadas: compile o projeto a partir do código-fonte.
@@ -113,17 +115,18 @@ Requisitos: Mac com Apple Silicon, macOS 26, Xcode 26 e [uv](https://docs.astral
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 241 tests
+swift build && swift test          # 315 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-O aplicativo exibe o caminho do bundle quando a compilação, o inventário da lista de recursos permitidos e as verificações rigorosas de assinatura de código passam. Os pesos dos modelos são baixados no primeiro uso. O executável não inclui pesos de modelos nem ambientes Python; `maccheroni doctor` verifica os runtimes e snapshots fixados.
+O aplicativo exibe o caminho do bundle quando a compilação, o inventário da lista de recursos permitidos e as verificações rigorosas de assinatura de código passam. Os pesos dos modelos são baixados no primeiro uso. O executável não inclui pesos de modelos nem ambientes Python; `maccheroni doctor` verifica os runtimes, os snapshots fixados e a prontidão de armazenamento por volume configurado.
 
-O executável oferece quatro comandos do produto:
+O executável oferece cinco comandos do produto:
 
 ```bash
-.build/debug/maccheroni help [help|run|doctor|capabilities]
+.build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni postprocess Runs/meeting --profile ko-meeting
 .build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
 .build/debug/maccheroni capabilities [--json]
 ```
@@ -159,7 +162,7 @@ Issues e pull requests focados são bem-vindos. Os comandos de compilação e te
 | Caminho | Conteúdo |
 |---|---|
 | `Sources/` | Pacote Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 241 testes baseados em fixtures, distribuídos em 22 suites |
+| `Tests/` | 315 testes baseados em fixtures, distribuídos em 24 suites |
 | `benchmarks/scripts/` | Executores, avaliadores e o arnês de comparação de vias de correção, com veredictos derivados e testes negativos |
 | `docs/` | Resumo da pesquisa, auditorias de código-fonte, política de restrições, contratos (esquemas JSON), design da interface |
 | `scripts/` | Compilação do bundle do aplicativo, compilação do harness MOSS, configuração do runtime de pós-processamento |

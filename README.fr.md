@@ -38,7 +38,7 @@ Les corrections incertaines sont signalées, jamais remplacées en silence. Les 
 <p align="center">
   <img src="docs/assets/screenshots/transcript.png" alt="Vue de transcription de Maccheroni : deux locuteurs avec des étiquettes globales et des puces d'évidence par segment, à côté d'un inspecteur affichant l'état de l'exécution, les révisions épinglées des modèles et l'enregistrement du glossaire" width="100%">
 </p>
-<p align="center"><em>Chaque exécution conserve ses preuves : l'inspecteur affiche les modèles épinglés exacts, l'état de l'exécution et si le glossaire a atteint le décodeur.</em></p>
+<p align="center"><em>Chaque exécution conserve ses preuves : l'inspecteur affiche les modèles épinglés exacts, l'état de l'exécution et si le glossaire a atteint le décodeur. La couche affichée — brute, corrigée ou traduite — se copie dans le presse-papiers avec un en-tête de provenance.</em></p>
 
 ## Pourquoi ce projet existe
 
@@ -93,7 +93,7 @@ Tous les résultats proviennent de jeux de test publics ou synthétiques ; les i
 | Synthèse italienne à 2 locuteurs (10 min), glossaire de 9 termes | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | Échantillon VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-Le coréen et l'italien sont les deux premiers profils de langue ; de nouveaux jeux de test linguistiques rejoignent ce tableau au fur et à mesure des mesures.
+Le coréen et l’italien sont les deux premiers profils de langue. Un pack d’acceptation coréen-anglais épinglé — extraits HiKE avec alternance codique et une réunion AMI à quatre locuteurs — est préparé comme prochain jeu de fixtures, et les nouvelles mesures rejoignent ce tableau dès qu’elles sont disponibles.
 
 Stabilité des locuteurs aux frontières des fragments sur l’échantillon de 78 minutes : 1.0 pour les deux locuteurs de référence. Une matrice fixe de 600 secondes a montré que les feuilles MOSS de plus de 120 s perdent entièrement la structure des horodatages. C’est pourquoi la limite de production est fixée à 120 s ; les détails figurent dans [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 
@@ -104,6 +104,8 @@ Stabilité des locuteurs aux frontières des fragments sur l’échantillon de 7
 
 Les gains de la correction sont mesurés, pas supposés. Un banc de comparaison à quatre états évalue la sortie brute et la sortie corrigée d’une exécution terminée contre la même référence, avec et sans injection du glossaire au décodage, et compte chaque correction appliquée qui a éloigné un segment de la référence. Une réparation fausse mais sûre d’elle ne peut pas se cacher dans une moyenne.
 
+Une exécution terminée n’est pas figée. `maccheroni postprocess` et l’application dérivent de nouveaux ensembles de correction ou de traduction à partir des segments scellés sans réexécuter l’ASR, et chaque enregistrement du glossaire est conservé comme une révision adressée par contenu, si bien qu’une dérivation ultérieure peut réutiliser exactement les octets du glossaire enregistrés par l’exécution d’origine.
+
 ## Installation
 
 Il n’existe pas encore de version empaquetée : compilez depuis les sources.
@@ -113,17 +115,18 @@ Prérequis : Mac Apple Silicon, macOS 26, Xcode 26, [uv](https://docs.astral.sh/
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 241 tests
+swift build && swift test          # 315 tests
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-L’application affiche le chemin de son bundle lorsque la compilation, l’inventaire des ressources autorisées et les contrôles stricts de signature du code réussissent. Les poids des modèles se téléchargent à la première utilisation. L’exécutable n’inclut ni poids de modèles ni environnements Python ; `maccheroni doctor` vérifie les environnements d’exécution et les instantanés épinglés.
+L’application affiche le chemin de son bundle lorsque la compilation, l’inventaire des ressources autorisées et les contrôles stricts de signature du code réussissent. Les poids des modèles se téléchargent à la première utilisation. L’exécutable n’inclut ni poids de modèles ni environnements Python ; `maccheroni doctor` vérifie les environnements d’exécution, les instantanés épinglés et l’état de préparation du stockage par volume configuré.
 
-L’exécutable propose quatre commandes du produit :
+L’exécutable propose cinq commandes du produit :
 
 ```bash
-.build/debug/maccheroni help [help|run|doctor|capabilities]
+.build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
 .build/debug/maccheroni run recording.wav --profile it-dialogue
+.build/debug/maccheroni postprocess Runs/meeting --profile ko-meeting
 .build/debug/maccheroni doctor [--profile NAME] [--profiles PATH] [--json]
 .build/debug/maccheroni capabilities [--json]
 ```
@@ -159,7 +162,7 @@ Les signalements de problèmes et les pull requests ciblées sont les bienvenus.
 | Chemin | Contenu |
 |---|---|
 | `Sources/` | Package Swift : Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 241 tests fondés sur des fixtures, répartis en 22 suites |
+| `Tests/` | 315 tests fondés sur des fixtures, répartis en 24 suites |
 | `benchmarks/scripts/` | Outils d’exécution et de notation et le banc de comparaison des chemins de correction, avec verdicts dérivés et tests négatifs |
 | `docs/` | Synthèse de recherche, audits des sources, politique de contraintes, contrats (schémas JSON), conception de l’interface |
 | `scripts/` | Compilation du bundle de l’application, compilation du harness MOSS, configuration de l’environnement de post-traitement |
