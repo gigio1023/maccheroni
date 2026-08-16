@@ -320,28 +320,20 @@ struct SettingsView: View {
         let configuredProfiles = profiles.map {
             ConfiguredStorageProfile(
                 diarizationBackend: $0.diarizationBackend,
-                postprocessBackend: nil
+                postprocessBackend: nil,
+                models: $0.models
             )
         } + [ConfiguredStorageProfile(
             diarizationBackend: nil,
-            postprocessBackend: postprocessRaw
+            postprocessBackend: postprocessRaw,
+            models: [LocalPostprocessBackend.pinnedModel]
         )]
-        let displayedModelRoots = uniqueModels.compactMap { model -> StorageRoot? in
-            guard let role = storageRole(for: model.descriptor.role),
-                  let url = ModelCacheInspector.location(for: model.descriptor)
-            else { return nil }
-            return StorageRoot(
-                id: ModelRegistry.storageRootID(for: model.descriptor),
-                role: role,
-                url: url
-            )
-        }
         storageReport = await Task.detached(priority: .utility) {
             StorageReadinessReporter().report(
                 roots: StorageRootInventory.current(
                     library: library,
                     profiles: configuredProfiles
-                ) + displayedModelRoots
+                )
             )
         }.value
     }
@@ -417,22 +409,8 @@ enum ModelRegistry {
         "\(descriptor.hfModelID)@\(descriptor.revision)@\(descriptor.quantization)"
     }
 
-    static func isLocalPostprocessModel(_ descriptor: ModelDescriptor) -> Bool {
-        descriptor == LocalPostprocessBackend.pinnedModel
-    }
-
     static func storageRootID(for descriptor: ModelDescriptor) -> String {
-        "app.model.\(key(for: descriptor))"
-    }
-}
-
-private func storageRole(for modelRole: ModelRole) -> StorageRole? {
-    switch modelRole {
-    case .asr: .asrModelCache
-    case .vad: .vadModelCache
-    case .diarization: .diarizationModelCache
-    case .postprocess: .postprocessModelCache
-    case .alignment, .enhancement: nil
+        StorageModelRoot.id(for: descriptor)
     }
 }
 
@@ -495,10 +473,8 @@ private struct ModelCacheStatus: Equatable {
     static let missing = ModelCacheStatus(installed: false, sizeBytes: nil)
 }
 
-private enum ModelCacheInspector {
-    static let cacheRoot = ModelDownloadPlan.defaultCacheRoot
-
-    static func statuses(for models: [ConfiguredModel]) -> [String: ModelCacheStatus] {
+enum ModelCacheInspector {
+    fileprivate static func statuses(for models: [ConfiguredModel]) -> [String: ModelCacheStatus] {
         Dictionary(uniqueKeysWithValues: models.map { model in
             let location = location(for: model.descriptor)
             let installed = location.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
@@ -509,11 +485,16 @@ private enum ModelCacheInspector {
         })
     }
 
-    static func location(for descriptor: ModelDescriptor) -> URL? {
-        if ModelRegistry.isLocalPostprocessModel(descriptor) {
-            return LocalPostprocessRuntime.local.modelSnapshotURL
-        }
-        return ModelDownloadPlan(model: descriptor, cacheRoot: cacheRoot).pinnedLocation
+    static func location(
+        for descriptor: ModelDescriptor,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL? {
+        StorageModelRoot.location(
+            for: descriptor,
+            environment: environment,
+            homeDirectory: homeDirectory
+        )
     }
 
     private static func directorySize(_ url: URL) -> Int64? {

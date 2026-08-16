@@ -90,18 +90,23 @@ public struct ASRRuntime: Sendable {
         )
     }
 
-    static func localRuntime(environment: [String: String], home: URL) -> ASRRuntime {
-        let resolvedCacheRoot: URL
+    public static func resolveCacheRoot(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
         if let configuredCache = environment["MACCHERONI_BENCHMARK_CACHE"],
            !configuredCache.isEmpty
         {
-            resolvedCacheRoot = URL(fileURLWithPath: configuredCache, isDirectory: true)
-        } else {
-            resolvedCacheRoot = home.appendingPathComponent(
-                "Library/Caches/Maccheroni/benchmarks",
-                isDirectory: true
-            )
+            return URL(fileURLWithPath: configuredCache, isDirectory: true)
         }
+        return home.appendingPathComponent(
+            "Library/Caches/Maccheroni/benchmarks",
+            isDirectory: true
+        )
+    }
+
+    static func localRuntime(environment: [String: String], home: URL) -> ASRRuntime {
+        let resolvedCacheRoot = resolveCacheRoot(environment: environment, home: home)
         let bundledRunner = asrResourcesBundle.url(
             forResource: "maccheroni_asr_runner",
             withExtension: "py"

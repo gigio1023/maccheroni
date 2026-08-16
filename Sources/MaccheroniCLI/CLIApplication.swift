@@ -590,16 +590,25 @@ public struct CLIApplication: Sendable {
     public var dependencies: CLIDependencies
     public var now: @Sendable () -> Date
     public var runID: @Sendable (Date) -> String
-    public var storageReport: @Sendable (CLIProfile) -> StorageReport
+    public var libraryStorageConfiguration: @Sendable () -> LibraryStorageConfiguration
+    public var storageReport: @Sendable (
+        CLIProfile,
+        LibraryStorageConfiguration
+    ) -> StorageReport
     public init(
         dependencies: CLIDependencies = .production,
         now: @escaping @Sendable () -> Date = Date.init,
         runID: @escaping @Sendable (Date) -> String = CLIApplication.defaultRunID,
-        storageReport: @escaping @Sendable (CLIProfile) -> StorageReport = CLIApplication.productionStorageReport
+        libraryStorageConfiguration: @escaping @Sendable () -> LibraryStorageConfiguration = CLIApplication.productionLibraryStorageConfiguration,
+        storageReport: @escaping @Sendable (
+            CLIProfile,
+            LibraryStorageConfiguration
+        ) -> StorageReport = CLIApplication.productionStorageReport
     ) {
         self.dependencies = dependencies
         self.now = now
         self.runID = runID
+        self.libraryStorageConfiguration = libraryStorageConfiguration
         self.storageReport = storageReport
     }
 
@@ -612,9 +621,9 @@ public struct CLIApplication: Sendable {
         return "\(formatter.string(from: date))-\(suffix)"
     }
 
-    public static func productionStorageReport(_ profile: CLIProfile) -> StorageReport {
+    public static func productionLibraryStorageConfiguration() -> LibraryStorageConfiguration {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let library = LibraryStorageConfiguration(
+        return LibraryStorageConfiguration(
             applicationSupportDirectory: home.appendingPathComponent(
                 "Library/Application Support",
                 isDirectory: true
@@ -622,38 +631,42 @@ public struct CLIApplication: Sendable {
             environment: ProcessInfo.processInfo.environment,
             preferences: .appDomain()
         )
+    }
+
+    public static func productionStorageReport(
+        _ profile: CLIProfile,
+        library: LibraryStorageConfiguration
+    ) -> StorageReport {
         let roots = StorageRootInventory.current(
             library: library,
             profile: ConfiguredStorageProfile(
                 diarizationBackend: profile.diarization.enabled
                     ? profile.diarization.backend
                     : nil,
-                postprocessBackend: profile.postprocess
+                postprocessBackend: profile.postprocess,
+                models: configuredModels(for: profile)
             )
         )
         return StorageReadinessReporter().report(roots: roots)
     }
 
-    public static func defaultGlossaryRevisionStoreRoot() -> URL {
-        let environment = ProcessInfo.processInfo.environment
-        let libraryRoot: URL
-        if let configured = environment["MACCHERONI_LIBRARY_ROOT"],
-           !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           (configured as NSString).isAbsolutePath
-        {
-            libraryRoot = URL(
-                fileURLWithPath: configured,
-                isDirectory: true
-            ).standardizedFileURL
-        } else {
-            libraryRoot = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(
-                    "Library/Application Support/Maccheroni",
-                    isDirectory: true
-                )
-                .standardizedFileURL
+    private static func configuredModels(for profile: CLIProfile) -> [ModelDescriptor] {
+        var models = SelectedASRBackend(rawValue: profile.asrBackend).map { [$0.model] } ?? []
+        if profile.diarization.enabled {
+            switch profile.diarization.backend {
+            case "community1": models.append(Community1Diarizer().model)
+            case "fluid": models.append(FluidAudioDiarizer().model)
+            default: break
+            }
         }
-        return libraryRoot.appendingPathComponent(
+        if profile.postprocess == PostprocessBackendID.local.rawValue {
+            models.append(LocalPostprocessBackend.pinnedModel)
+        }
+        return models
+    }
+
+    public static func defaultGlossaryRevisionStoreRoot() -> URL {
+        productionLibraryStorageConfiguration().root.appendingPathComponent(
             "Glossaries/Revisions",
             isDirectory: true
         )
@@ -963,6 +976,12 @@ public struct CLIApplication: Sendable {
         outputRoot: URL?,
         glossaryURL: URL?
     ) async throws -> String {
+        let library = libraryStorageConfiguration()
+        if outputRoot == nil,
+           !library.isRootConfigurationValid("library.runs")
+        {
+            throw CLIError.run("the configured run storage path is invalid")
+        }
         let resolution = try resolveProfile(name: profileName, profilesURL: profilesURL)
         let profile = resolution.profile
         let selected = try selectedASR(profile.asrBackend)
@@ -992,8 +1011,7 @@ public struct CLIApplication: Sendable {
         let duration = Double(inputFile.length) / inputFile.processingFormat.sampleRate
         guard duration > 0 else { throw CLIError.run("input duration is zero") }
 
-        let root = outputRoot ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Maccheroni/Runs", isDirectory: true)
+        let root = outputRoot ?? library.runsURL
         let started = now()
         let writer = try RunWriter(root: root, id: runID(started))
         let source = SourceAudio(
@@ -2161,7 +2179,7 @@ public struct CLIApplication: Sendable {
             profilesURL: profilesURL
         ).profile
         let selected = try selectedASR(profile.asrBackend)
-        let storage = storageReport(profile)
+        let storage = storageReport(profile, libraryStorageConfiguration())
         let postprocessBackend = PostprocessBackendID(rawValue: profile.postprocess)
         var lines = [
             "profile=\(profile.name)",

@@ -50,7 +50,7 @@ struct LibraryStorageSettingsTests {
     }
 
     @Test
-    func ignoresBlankAndRelativeStoredDirectories() {
+    func malformedStoredDirectoriesBlockUseInsteadOfSilentlyFallingBack() {
         let repository = LibraryRepository.resolve(
             applicationSupportDirectory: URL(fileURLWithPath: "/fixtures/Application Support", isDirectory: true),
             environment: [LibraryStorageSettings.libraryRootEnvironmentKey: "   "],
@@ -60,6 +60,9 @@ struct LibraryStorageSettingsTests {
 
         #expect(repository.recordingsRoot.path == "/fixtures/Application Support/Maccheroni/Recordings")
         #expect(repository.runsRoot.path == "/fixtures/Application Support/Maccheroni/Runs")
+        #expect(throws: (any Error).self) {
+            try repository.prepareDirectories()
+        }
     }
 
     @Test
@@ -185,6 +188,31 @@ struct LibraryStorageSettingsTests {
     }
 
     @Test
+    func failedSecurityScopeStartPreventsDirectoryUse() {
+        let access = RootAccessRecorder()
+        access.allowsStart = false
+        let repository = LibraryRepository(
+            root: URL(fileURLWithPath: "/Library"),
+            runsRoot: URL(fileURLWithPath: "/Runs"),
+            recordingsRoot: URL(fileURLWithPath: "/Recordings"),
+            runsBookmark: Data("runs".utf8),
+            recordingsBookmark: Data("recordings".utf8),
+            bookmarkAccess: LibraryBookmarkAccess(
+                resolve: { _ in throw TestStorageError.unexpectedBookmark },
+                create: { _ in Data() },
+                startAccessing: { access.start($0) },
+                stopAccessing: { access.stop($0) }
+            )
+        )
+
+        #expect(throws: (any Error).self) {
+            try repository.prepareDirectories()
+        }
+        #expect(access.started == ["/Recordings"])
+        #expect(access.stopped.isEmpty)
+    }
+
+    @Test
     func storagePresentationUsesOneGroupedReportForVolumesAndIssues() {
         let report = StorageReport(
             volumes: [StorageVolume(
@@ -286,6 +314,50 @@ struct LibraryStorageSettingsTests {
             LocalPostprocessBackend.pinnedModel.hfModelID
         ))
     }
+
+    @Test
+    func communityModelCardUsesTheDiarizerHFHomeResolution() throws {
+        let descriptor = ModelDescriptor(
+            role: .diarization,
+            hfModelID: "aufklarer/Pyannote-Community-1-CoreML",
+            revision: "a14e6c420d56e8472850649b016a486fd0acbe81",
+            quantization: "coreml-fp32"
+        )
+
+        let location = try #require(ModelCacheInspector.location(
+            for: descriptor,
+            environment: ["MACCHERONI_HF_HOME": "/Volumes/Models/huggingface"],
+            homeDirectory: URL(fileURLWithPath: "/unused-home", isDirectory: true)
+        ))
+
+        #expect(location.path == "/Volumes/Models/huggingface/hub/models--aufklarer--Pyannote-Community-1-CoreML/snapshots/a14e6c420d56e8472850649b016a486fd0acbe81")
+    }
+
+    @Test
+    func sharedInventoryAddsPerModelRootsForBothProfileEntryPoints() {
+        let descriptor = ModelDescriptor(
+            role: .asr,
+            hfModelID: "fixture/model",
+            revision: "revision",
+            quantization: "int8"
+        )
+        let profile = ConfiguredStorageProfile(
+            diarizationBackend: nil,
+            postprocessBackend: nil,
+            models: [descriptor]
+        )
+        let library = LibraryStorageConfiguration(
+            root: URL(fileURLWithPath: "/Library"),
+            recordingsURL: URL(fileURLWithPath: "/Recordings"),
+            runsURL: URL(fileURLWithPath: "/Runs")
+        )
+
+        let appRoots = StorageRootInventory.current(library: library, profiles: [profile])
+        let cliRoots = StorageRootInventory.current(library: library, profile: profile)
+
+        #expect(appRoots == cliRoots)
+        #expect(appRoots.contains { $0.id == StorageModelRoot.id(for: descriptor) })
+    }
 }
 
 private enum TestStorageError: Error {
@@ -296,13 +368,20 @@ private final class RootAccessRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var storedStarted: [String] = []
     private var storedStopped: [String] = []
+    private var storedAllowsStart = true
 
     var started: [String] { lock.withLock { storedStarted } }
     var stopped: [String] { lock.withLock { storedStopped } }
+    var allowsStart: Bool {
+        get { lock.withLock { storedAllowsStart } }
+        set { lock.withLock { storedAllowsStart = newValue } }
+    }
 
     func start(_ url: URL) -> Bool {
-        lock.withLock { storedStarted.append(url.path) }
-        return true
+        lock.withLock {
+            storedStarted.append(url.path)
+            return storedAllowsStart
+        }
     }
 
     func stop(_ url: URL) {

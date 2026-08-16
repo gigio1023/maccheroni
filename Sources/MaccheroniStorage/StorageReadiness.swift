@@ -24,19 +24,22 @@ public struct StorageRoot: Equatable, Sendable {
     public var url: URL
     public var bookmark: Data?
     public var kind: StorageRootKind
+    public var preflightStatus: StorageRootStatus?
 
     public init(
         id: String,
         role: StorageRole,
         url: URL,
         bookmark: Data? = nil,
-        kind: StorageRootKind = .directory
+        kind: StorageRootKind = .directory,
+        preflightStatus: StorageRootStatus? = nil
     ) {
         self.id = id
         self.role = role
         self.url = url.standardizedFileURL
         self.bookmark = bookmark
         self.kind = kind
+        self.preflightStatus = preflightStatus
     }
 }
 
@@ -199,6 +202,7 @@ public struct StorageVolumeProperties: Equatable, Sendable {
     public var name: String
     public var availableBytes: Int64?
     public var isDirectory: Bool
+    public var isRegularFile: Bool
     public var isReadable: Bool
     fileprivate var groupKey: StorageVolumeGroupKey
 
@@ -208,6 +212,7 @@ public struct StorageVolumeProperties: Equatable, Sendable {
         name: String,
         availableBytes: Int64?,
         isDirectory: Bool = true,
+        isRegularFile: Bool = false,
         isReadable: Bool = true
     ) {
         self.groupingIdentifier = groupingIdentifier
@@ -215,6 +220,7 @@ public struct StorageVolumeProperties: Equatable, Sendable {
         self.name = name
         self.availableBytes = availableBytes
         self.isDirectory = isDirectory
+        self.isRegularFile = isRegularFile
         self.isReadable = isReadable
         groupKey = StorageVolumeGroupKey(text: groupingIdentifier)
     }
@@ -225,6 +231,7 @@ public struct StorageVolumeProperties: Equatable, Sendable {
         name: String,
         availableBytes: Int64?,
         isDirectory: Bool,
+        isRegularFile: Bool,
         isReadable: Bool
     ) {
         groupingIdentifier = String(describing: volumeIdentifier)
@@ -232,6 +239,7 @@ public struct StorageVolumeProperties: Equatable, Sendable {
         self.name = name
         self.availableBytes = availableBytes
         self.isDirectory = isDirectory
+        self.isRegularFile = isRegularFile
         self.isReadable = isReadable
         groupKey = StorageVolumeGroupKey(object: volumeIdentifier)
     }
@@ -286,6 +294,7 @@ public struct StorageVolumeInspector: Sendable {
         do {
             let keys: Set<URLResourceKey> = [
                 .isDirectoryKey,
+                .isRegularFileKey,
                 .isReadableKey,
                 .volumeIdentifierKey,
                 .volumeUUIDStringKey,
@@ -312,6 +321,7 @@ public struct StorageVolumeInspector: Sendable {
                 name: name,
                 availableBytes: values.volumeAvailableCapacity.map(Int64.init),
                 isDirectory: values.isDirectory == true,
+                isRegularFile: values.isRegularFile == true,
                 isReadable: values.isReadable == true
             )
         } catch let failure as StorageInspectionFailure {
@@ -389,6 +399,16 @@ public struct StorageReadinessReporter: Sendable {
         var usedVolumeIDs: Set<String> = []
 
         for root in roots.sorted(by: { $0.id < $1.id }) {
+            if let status = root.preflightStatus {
+                observations.append(StorageRootObservation(
+                    id: root.id,
+                    role: root.role,
+                    status: status,
+                    bookmarkStatus: .none,
+                    volumeID: nil
+                ))
+                continue
+            }
             let resolved: URL
             let bookmarkStatus: StorageBookmarkStatus
             if let bookmark = root.bookmark {
@@ -414,11 +434,24 @@ public struct StorageReadinessReporter: Sendable {
             let isAccessing = root.bookmark.map { _ in
                 bookmarks.startAccessing(resolved)
             } ?? false
+            if root.bookmark != nil, !isAccessing {
+                observations.append(StorageRootObservation(
+                    id: root.id,
+                    role: root.role,
+                    status: .bookmarkUnavailable,
+                    bookmarkStatus: .unavailable,
+                    volumeID: nil
+                ))
+                continue
+            }
             defer {
                 if isAccessing { bookmarks.stopAccessing(resolved) }
             }
 
-            let result = inspectRoot(resolved, kind: root.kind)
+            let result = inspectRoot(
+                effectiveStorageURL(resolved),
+                kind: root.kind
+            )
             switch result {
             case .success((let properties, let status)):
                 var volume: StorageVolume
@@ -478,9 +511,13 @@ public struct StorageReadinessReporter: Sendable {
     ) -> Result<(StorageVolumeProperties, StorageRootStatus), StorageRootStatus> {
         do {
             let properties = try inspector.inspect(url)
-            guard properties.isReadable,
-                  kind == .file || properties.isDirectory
-            else { return .failure(.unreadable) }
+            guard properties.isReadable else { return .failure(.unreadable) }
+            switch kind {
+            case .directory:
+                guard properties.isDirectory else { return .failure(.unreadable) }
+            case .file:
+                guard properties.isRegularFile else { return .failure(.unreadable) }
+            }
             return .success((properties, .available))
         } catch StorageInspectionFailure.unreadable {
             return .failure(.unreadable)
@@ -533,6 +570,48 @@ public struct StorageReadinessReporter: Sendable {
             return .failure(.unreadable)
         }
     }
+}
+
+private func effectiveStorageURL(_ url: URL) -> URL {
+    var current = url.standardizedFileURL
+    for _ in 0 ..< 32 {
+        let automaticallyResolved = current.resolvingSymlinksInPath()
+        if automaticallyResolved != current {
+            current = automaticallyResolved
+            continue
+        }
+        guard let manuallyResolved = resolvingFirstSymbolicLink(in: current),
+              manuallyResolved != current
+        else { return current }
+        current = manuallyResolved
+    }
+    return current
+}
+
+private func resolvingFirstSymbolicLink(in url: URL) -> URL? {
+    let components = url.pathComponents
+    guard components.count > 1 else { return nil }
+    for componentCount in stride(from: components.count, through: 2, by: -1) {
+        let prefix = URL(
+            fileURLWithPath: NSString.path(
+                withComponents: Array(components.prefix(componentCount))
+            )
+        )
+        guard let destination = try? FileManager.default.destinationOfSymbolicLink(
+            atPath: prefix.path
+        ) else { continue }
+        var target = (destination as NSString).isAbsolutePath
+            ? URL(fileURLWithPath: destination)
+            : URL(
+                fileURLWithPath: destination,
+                relativeTo: prefix.deletingLastPathComponent()
+            )
+        for component in components.dropFirst(componentCount) {
+            target.appendPathComponent(component)
+        }
+        return target.standardizedFileURL
+    }
+    return nil
 }
 
 private func externalMountRoot(for url: URL) -> URL? {

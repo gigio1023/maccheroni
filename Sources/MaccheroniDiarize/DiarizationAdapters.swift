@@ -142,11 +142,29 @@ public struct Community1DiarizerConfiguration: Sendable {
     }
 
     public static var defaultHFHomeURL: URL {
-        if let override = ProcessInfo.processInfo.environment["MACCHERONI_HF_HOME"], !override.isEmpty {
+        resolveHFHomeURL()
+    }
+
+    public static func resolveHFHomeURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        if let override = environment["MACCHERONI_HF_HOME"], !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
-        return FileManager.default.homeDirectoryForCurrentUser
+        return homeDirectory
             .appendingPathComponent("Library/Caches/Maccheroni/benchmarks/models/huggingface", isDirectory: true)
+    }
+}
+
+public enum DiarizationWorkspace {
+    public static func processCaptureRootURL(
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory
+    ) -> URL {
+        temporaryDirectory.appendingPathComponent(
+            "Maccheroni/diarization/process",
+            isDirectory: true
+        )
     }
 }
 
@@ -715,8 +733,7 @@ private func runProcess(
     var mergedEnvironment = ProcessInfo.processInfo.environment
     for (key, value) in environment { mergedEnvironment[key] = value }
     process.environment = mergedEnvironment
-    let outputDirectory = FileManager.default.temporaryDirectory
-        .appendingPathComponent("Maccheroni/diarization/process", isDirectory: true)
+    let outputDirectory = DiarizationWorkspace.processCaptureRootURL()
     try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
     let outputURL = outputDirectory.appendingPathComponent("\(UUID().uuidString.lowercased()).stdout")
     let errorURL = outputDirectory.appendingPathComponent("\(UUID().uuidString.lowercased()).stderr")

@@ -65,6 +65,61 @@ struct StorageReadinessTests {
     }
 
     @Test
+    func resolvesASymlinkBeforeInspectingItsVolume() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "maccheroni-storage-symlink-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let target = root.appendingPathComponent("target", isDirectory: true)
+        let link = root.appendingPathComponent("configured-link", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let report = StorageReadinessReporter(
+            inspector: FixtureInspector(values: [
+                target.path: .volume(id: "resolved", name: "Resolved", bytes: 321),
+            ]).adapter
+        ).report(roots: [
+            StorageRoot(id: "runs", role: .runs, url: link),
+        ])
+
+        #expect(report.roots.first?.status == .available)
+        #expect(report.roots.first?.volumeID == "resolved")
+        #expect(report.volumes.first?.availableBytes == 321)
+    }
+
+    @Test
+    func resolvedBrokenSymlinkKeepsTheUnmountedFailure() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "maccheroni-storage-broken-link-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let link = root.appendingPathComponent("configured-link", isDirectory: true)
+        let missingTarget = URL(
+            fileURLWithPath: "/Volumes/MaccheroniMissingVolume/Library/Runs",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: missingTarget)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let inspector = FixtureInspector(values: [
+            "/Volumes/MaccheroniMissingVolume/Library/Runs": .failure(.notFound),
+            "/Volumes/MaccheroniMissingVolume/Library": .failure(.notFound),
+            "/Volumes/MaccheroniMissingVolume": .failure(.notFound),
+            "/Volumes": .volume(id: "system", name: "System", bytes: 500),
+        ])
+
+        let report = StorageReadinessReporter(inspector: inspector.adapter).report(roots: [
+            StorageRoot(id: "runs", role: .runs, url: link),
+        ])
+
+        #expect(report.roots.first?.status == .unmounted)
+        #expect(report.roots.first?.volumeID == nil)
+        #expect(report.volumes.isEmpty)
+    }
+
+    @Test
     func doesNotAttributeAMissingExternalMountToTheSystemVolume() {
         let inspector = FixtureInspector(values: [
             "/Volumes/Archive/Maccheroni": .failure(.notFound),
@@ -175,6 +230,36 @@ struct StorageReadinessTests {
     }
 
     @Test
+    func failedSecurityScopeStartIsReportedWithoutInspection() {
+        let reporter = StorageReadinessReporter(
+            inspector: FixtureInspector(values: [
+                "/Moved/Runs": .volume(id: "wrong", name: "Wrong", bytes: 1),
+            ]).adapter,
+            bookmarks: StorageBookmarkAccess(
+                resolve: { _ in
+                    StorageBookmarkResolution(
+                        url: URL(fileURLWithPath: "/Moved/Runs"),
+                        isStale: false
+                    )
+                },
+                startAccessing: { _ in false },
+                stopAccessing: { _ in Issue.record("an unstarted scope must not be stopped") }
+            )
+        )
+
+        let report = reporter.report(roots: [StorageRoot(
+            id: "runs",
+            role: .runs,
+            url: URL(fileURLWithPath: "/Stored/Runs"),
+            bookmark: Data("bookmark".utf8)
+        )])
+
+        #expect(report.roots.first?.status == .bookmarkUnavailable)
+        #expect(report.roots.first?.bookmarkStatus == .unavailable)
+        #expect(report.volumes.isEmpty)
+    }
+
+    @Test
     func libraryAndActiveBackendInventoryDeclaresEveryIndependentRoot() {
         let recordingsBookmark = Data("recordings".utf8)
         let runsBookmark = Data("runs".utf8)
@@ -210,13 +295,93 @@ struct StorageReadinessTests {
             "models.vad.data",
             "models.vad.revision",
             "models.diarization.community1",
+            "work.diarization.community1",
             "models.diarization.fluid",
             "work.diarization.fluid",
             "models.postprocess.local",
+            "work.postprocess.local",
         ])
         #expect(roots.first { $0.id == "library.recordings" }?.bookmark == recordingsBookmark)
         #expect(roots.first { $0.id == "library.runs" }?.bookmark == runsBookmark)
         #expect(roots.first { $0.id == "work.diarization.fluid" }?.role == .temporaryWork)
+        #expect(roots.first { $0.id == "work.diarization.community1" }?.role == .temporaryWork)
+        #expect(roots.first { $0.id == "work.postprocess.local" }?.role == .temporaryWork)
+    }
+
+    @Test
+    func singleProfileAndProfileSetInventoryUseTheSameSharedComputation() {
+        let library = LibraryStorageConfiguration(
+            root: URL(fileURLWithPath: "/Library"),
+            recordingsURL: URL(fileURLWithPath: "/Recordings"),
+            runsURL: URL(fileURLWithPath: "/Runs")
+        )
+        let profile = ConfiguredStorageProfile(
+            diarizationBackend: "community1",
+            postprocessBackend: "codex"
+        )
+        let temporaryDirectory = URL(fileURLWithPath: "/SeparateTemp", isDirectory: true)
+
+        let appInventory = StorageRootInventory.current(
+            library: library,
+            profiles: [profile],
+            temporaryDirectory: temporaryDirectory
+        )
+        let cliInventory = StorageRootInventory.current(
+            library: library,
+            profile: profile,
+            temporaryDirectory: temporaryDirectory
+        )
+
+        #expect(appInventory == cliInventory)
+        #expect(appInventory.first { $0.id == "work.diarization.community1" }?.url.path
+            == "/SeparateTemp/Maccheroni/diarization/process")
+        #expect(appInventory.first { $0.id == "work.postprocess.codex" }?.url.path
+            == "/SeparateTemp")
+    }
+
+    @Test
+    func malformedConfiguredPathsProduceUnreadableObservationsWithoutFallbackVolumes() {
+        let applicationSupport = URL(
+            fileURLWithPath: "/Fallback/Application Support",
+            isDirectory: true
+        )
+        let invalidEnvironment = LibraryStorageConfiguration(
+            applicationSupportDirectory: applicationSupport,
+            environment: [StoragePreferenceKeys.libraryRootEnvironment: "relative/library"],
+            preferences: LibraryStoragePreferences()
+        )
+        let invalidPreferences = LibraryStorageConfiguration(
+            applicationSupportDirectory: applicationSupport,
+            environment: [:],
+            preferences: LibraryStoragePreferences(
+                recordingsPath: "   ",
+                runsPath: "relative/runs"
+            )
+        )
+        let inspector = FixtureInspector(values: [
+            "/Fallback/Application Support/Maccheroni": .volume(
+                id: "fallback",
+                name: "Fallback",
+                bytes: 999
+            ),
+        ])
+
+        let environmentReport = StorageReadinessReporter(inspector: inspector.adapter)
+            .report(roots: invalidEnvironment.roots)
+        let preferencesReport = StorageReadinessReporter(inspector: inspector.adapter)
+            .report(roots: invalidPreferences.roots)
+
+        #expect(environmentReport.roots.allSatisfy { $0.status == .unreadable })
+        #expect(environmentReport.volumes.isEmpty)
+        #expect(preferencesReport.roots.first {
+            $0.id == "library.recordings"
+        }?.status == .unreadable)
+        #expect(preferencesReport.roots.first {
+            $0.id == "library.runs"
+        }?.status == .unreadable)
+        #expect(preferencesReport.roots.first {
+            $0.id == "library.metadata"
+        }?.volumeID == "fallback")
     }
 
     @Test
@@ -261,6 +426,23 @@ struct StorageReadinessTests {
         #expect(report.roots.first?.status == .unreadable)
         #expect(report.volumes.isEmpty)
         #expect(!report.isObservable)
+    }
+
+    @Test
+    func fileRootRejectsAnExistingDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "maccheroni-storage-directory-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let report = StorageReadinessReporter().report(roots: [
+            StorageRoot(id: "marker", role: .vadModelCache, url: root, kind: .file),
+        ])
+
+        #expect(report.roots.first?.status == .unreadable)
+        #expect(report.volumes.isEmpty)
     }
 
     @Test

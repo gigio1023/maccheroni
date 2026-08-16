@@ -82,6 +82,7 @@ final class MaccheroniAppModel {
     private var player: AVPlayer?
     private var playbackTask: Task<Void, Never>?
     private var activeSecurityURL: URL?
+    private var activeRecordingStorageAccess: LibraryStorageAccessLease?
     private var activeRecordingSelection: RecordingSelection?
     private var activeRecordingRecordID: UUID?
 
@@ -180,8 +181,11 @@ final class MaccheroniAppModel {
         captureTimer?.cancel()
         stopPlayback()
         activeRecordingSelection = nil
-        if isRecording {
-            Task { await recorder.cancel() }
+        if isRecording || activeRecordingStorageAccess != nil {
+            Task { [weak self] in
+                await self?.recorder.cancel()
+                self?.finishRecordingStorageAccess()
+            }
         }
     }
 
@@ -361,6 +365,8 @@ final class MaccheroniAppModel {
             guard let self else { return }
             var captureStarted = false
             do {
+                activeRecordingStorageAccess = try repository
+                    .beginAccessingRecordingsRoot()
                 let session = try await recorder.start(in: repository.recordingsRoot)
                 captureStarted = true
                 let record = LibraryRecord(
@@ -394,6 +400,7 @@ final class MaccheroniAppModel {
                 if captureStarted {
                     await recorder.cancel()
                 }
+                finishRecordingStorageAccess()
                 errorMessage = error.localizedDescription
                 activeRecordingSelection = nil
                 activeRecordingRecordID = nil
@@ -412,7 +419,10 @@ final class MaccheroniAppModel {
         activeTask = Task { [weak self] in
             guard let self else { return }
             let recordID = provisionalRecordID
-            defer { finishActiveTranscription() }
+            defer {
+                finishRecordingStorageAccess()
+                finishActiveTranscription()
+            }
             captureTimer?.cancel()
             do {
                 let artifacts = try await recorder.stop()
@@ -553,6 +563,8 @@ final class MaccheroniAppModel {
                 activeTask = nil
             }
             do {
+                let runsAccess = try repository.beginAccessingRunsRoot()
+                defer { runsAccess?.end() }
                 if backend == .codex {
                     if !codexAvailability.isAuthenticated {
                         await refreshCodexAvailability()
@@ -819,8 +831,13 @@ final class MaccheroniAppModel {
         try recordSaver(records)
         let glossaryURL = try activeGlossaryURL(at: glossaryURL(for: record.profileID))
         let source = try resolveOriginalRefreshingRecord(record)
-        let accessing = source.startAccessingSecurityScopedResource()
-        defer { if accessing { source.stopAccessingSecurityScopedResource() } }
+        let sourceAccess = try repository.beginAccessingOriginal(
+            source,
+            bookmark: record.securityScopedBookmark
+        )
+        defer { sourceAccess?.end() }
+        let storageAccesses = try repository.beginAccessingRunnerRoots()
+        defer { storageAccesses.forEach { $0.end() } }
         let request = TranscriptionRequest(
             sourceURL: source,
             outputRoot: repository.runsRoot,
@@ -995,6 +1012,11 @@ final class MaccheroniAppModel {
         activeRecordID = nil
         activeTask = nil
         progress = nil
+    }
+
+    private func finishRecordingStorageAccess() {
+        activeRecordingStorageAccess?.end()
+        activeRecordingStorageAccess = nil
     }
 
     private func saveRecordsReportingErrors() {

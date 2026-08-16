@@ -420,7 +420,10 @@ struct MaccheroniCLITests {
                 ),
             ]
         )
-        let app = testApplication(runID: "doctor-storage", storageReport: { _ in storage })
+        let app = testApplication(
+            runID: "doctor-storage",
+            storageReport: { _, _ in storage }
+        )
 
         let report = try await app.inspectDoctor(
             profileName: "ko-meeting",
@@ -453,6 +456,52 @@ struct MaccheroniCLITests {
         #expect(roots[0]["status"] as? String == "not_created")
         #expect(roots[0]["bookmark_status"] as? String == "stale")
         #expect(roots[1]["status"] as? String == "unreadable")
+    }
+
+    @Test
+    func runDefaultAndDoctorInventoryUseTheSameConfiguredRunsRoot() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "storage-input.wav")
+        let profiles = try profileFile(in: root)
+        let configuredRuns = root.appendingPathComponent("ConfiguredRuns", isDirectory: true)
+        let explicitRuns = root.appendingPathComponent("ExplicitRuns", isDirectory: true)
+        let library = LibraryStorageConfiguration(
+            root: root.appendingPathComponent("Library", isDirectory: true),
+            recordingsURL: root.appendingPathComponent("Recordings", isDirectory: true),
+            runsURL: configuredRuns
+        )
+        let observed = CLIStorageConfigurationRecorder()
+        let app = testApplication(
+            runID: "storage-agreement",
+            libraryStorageConfiguration: { library },
+            storageReport: { _, configuration in
+                observed.record(configuration)
+                return fixtureStorageReport()
+            }
+        )
+
+        _ = try await app.inspectDoctor(
+            profileName: "ko-meeting",
+            profilesPath: profiles.path
+        )
+        let defaultRunPath = try await app.execute(arguments: [
+            "run", input.path,
+            "--profile", "ko-meeting",
+            "--profiles", profiles.path,
+        ])
+        let explicitRunPath = try await app.execute(arguments: [
+            "run", input.path,
+            "--profile", "ko-meeting",
+            "--profiles", profiles.path,
+            "--output-root", explicitRuns.path,
+        ])
+
+        #expect(observed.runsURL == configuredRuns)
+        #expect(URL(fileURLWithPath: defaultRunPath).deletingLastPathComponent()
+            == configuredRuns)
+        #expect(URL(fileURLWithPath: explicitRunPath).deletingLastPathComponent()
+            == explicitRuns)
     }
 
     @Test
@@ -2389,7 +2438,11 @@ struct MaccheroniCLITests {
     private func testApplication(
         runID: String,
         dependencies: CLIDependencies? = nil,
-        storageReport: @escaping @Sendable (CLIProfile) -> StorageReport = { _ in
+        libraryStorageConfiguration: @escaping @Sendable () -> LibraryStorageConfiguration = CLIApplication.productionLibraryStorageConfiguration,
+        storageReport: @escaping @Sendable (
+            CLIProfile,
+            LibraryStorageConfiguration
+        ) -> StorageReport = { _, _ in
             fixtureStorageReport()
         }
     ) -> CLIApplication {
@@ -2397,8 +2450,20 @@ struct MaccheroniCLITests {
             dependencies: dependencies ?? testDependencies(),
             now: { Date(timeIntervalSince1970: 1_786_000_000) },
             runID: { _ in runID },
+            libraryStorageConfiguration: libraryStorageConfiguration,
             storageReport: storageReport
         )
+    }
+}
+
+private final class CLIStorageConfigurationRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedRunsURL: URL?
+
+    var runsURL: URL? { lock.withLock { storedRunsURL } }
+
+    func record(_ configuration: LibraryStorageConfiguration) {
+        lock.withLock { storedRunsURL = configuration.runsURL }
     }
 }
 
