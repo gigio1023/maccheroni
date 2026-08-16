@@ -335,7 +335,7 @@ not deleted.
   model, prompt, batch, output-budget, and historical evidence records. New manifests
   identify the backend as `codex-app-server`; historical `codex-cli` manifests remain
   valid and decodable.
-- D34 [inference] Replaces D33's authentication-custody clause (decided 2026-08-10).
+- D34 [maintainer] Replaces D33's authentication-custody clause (decided 2026-08-10).
   For each readiness probe or text transformation, Maccheroni reads the active native
   Codex ChatGPT credential only long enough to extract a safely unexpired access token,
   account ID, and plan type, then injects those fields through `account/login/start`
@@ -344,7 +344,9 @@ not deleted.
   refreshes, or modifies the credential; when safe validity cannot be proved or the
   child requests refresh, the operation fails before output promotion and directs the
   user to refresh or sign in through Codex. Native Codex remains the sole writer of its
-  credential store.
+  credential store. Promotion record (2026-08-16): the maintainer confirmed this
+  decision; provenance changed from inference to maintainer without altering its
+  content.
 - D35 [inference] Published README benchmark results and both generated benchmark figures
   derive from `benchmarks/published-results.json` (decided 2026-08-10). Rates use
   decimal round-half-up: CER, WER, and DER display to 3 places; README term recall
@@ -367,14 +369,16 @@ not deleted.
   `0.0847457627118644`. CER is invariant because character scoring removes all
   whitespace after common normalization. The declaration, ten READMEs, generated
   figures, profile resource, and historical verdict summaries are republished together.
-- D37 [inference] Supersedes D23's fallback clause (decided 2026-08-11). Qwen3-ASR is
+- D37 [maintainer] Supersedes D23's fallback clause (decided 2026-08-11). Qwen3-ASR is
   withdrawn as a product fallback because the pinned `speech` 0.0.23 backend exposes no
   enforceable token cap, decoder terminal reason, token counts, or intra-chunk
   timestamps, so its output cannot carry the evidence required for promotion. The
   adapter fails this path with typed `asr_evidence_unavailable` while retaining
   diagnostic evidence. Qwen3-ASR may return as a fallback when a backend version
   exposes all missing terminal, token, and timestamp evidence. D23's VibeVoice Korean
-  default remains in force.
+  default remains in force. Promotion record (2026-08-16): the maintainer confirmed
+  this decision; provenance changed from inference to maintainer without altering
+  its content.
 - D38 [maintainer] Reframes public positioning from market exclusivity to personal
   configurability (decided 2026-08-12). The README family no longer claims that apps
   with local diarization do not deliver glossaries to the ASR model, that the app with
