@@ -105,62 +105,52 @@ insufficient privacy control regardless of transcription quality.
 
 ## 5. Most Important Current Question (Risk)
 
-**Does the text-to-text output budget remain conservative for real long-form inputs and
-new models?** D29 correction and translation use bounded batches at segment boundaries,
-pre-call output budgeting, a second check against raw schema response bytes, exact
-coverage, and a separate create-only translation artifact. An actual two-batch request
-with synthetic Italian text and `gpt-5.6-sol` is preserved in the create-only run
-`t7-codex-actual-20260803T230231Z-e1852cd5-0caa38d1-d9e4-4085-b9dd-59341acb6576`.
-The SHA-256 of `evidence.json` is
-`331c578fb88e3ddee628d919a0e20eff6ea0f97d638cc233c213f153459f0f51`. The fixture
-confirmed that audio, the raw transcript, speakers, and timestamps remained unchanged.
-MOSS transcription retains 120-second leaves, 5,120 output tokens, EOS-only promotion,
-and typed recovery. Remaining risks are recalibrating when a new model or a real
-long-form input changes the output expansion factor, and the inability of the Codex
-app-server read-only sandbox to fully prevent macOS-level reads outside an empty working
-directory. A private real recording, validated through structural metadata
-only; not part of this repository. It remains optional validation under D19 and does
-not block v1 completion.
+**Can the shipped `ko-meeting` profile produce a reliable mixed-language,
+multi-speaker record with every applied correction aligned to reference evidence?** The
+2026-08-31 HiKE run verifies mixed-language ASR and decoding-time glossary use. The AMI
+IN1009 clean IHM mix verifies long-form ASR and one global four-speaker timeline. These
+are separate component measurements: neither fixture combines mixed-language speech
+with multiple scored speakers, and neither measures human correction time. The
+four-state correction comparison observed aggregate CER and WER improvements, but all
+five applied changes were unscorable under exact-interval reference alignment.
+`correct_to_incorrect` and broader per-change regression therefore remain unknown. A
+valid next measurement campaign needs one sealed C3 condition that combines the two
+speech properties, complete structural evidence, scorable correction changes, and a
+predeclared calibration method with held-out or repeated observation.
 
 ## 6. Current Position
 
-- **now**: T1-T16, the MOSS long-file improvements, and D29 correction and translation
-  are complete for v1. At product baseline `5a74fa3`, Xcode 26 passed 140 Swift tests in
-  16 suites, the complete build, and the strictly codesigned app bundle. The T7 exact
-  check passed 43 App tests and 15 CLI tests. Two synthetic text-only batches ran with
-  authenticated `codex-cli 0.146.0` and `gpt-5.6-sol`, preserving the input hash and
-  recording the text-only boundary in a checksummed artifact. From the actual backend
-  artifact baseline `e1852cd` through the final product, there were 0 diffs in the
-  post-processing backend, actual test, and evidence runner. Two consecutive tracked T14
-  runs at the final product baseline were
-  `t14-20260803T232022243105Z-5a74fa3d-a649bb42` and
-  `t14-20260803T232023289691Z-5a74fa3d-1331e04d`. Their summary SHA-256 values were
-  `2f272671814cc2949445c4a7fc45b7901a7903f02e8a8084d571537170eb0df0` and
-  `7798686a431d59d5ac23388285ad61214c270a8dc7d91a522fdd32c290f0c6d8`, respectively.
-  Both passed strict no-regression, source hash, glossary, and chunk-boundary global
-  speaker contracts. Failed runs, recordings, raw transcripts, and existing artifacts
-  remain in preserved local run directories that are create-only and not part of this
-  repository. The active Codex transport now uses a fresh `codex app-server` process for
-  each readiness probe or text transformation. It accepts only a ChatGPT subscription
-  account, creates one ephemeral read-only thread, disables tools, declines approval
-  requests, and records new manifests as `codex-app-server`.
-- **next**: Restore a truthful, reproducible shipped `ko-meeting` baseline from a new
-  empty model cache. Provision the pinned VibeVoice model, its indirect pinned
-  `Qwen/Qwen2.5-7B` tokenizer, and required Hugging Face metadata without manual copying;
-  make doctor reject every incomplete state; preserve bounded path-redacted subprocess
-  diagnostics; and repeat the 7.2-second HiKE smoke with full coverage, glossary, model,
-  and terminal evidence. Then continue the cache-independent test and unpublished HiKE
-  and AMI baseline work. Model-reference experiments and any MLX/Core ML conversions run
-  as a separate lane against that baseline. If the model revision, backend output format,
-  or long-form output expansion changes, recalibrate the budget coefficient with the
-  fixture and an actual synthetic round trip.
-- **under review**: Generalization to real-meeting accents, overlapping speech, and
-  noise; reducing the backend CLI's OS-level read scope; the output coefficient for new
-  models; and VibeVoice memory use.
-- **success measure**: Can 1 important meeting become a reliable speaker-attributed
-  record with no more than 30 minutes of human correction? Supporting metrics are
-  reference-term recall, omitted utterance count, speaker-count accuracy, processing
-  time, and human review time.
+- **now**: The 2026-08-31 post-v1 reliability reset has an implemented Draft PR stack
+  for fresh-cache `ko-meeting` provisioning, cache-independent tests, bounded subprocess
+  fixtures, immutable evaluation envelopes, correction comparison, and reproducible
+  Stage 2 fixture construction. Two consecutive empty-cache Swift runs passed 324 tests
+  in 25 suites. The explicit model integration, package build, strict codesign, and
+  product doctor also passed. Unpublished evaluation `hike-20260831-t7-04` is sealed by
+  SHA-256 `055122968710f3b3732b8eb2cd9e0c8bc8d137919b4f8ac2835bbe5b931d533d`;
+  unpublished evaluation `ami-20260831-t8-02` by
+  `41336850701d0bd368aab7b726b6e32d0483303864904b3c830753f8f77a15fd`;
+  and unpublished comparison `hike-20260831-t9-01` by
+  `8b5bdbccd5bb260b9c5cfb1882e8ab63b8f45ff15f38b5f5b4fa44d2f32b5b87`.
+  Exact metrics remain local. The threshold declaration remains a placeholder, so none
+  of these observations is a quality pass, profile promotion, product acceptance, or
+  closure of C3.
+- **next**: Add or select a public mixed-language, multi-speaker C3 fixture. Run a
+  measurement-only campaign through the fixed shipped profile with a predeclared
+  calibration method and held-out or repeated observation. Make every applied
+  correction alignable to reference evidence and record a nonzero adequate denominator
+  for both correction paths. Keep the D43 DiCoW conversion lane separate from this
+  shipped-baseline campaign. Do not change a model, backend, chunk, token, timeout,
+  retry, fallback, or cache setting to make the measurement pass.
+- **under review**: Raw-quality thresholds and their campaign scope; a rate or scoped
+  maximum for `correct_to_incorrect`; broader per-change regression measurement;
+  generalization to real-meeting accents, overlap, and noise; the Codex backend's
+  OS-level read scope; the output coefficient for new models; and VibeVoice memory use.
+- **success measure**: Retain the north-star question: can 1 important meeting become a
+  reliable speaker-attributed record with no more than 30 minutes of human correction?
+  The current public component measurements did not measure human review time, so this
+  is not a current acceptance gate. Supporting observations remain reference-term
+  recall, omitted utterance count, speaker-count accuracy, processing time, and human
+  review time.
 
 ## Decisions
 
@@ -466,6 +456,62 @@ not deleted.
   permit private audio in a non-Apple reference runtime, replace the shipped-baseline
   repair in the Current Position, or relax D42's license, parity, evidence, and
   constraint gates.
+- D44 [maintainer] Defer numerical raw-quality thresholds and a maximum
+  `correct_to_incorrect` guardrail after the 2026-08-31 post-v1 reliability campaign
+  (decided 2026-09-01). Keep
+  `benchmarks/scripts/scoring/correction-comparison-thresholds.json` in its all-null
+  placeholder state, SHA-256
+  `4f90b718fd15e89b20353562cd2220020a38d308f157b2f2f5eb4f7b4de6f38e`.
+  A next campaign is measurement-valid only when the immutable evaluation verifier
+  passes its source, fixture, model, glossary, terminal, scorer, schema, result, and
+  file-hash contracts; every planned chunk completes with an observed successful
+  terminal reason; source coverage is exact and untruncated; segments are nonempty and
+  valid; and source artifacts remain immutable. These are integrity gates for recording
+  evidence. CER, WER, term recall, omissions, DER, processing time, and human review time
+  remain observations without pass or fail, candidate promotion, profile promotion, or
+  product-acceptance meaning until a separate numerical policy is adopted.
+
+  The HiKE evidence consists of source manifest SHA-256
+  `4183c7481e14c1a1b6d04531b7d9210956da9ba57d2ee7f97674527e65132bec`, score
+  SHA-256 `2884f0bc20cdd0aeb0b49933622a6939214ebbfa55e9628e19b76a00a07f587d`,
+  and evaluation `hike-20260831-t7-04` SHA-256
+  `055122968710f3b3732b8eb2cd9e0c8bc8d137919b4f8ac2835bbe5b931d533d`.
+  It measures Korean-English mixed-language ASR without scored multi-speaker
+  diarization. The AMI clean IHM evidence consists of source manifest SHA-256
+  `9c395f4519bce95db6121746ed89f732bb21e1cb06189e0d587813ec377f7889`, score
+  SHA-256 `354366ea8607c358a18b4ae014fc2e730f794302fb61cb2dff0c5450d8ca5d34`,
+  hypothesis RTTM SHA-256
+  `16acc3f12f4991e07cd600f8e8a23684645ca5c84c180380ac89cbf7c28d638f`,
+  and evaluation `ami-20260831-t8-02` SHA-256
+  `41336850701d0bd368aab7b726b6e32d0483303864904b3c830753f8f77a15fd`.
+  It measures clean English ASR and four-speaker diarization. Their component results
+  cannot be combined into an end-to-end claim and do not close the mixed-language,
+  multi-speaker C3 gap.
+
+  Four-state comparison `hike-20260831-t9-01`, SHA-256
+  `8b5bdbccd5bb260b9c5cfb1882e8ab63b8f45ff15f38b5f5b4fa44d2f32b5b87`,
+  links no-glossary source manifest
+  `4f3d64276546b482517a2654f462f6c805032740f360ad9be3791ba91d702deb`
+  and derivation
+  `98d8df698a08d765a4d5cbad9e93fc2dc12833f6ef4771f2cefa660d2c0d68b9`
+  with decode-glossary source manifest
+  `4183c7481e14c1a1b6d04531b7d9210956da9ba57d2ee7f97674527e65132bec`
+  and derivation
+  `6f1b9869af14435e60697461a5fbd4d59b7024d8a0be6d366d12d72661a44640`.
+  All five applied changes lacked a unique reference segment with the exact interval,
+  so `correct_to_incorrect` is unknown rather than zero. The current comparator also
+  does not measure every way an already-imperfect segment can become worse; aggregate
+  improvements cannot establish general correction safety.
+
+  Retain the 30-minute human-correction success measure as an unmeasured north-star
+  question, not a current acceptance gate. Revisit raw-quality thresholds after a
+  predeclared calibration campaign and held-out or repeated observation include a
+  sealed mixed-language, multi-speaker fixture. Revisit the `correct_to_incorrect`
+  guardrail after both correction paths have a predeclared adequate nonzero denominator,
+  every applied change is harm-scorable, and the result is scoped to a fixed campaign or
+  expressed as a rate; broaden the scorer before naming it a general correction-harm
+  limit. Revisit the human outcome after one timed local review that records only timing
+  and structural metadata. A private real recording remains optional under D19.
 
 ## Project-wide Done Criteria
 
