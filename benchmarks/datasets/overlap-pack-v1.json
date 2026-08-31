@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "overlap-pack-v1",
+  "window": {
+    "channels": 1,
+    "dtype": "signed-pcm16-little-endian",
+    "sample_rate_hz": 16000,
+    "samples": 480000,
+    "stno_frames": 1500
+  },
+  "sources": {
+    "ami": {
+      "fixture_id": "ami-in1009-ihm-mix-v1",
+      "revision": "ami_public_manual_1.6.2",
+      "use": "parity-only",
+      "windows_s": [[95, 125], [125, 155]]
+    },
+    "fleurs": {
+      "dataset_id": "google/fleurs",
+      "files": {
+        "en_us": {"relative_path": "parquet-data/en_us/test-00000-of-00001.parquet", "size_bytes": 401722686},
+        "it_it": {"relative_path": "parquet-data/it_it/test-00000-of-00001.parquet", "size_bytes": 806437035},
+        "ko_kr": {"relative_path": "parquet-data/ko_kr/test-00000-of-00001.parquet", "size_bytes": 291159866}
+      },
+      "license": "CC-BY-4.0",
+      "revision": "70bb2e84b976b7e960aa89f1c648e09c59f894dd"
+    },
+    "hike": {
+      "fixture_id": "hike-code-switch-v1",
+      "license": "Apache-2.0",
+      "pinned_source_sha256": "cc807d5e31c92df85a46445b28df2b239f7fb33943a35502161af61c1ee8b4d0",
+      "revision": "255609b24005e1fcce3f8b3a452260aaf2872cc9"
+    }
+  },
+  "selection": {
+    "aligner_order": [
+      {"family": "hike", "rows": 12},
+      {"family": "fleurs-en", "rows": 8},
+      {"family": "fleurs-it", "rows": 8}
+    ],
+    "aligner_processes": 2,
+    "community_processes": 10,
+    "constructed_mixtures": {"hike": 6, "fleurs-en": 2, "fleurs-it": 2},
+    "fleurs": {
+      "candidate_rows_per_locale": 8,
+      "candidate_manifest": "seal ordered row IDs, ranks, transcripts, source sample counts, per-item audio hashes, and canonical JSON hash before alignment",
+      "duration_s": {"minimum": 4, "maximum": 12},
+      "pairs_per_locale": 2,
+      "salt_formula": "sha256('maccheroni-overlap-pack-v1' + locale + row_id)",
+      "survivor_rule": "remove only an ineligible row; retain an eligible survivor in rank order; never swap A/B"
+    },
+    "hike_pairs": [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]],
+    "korean_geometry": "all-or-nothing across all 12 fixed HiKE targets",
+    "pair_targets": 20
+  },
+  "mixer": {
+    "formula_version": "binary64-pcm16-v1",
+    "mix_gain": "0.999/mix_peak only when mix_peak>0.999; otherwise 1.0",
+    "normalization_peak": 0.7079457843841379,
+    "overlap_samples": "floor(2*min(n_A,n_B)/5)",
+    "quantizer": "clamp[-1,32767/32768], multiply 32768, ties-to-even, signed int16",
+    "sum_order": "A-then-B"
+  },
+  "activity": {
+    "frame_rule": "center sample 320*f+160 belongs to half-open source support",
+    "shape": ["S", 1500],
+    "stno_class_order": ["silence", "target", "non_target", "overlap"]
+  },
+  "crop": {
+    "context_samples": 320,
+    "coordinates": "original 30-second window",
+    "frame_rule": "a 320-sample frame interval intersects K",
+    "pi_binary64": 3.141592653589793,
+    "post_crop_gain": 1.0
+  },
+  "models": {
+    "aligner": {"id": "Qwen/Qwen3-ForcedAligner-0.6B", "revision": "c7cbfc2048c462b0d63a45797104fc9db3ad62b7"},
+    "diarizer": {"id": "aufklarer/Pyannote-Community-1-CoreML", "revision": "a14e6c420d56e8472850649b016a486fd0acbe81"}
+  },
+  "licenses": {
+    "audio_and_transcript_artifacts": "external create-only pack; never committed",
+    "private_audio": "rejected",
+    "redistribution": "tracked declaration contains rules and public identities only"
+  }
+}

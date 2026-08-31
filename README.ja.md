@@ -21,7 +21,7 @@
 
 ---
 
-**Maccheroni**という名前は、複数の言語が一つの発話に混ざる*macaronic speech*に由来します。各文に英語の製品名が登場する韓国語の会議、語学クラス、多言語通話など、正確な文字起こしが最も難しい会話を文字起こしします。固定されたMLX/CoreMLモデルを使い、すべてをデバイス上で処理します。
+**Maccheroni**という名前は、複数の言語が一つの発話に混ざる*macaronic speech*に由来します。各文に英語の製品名が登場する韓国語の会議、語学クラス、多言語通話など、正確な文字起こしが最も難しい会話を文字起こしします。文字起こしと話者分離は、固定されたMLX/Core MLモデルを使ってデバイス上で実行します。任意のテキストのみの後処理にはリモートのCodexを利用できます。
 
 エクスポート例です。モデルの出力ではなく、説明用のサンプルです。
 
@@ -66,7 +66,7 @@ Maccheroniは個人用ツールです。1台のMacで混在言語の会話を話
 
 ## モデル
 
-すべてのモデルをHugging Face ID + revision + quantizationで固定し、各run manifestに記録します。
+プロダクトで使うモデルとサービスの識別情報は、各run manifestに記録します。ダウンロード可能なモデルは、Hugging Face ID + revision + quantizationで固定します。
 
 | 役割 | モデル | リビジョン | 量子化 |
 |---|---|---|---|
@@ -76,6 +76,8 @@ Maccheroniは個人用ツールです。1台のMacで混在言語の会話を話
 | 話者分離 | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | 後処理（ローカル） | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
 | 後処理（リモート、テキストのみ） | Codex app server経由の`gpt-5.6-sol` | サービス側で管理 | 該当なし |
+
+Qwen3 ASR、Qwen3 ForcedAligner、DiCoWは研究候補です。Appleランタイムとの互換性、変換後の同等性、プロダクト品質の改善はいずれも確立していません。
 
 ## 測定結果
 
@@ -92,7 +94,7 @@ Maccheroniは個人用ツールです。1台のMacで混在言語の会話を話
 | イタリア語の2話者合成音声（10分）、9語の用語集 | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverseサンプル（78分） | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-韓国語とイタリア語が最初の2つの言語プロファイルです。次のフィクスチャセットとして、固定した韓英acceptance pack（HiKEのコードスイッチング抜粋と4話者のAMI会議）を準備済みで、新しい測定結果は得られ次第この表に追加します。
+韓国語とイタリア語が最初の2つの言語プロファイルです。HiKE、FLEURS、AMIは、transport、scoring、conversion parityの研究用fixtureに限ります。学習データからの除外を確認し、overlap音声に特化した測定を行うまで、これらのfixtureでモデルを昇格させることはできません。
 
 78分のサンプルでは、chunk境界での話者安定性が両方の基準話者について1.0でした。固定した600秒のmatrixでは、120秒を超えるMOSS leafがtimestamp構造を完全に失いました。このためproduction leafの上限を120秒に設定しています。詳細は[docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md)にあります。
 
@@ -101,9 +103,7 @@ Maccheroniは個人用ツールです。1台のMacで混在言語の会話を話
   <img src="docs/assets/leaf-cap-light.svg" alt="棒グラフ: 同じ600秒の入力で、120秒leafは5つの正準EOS leafを生成（合格）、240秒と300秒のleafは有効leaf 0（型付きinvalid_eos_output失敗）、240秒の親からの強制リカバリは有効な120秒の子を5つ生成" width="100%">
 </picture>
 
-Correctionの改善幅は仮定ではなく測定で確認します。4-state比較harnessが完了したrunのraw出力とcorrected出力を同じ参照文字起こしと照合し、decode時の用語集注入の有無も比較して、参照から遠ざかった修正を一つずつ数えます。自信を持って間違えた修正が平均の中に隠れることはありません。
-
-完了したrunは凍結されません。`maccheroni postprocess`とアプリは、ASRを再実行せずに封印されたセグメントから新しい修正セットや翻訳セットを導出します。glossaryの保存はすべてcontent-addressedなrevisionとして保持されるため、後の導出では元のrunが記録したglossaryのバイト列をそのまま再利用できます。
+Correctionの改善幅は、raw出力とcorrected出力、decode時の用語集注入の有無を組み合わせた4-state比較で測定し、有害な修正も明示的に数えます。`maccheroni postprocess`とアプリは、ASRを再実行せずに封印されたセグメントから新しい修正セットや翻訳セットを導出できます。保存済みのglossary revisionはcontent-addressedで、元のrunが記録したバイト列をそのまま再利用します。
 
 ## インストール
 
@@ -114,11 +114,11 @@ Correctionの改善幅は仮定ではなく測定で確認します。4-state比
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 315 tests
+swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-build、resource allowlist inventory、strict codesignの各チェックに合格すると、アプリがbundle pathを表示します。モデルweightは初回使用時にダウンロードされます。実行ファイルにはモデルweightもPython環境も含まれません。`maccheroni doctor`はruntimeと固定snapshot、設定済みボリュームごとのストレージ準備状態を検証します。
+build、resource allowlist inventory、strict codesignの各チェックに合格すると、アプリがbundle pathを表示します。実行ファイルにはモデルweightもPython環境も含まれません。`ko-meeting`と`it-dialogue`のprofile定義は付属し、`maccheroni doctor`は観測した依存関係とストレージの状態を報告します。空のcacheからの`ko-meeting` provisioningと`doctor`による完全な検証は、まだ完了していません。間接依存するQwen tokenizerとHugging Face metadataを手動で準備しておく必要があります。
 
 実行ファイルには5つの製品コマンドがあります。
 
@@ -132,7 +132,7 @@ build、resource allowlist inventory、strict codesignの各チェックに合�
 
 `maccheroni help`、`maccheroni doctor --json`、`maccheroni capabilities --json`でヘルプと構造化出力を利用できます。簡潔な[CLIガイド](docs/cli-guide.md)にコマンドと出力の契約を記載しています。文字起こしと話者分離はこのMacで実行されるため、音声はローカルに残ります。
 
-韓国語会議用profile（`ko-meeting`、VibeVoice）とイタリア語対話用profile（`it-dialogue`、MOSS）が付属します。任意のローカル後処理モデルを使う場合は、`zsh scripts/setup-postprocess-runtime.zsh`を実行してください。
+任意のローカル後処理モデルを使う場合は、`zsh scripts/setup-postprocess-runtime.zsh`を実行してください。
 
 ## プライバシー
 
@@ -161,7 +161,7 @@ Issueと対象を絞ったpull requestを歓迎します。Buildとtestのコマ
 | パス | 内容 |
 |---|---|
 | `Sources/` | Swiftパッケージ：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
-| `Tests/` | 24 suite、315件のfixtureベースtest |
+| `Tests/` | fixtureベースのSwift test |
 | `benchmarks/scripts/` | Derived verdictとnegative testを備えたrunner、scorer、correction経路比較harness |
 | `docs/` | 調査digest、source audit、constraint policy、契約（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |

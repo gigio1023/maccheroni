@@ -21,7 +21,7 @@
 
 ---
 
-**Maccheroni**는 여러 언어를 한 발화에 섞는 *macaronic speech*에서 이름을 따왔습니다. 문장마다 영어 제품명이 등장하는 한국어 회의, 어학 수업, 다국어 통화처럼 정확히 옮기기 가장 어려운 대화를 전사합니다. 고정된 MLX/CoreML 모델로 모든 작업을 기기에서 처리합니다.
+**Maccheroni**는 여러 언어를 한 발화에 섞는 *macaronic speech*에서 이름을 따왔습니다. 문장마다 영어 제품명이 등장하는 한국어 회의, 어학 수업, 다국어 통화처럼 정확히 옮기기 가장 어려운 대화를 전사합니다. 전사와 화자 분리는 고정된 MLX/Core ML 모델로 기기에서 실행합니다. 선택 기능인 텍스트 전용 후처리는 원격 Codex를 사용할 수 있습니다.
 
 내보낸 결과의 예시입니다. 모델 출력이 아닌 설명용 샘플입니다.
 
@@ -66,7 +66,7 @@ Maccheroni는 개인용 도구입니다. 한 대의 Mac에서 혼용 언어 대�
 
 ## 모델
 
-모든 모델은 Hugging Face ID + revision + quantization으로 고정하며 각 run manifest에 기록합니다.
+제품 모델과 서비스의 식별 정보는 각 run manifest에 기록합니다. 다운로드할 수 있는 모델은 Hugging Face ID + revision + quantization으로 고정합니다.
 
 | 역할 | 모델 | 리비전 | 양자화 |
 |---|---|---|---|
@@ -76,6 +76,8 @@ Maccheroni는 개인용 도구입니다. 한 대의 Mac에서 혼용 언어 대�
 | 화자 분리 | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | 후처리(로컬) | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
 | 후처리(원격, 텍스트만) | Codex 앱 서버를 통한 `gpt-5.6-sol` | 서비스에서 관리 | 해당 없음 |
+
+Qwen3 ASR, Qwen3 ForcedAligner, DiCoW는 연구 후보입니다. Apple runtime 호환성, 변환 동등성, 제품 품질 개선은 아직 입증하지 못했습니다.
 
 ## 측정 결과
 
@@ -92,7 +94,7 @@ Maccheroni는 개인용 도구입니다. 한 대의 Mac에서 혼용 언어 대�
 | 이탈리아어 화자 2명 합성 녹음(10분), 9개 용어집 | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverse 샘플(78분) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-한국어와 이탈리아어가 첫 두 언어 프로필입니다. 다음 fixture 세트로 고정된 한영 acceptance pack(HiKE 코드스위칭 발췌와 4화자 AMI 회의)을 준비했고 새 측정치는 나오는 대로 이 표에 추가합니다.
+한국어와 이탈리아어가 첫 두 언어 프로필입니다. HiKE, FLEURS, AMI는 전송, 채점, 변환 동등성 검증을 위한 연구용 fixture입니다. 학습 데이터에서 제외됐음을 확인하고 겹침 음성을 별도로 측정하기 전에는 이 fixture로 모델을 승격할 수 없습니다.
 
 78분 샘플에서 chunk 경계의 화자 안정성은 두 기준 화자 모두 1.0이었습니다. 고정된 600초 matrix에서는 120초를 넘긴 MOSS leaf가 timestamp 구조를 완전히 잃었습니다. 이 결과를 근거로 production leaf 상한을 120초로 정했습니다. 자세한 내용은 [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md)에 있습니다.
 
@@ -101,9 +103,7 @@ Maccheroni는 개인용 도구입니다. 한 대의 Mac에서 혼용 언어 대�
   <img src="docs/assets/leaf-cap-light.svg" alt="막대 그래프: 같은 600초 입력에서 120초 leaf는 정준 EOS leaf 5개를 생성(통과), 240초와 300초 leaf는 유효 leaf 0개(타입이 지정된 invalid_eos_output 실패), 240초 부모의 강제 복구는 유효한 120초 자식 5개를 생성" width="100%">
 </picture>
 
-Correction의 개선 폭은 가정이 아니라 측정으로 확인합니다. 4-state 비교 harness가 완료된 run의 raw 출력과 corrected 출력을 같은 기준 전사와 대조합니다. decode 시점 용어집 주입 유무까지 비교하고 기준에서 멀어진 수정을 하나씩 셉니다. 자신 있게 틀린 수정이 평균 속에 숨지 못합니다.
-
-완료된 run은 얼어붙지 않습니다. `maccheroni postprocess`와 앱은 ASR을 재실행하지 않고 봉인된 세그먼트에서 새 교정본이나 번역본을 파생합니다. glossary 저장은 모두 내용 주소 revision으로 보존되므로 나중의 파생이 원래 run이 기록한 glossary 바이트를 그대로 재사용할 수 있습니다.
+교정 개선 폭은 raw 출력과 corrected 출력, decode 시점의 용어집 주입 유무를 조합한 4-state 비교로 측정하며 해로운 수정도 명시적으로 셉니다. `maccheroni postprocess`와 앱은 ASR을 재실행하지 않고 봉인된 세그먼트에서 새 교정본이나 번역본을 파생할 수 있습니다. 저장한 glossary revision은 내용 주소 방식으로 보존하며 원래 run이 기록한 바이트를 그대로 재사용합니다.
 
 ## 설치
 
@@ -114,11 +114,11 @@ Correction의 개선 폭은 가정이 아니라 측정으로 확인합니다. 4-
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 315 tests
+swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-build, resource allowlist inventory, strict codesign 검사를 모두 통과하면 앱이 bundle 경로를 출력합니다. 모델 weight는 처음 사용할 때 다운로드합니다. 실행 파일은 모델 weight나 Python 환경을 포함하지 않습니다. `maccheroni doctor`는 runtime과 고정된 snapshot, 설정된 볼륨별 저장소 준비 상태를 검증합니다.
+build, resource allowlist inventory, strict codesign 검사를 모두 통과하면 앱이 bundle 경로를 출력합니다. 실행 파일은 모델 weight나 Python 환경을 포함하지 않습니다. `ko-meeting`과 `it-dialogue` 프로필 정의를 제공하며 `maccheroni doctor`는 관찰한 의존성과 저장소 상태를 보고합니다. 빈 cache에서 `ko-meeting`을 준비하고 `doctor`로 완전히 검증하는 과정은 아직 완결되지 않았습니다. 간접 Qwen tokenizer와 Hugging Face metadata를 수동으로 준비해야 합니다.
 
 실행 파일은 다섯 가지 제품 명령을 제공합니다.
 
@@ -132,7 +132,7 @@ build, resource allowlist inventory, strict codesign 검사를 모두 통과하�
 
 `maccheroni help`, `maccheroni doctor --json`, `maccheroni capabilities --json`으로 도움말과 구조화된 출력을 확인할 수 있습니다. 간결한 [CLI 가이드](docs/cli-guide.md)에서 명령과 출력 계약을 확인하세요. 전사와 화자 분리는 이 Mac에서 실행하므로 오디오는 로컬에 남습니다.
 
-한국어 회의용 profile(`ko-meeting`, VibeVoice)과 이탈리아어 대화용 profile(`it-dialogue`, MOSS)을 제공합니다. 선택 기능인 로컬 후처리 모델을 사용하려면 `zsh scripts/setup-postprocess-runtime.zsh`를 실행하세요.
+선택 기능인 로컬 후처리 모델을 사용하려면 `zsh scripts/setup-postprocess-runtime.zsh`를 실행하세요.
 
 ## 개인정보 보호
 
@@ -161,7 +161,7 @@ Issue와 범위를 명확히 한 pull request를 환영합니다. Build 및 test
 | 경로 | 내용 |
 |---|---|
 | `Sources/` | Swift 패키지: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 24개 suite에 걸친 fixture 기반 test 315개 |
+| `Tests/` | fixture 기반 Swift test |
 | `benchmarks/scripts/` | Derived verdict와 negative test를 포함한 runner, scorer, correction 경로 비교 harness |
 | `docs/` | 조사 digest, source audit, constraint policy, 계약(JSON schema), UI design |
 | `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |

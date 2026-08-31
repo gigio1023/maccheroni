@@ -21,7 +21,7 @@
 
 ---
 
-**Maccheroni** (de *macaronic speech*, des énoncés qui mélangent les langues) transcrit les conversations les plus difficiles à transcrire correctement : réunions en coréen où chaque phrase contient des noms de produits anglais, cours de langue, appels multilingues. Tout s’exécute sur l’appareil avec des modèles MLX/CoreML épinglés.
+**Maccheroni** (de *macaronic speech*, des énoncés qui mélangent les langues) transcrit les conversations les plus difficiles à transcrire correctement : réunions en coréen où chaque phrase contient des noms de produits anglais, cours de langue, appels multilingues. La transcription audio et la diarisation s’exécutent localement avec des modèles MLX/CoreML épinglés ; le post-traitement Codex facultatif n’envoie que du texte et peut s’exécuter à distance.
 
 Voici à quoi ressemble un export (exemple illustratif, et non sortie d’un modèle) :
 
@@ -67,7 +67,7 @@ Les feuilles en échec sont redécoupées dans des limites typées (minimum de 3
 
 ## Modèles
 
-Chaque modèle est épinglé par identifiant Hugging Face + révision + quantification et consigné dans tous les manifestes d’exécution.
+Les identités des modèles et services du produit sont consignées dans chaque manifeste d’exécution. Les modèles téléchargeables sont épinglés par identifiant Hugging Face, révision et quantification.
 
 | Rôle | Modèle | Révision | Quantification |
 |---|---|---|---|
@@ -77,6 +77,8 @@ Chaque modèle est épinglé par identifiant Hugging Face + révision + quantifi
 | Diarisation | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | Post-traitement (local) | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
 | Post-traitement (distant, texte uniquement) | `gpt-5.6-sol` via le serveur d’application Codex | gérée par le service | s.o. |
+
+Qwen3 ASR/ForcedAligner et DiCoW sont des candidats de recherche. La compatibilité avec les environnements d’exécution Apple, la parité de conversion et les gains de qualité pour le produit restent à établir.
 
 ## Résultats mesurés
 
@@ -93,7 +95,7 @@ Tous les résultats proviennent de jeux de test publics ou synthétiques ; les i
 | Synthèse italienne à 2 locuteurs (10 min), glossaire de 9 termes | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | Échantillon VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-Le coréen et l’italien sont les deux premiers profils de langue. Un pack d’acceptation coréen-anglais épinglé — extraits HiKE avec alternance codique et une réunion AMI à quatre locuteurs — est préparé comme prochain jeu de fixtures, et les nouvelles mesures rejoignent ce tableau dès qu’elles sont disponibles.
+Le coréen et l’italien sont les deux premiers profils de langue. HiKE, FLEURS et AMI sont des fixtures de recherche réservées aux contrôles de transport, de notation et de parité de conversion. Elles ne peuvent pas justifier la promotion d’un modèle sans prouver d’abord leur absence de ses données d’entraînement et mesurer séparément la parole superposée.
 
 Stabilité des locuteurs aux frontières des fragments sur l’échantillon de 78 minutes : 1.0 pour les deux locuteurs de référence. Une matrice fixe de 600 secondes a montré que les feuilles MOSS de plus de 120 s perdent entièrement la structure des horodatages. C’est pourquoi la limite de production est fixée à 120 s ; les détails figurent dans [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 
@@ -102,9 +104,7 @@ Stabilité des locuteurs aux frontières des fragments sur l’échantillon de 7
   <img src="docs/assets/leaf-cap-light.svg" alt="Diagramme en barres : sur la même entrée de 600 secondes, les feuilles de 120 s produisent 5 feuilles canoniques avec fin de séquence (réussite), celles de 240 et 300 s produisent 0 feuille valide (échecs typés invalid_eos_output), et la récupération forcée depuis des parents de 240 s produit 5 enfants valides de 120 s" width="100%">
 </picture>
 
-Les gains de la correction sont mesurés, pas supposés. Un banc de comparaison à quatre états évalue la sortie brute et la sortie corrigée d’une exécution terminée contre la même référence, avec et sans injection du glossaire au décodage, et compte chaque correction appliquée qui a éloigné un segment de la référence. Une réparation fausse mais sûre d’elle ne peut pas se cacher dans une moyenne.
-
-Une exécution terminée n’est pas figée. `maccheroni postprocess` et l’application dérivent de nouveaux ensembles de correction ou de traduction à partir des segments scellés sans réexécuter l’ASR, et chaque enregistrement du glossaire est conservé comme une révision adressée par contenu, si bien qu’une dérivation ultérieure peut réutiliser exactement les octets du glossaire enregistrés par l’exécution d’origine.
+Les gains de la correction sont mesurés par un banc à quatre états qui compare la sortie brute et corrigée à une même référence, avec et sans glossaire au décodage, et compte chaque changement qui éloigne un segment de celle-ci. `maccheroni postprocess` et l’application peuvent dériver de nouveaux ensembles de correction ou de traduction à partir des segments scellés sans réexécuter l’ASR ; chaque enregistrement du glossaire conserve une révision adressée par contenu afin de réutiliser les octets exacts consignés par l’exécution d’origine.
 
 ## Installation
 
@@ -115,11 +115,11 @@ Prérequis : Mac Apple Silicon, macOS 26, Xcode 26, [uv](https://docs.astral.sh/
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 315 tests
+swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-L’application affiche le chemin de son bundle lorsque la compilation, l’inventaire des ressources autorisées et les contrôles stricts de signature du code réussissent. Les poids des modèles se téléchargent à la première utilisation. L’exécutable n’inclut ni poids de modèles ni environnements Python ; `maccheroni doctor` vérifie les environnements d’exécution, les instantanés épinglés et l’état de préparation du stockage par volume configuré.
+L’application affiche le chemin de son bundle lorsque la compilation, l’inventaire des ressources autorisées et les contrôles stricts de signature du code réussissent. L’exécutable n’inclut ni poids de modèles ni environnements Python, mais inclut les définitions des profils `ko-meeting` et `it-dialogue`. À partir d’un cache vide, le cycle complet de provisionnement et de validation par `doctor` pour `ko-meeting` reste incomplet : le tokenizer Qwen indirect et les métadonnées Hugging Face doivent être préparés manuellement.
 
 L’exécutable propose cinq commandes du produit :
 
@@ -133,7 +133,7 @@ L’exécutable propose cinq commandes du produit :
 
 Utilisez `maccheroni help`, `maccheroni doctor --json` et `maccheroni capabilities --json` pour consulter l’aide et obtenir une sortie structurée. Le [guide CLI](docs/cli-guide.md) concis décrit les contrats des commandes et des sorties. La transcription et la séparation des locuteurs s’exécutent sur ce Mac, donc l’audio reste local.
 
-Des profils sont fournis pour les réunions en coréen (`ko-meeting`, VibeVoice) et les dialogues en italien (`it-dialogue`, MOSS). Pour le modèle facultatif de post-traitement local, exécutez `zsh scripts/setup-postprocess-runtime.zsh`.
+Pour le modèle facultatif de post-traitement local, exécutez `zsh scripts/setup-postprocess-runtime.zsh`.
 
 ## Confidentialité
 
@@ -162,7 +162,7 @@ Les signalements de problèmes et les pull requests ciblées sont les bienvenus.
 | Chemin | Contenu |
 |---|---|
 | `Sources/` | Package Swift : Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 315 tests fondés sur des fixtures, répartis en 24 suites |
+| `Tests/` | Tests fondés sur des fixtures |
 | `benchmarks/scripts/` | Outils d’exécution et de notation et le banc de comparaison des chemins de correction, avec verdicts dérivés et tests négatifs |
 | `docs/` | Synthèse de recherche, audits des sources, politique de contraintes, contrats (schémas JSON), conception de l’interface |
 | `scripts/` | Compilation du bundle de l’application, compilation du harness MOSS, configuration de l’environnement de post-traitement |

@@ -1,4 +1,4 @@
-# T1 Public Evaluation Datasets
+# Public Evaluation Datasets
 
 This directory contains only provenance, pinned revisions, and reproducible acquisition
 commands. Downloaded audio and source Parquet files remain local under
@@ -15,10 +15,10 @@ bash benchmarks/datasets/acquire-public-datasets.sh
 uv run --with pyarrow python benchmarks/datasets/check-public-datasets.py
 ```
 
-The 2026-08-03 T1 acquisition confirmed local authentication with `hf auth whoami`.
 The script pins every file to a commit revision. The default destination is
 `benchmarks/samples/public/`; pass another local path as the first argument when needed.
-For example, run `bash benchmarks/datasets/acquire-public-datasets.sh /tmp/maccheroni-t1`.
+For example, run
+`bash benchmarks/datasets/acquire-public-datasets.sh /tmp/maccheroni-public-datasets`.
 
 ## ASR: FLEURS Test Split by Language
 
@@ -32,8 +32,8 @@ The official FLEURS dataset card states that each language configuration contain
 test examples and the features listed above (`audio`, `transcription`,
 `raw_transcription`, `id`). However, `check-public-datasets.py` reads 382/865/647 rows
 from the actual pinned Parquet files at the same revision. This contradiction remains
-unresolved. T4 must decide whether to retain all 3 complete files as its final scope
-or find a separate official export that matches the card counts. The source file sizes
+unresolved. Consumers must record whether they use the three complete pinned files or
+a separately verified official export that matches the card counts. The source file sizes
 are 291,159,866 B for Korean, 806,437,035 B for Italian, and 401,722,686 B for English.
 These 3 files provide per-language ASR baselines for single-speaker read speech.
 Do not treat them as representative of meeting speech quality, diarization, or
@@ -50,8 +50,8 @@ This distribution is the official
 preprocessed into Parquet by `diarizers`. The selected shard is not the complete dev
 split. The dataset card's count of 216 clips across all 5 dev shards conflicts with
 the example split counts shown on the card: `train=136`, `validation=18`, `test=16`.
-T5 must therefore inspect the actual Parquet row count and timestamp arrays and record
-the scope used. Do not use the example split counts in this README as ground truth.
+Inspect the actual Parquet row count and timestamp arrays and record the scope used. Do
+not use the example split counts in this README as ground truth.
 
 ## Korean-English Code-Switching: HiKE
 
@@ -61,10 +61,9 @@ the scope used. Do not use the example split counts in this README as ground tru
 
 The official [HiKE dataset card](https://huggingface.co/datasets/thetaone-ai/HiKE)
 describes a natural Korean-English code-switching ASR benchmark and specifies the 9
-features above and 1,121 test examples. T4 prioritizes `text_normalized` for general ASR
-scores and preserves `text_pier_labeled`, `loanwords`, and `cs_level` for glossary recall
-and code-switching analysis. Do not replace the normalization or labels with arbitrary
-values.
+features above and 1,121 test examples. Use `text_normalized` for general ASR scores and
+preserve `text_pier_labeled`, `loanwords`, and `cs_level` for glossary recall and
+code-switching analysis. Do not replace the normalization or labels with arbitrary values.
 
 ## Scope and Follow-Up Cautions
 
@@ -74,5 +73,9 @@ values.
 - FLEURS and HiKE provide per-utterance audio and transcript ground truth. VoxConverse
   provides no transcript ground truth and provides only diarization ground truth. Do
   not force ASR WER and DER into the same material.
+- No evidence here proves that FLEURS or HiKE was excluded from an evaluated model's
+  training data. Use them for transport, scoring, and conversion-parity diagnostics,
+  not product-quality promotion. The frozen overlap construction is documented in
+  [`overlap-pack-v1.md`](./overlap-pack-v1.md).
 - Every model runner must record the model's Hugging Face ID, revision, and quantization
   in the run manifest. Dataset acquisition does not use a model.

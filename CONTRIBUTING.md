@@ -13,7 +13,7 @@ git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
 swift build && swift test          # full Swift suite
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
-.build/debug/maccheroni doctor     # verifies runtimes and pinned model snapshots
+.build/debug/maccheroni doctor     # reports observed runtime and model readiness
 ```
 
 For the optional local post-processing model, run
@@ -21,7 +21,7 @@ For the optional local post-processing model, run
 
 ## Testing
 
-Swift — 315 fixture-based tests in 24 suites:
+Swift fixture suites:
 
 ```bash
 swift test                                        # everything
@@ -34,6 +34,10 @@ Python contract suites:
 uv run --project Sources/MaccheroniASR/Python python -m unittest discover -s Sources/MaccheroniASR/Python/tests
 uv run --project benchmarks/scripts/scoring python -m unittest benchmarks/scripts/scoring/tests/test_evaluate_moss_long_audio.py
 uv run --project benchmarks/scripts/scoring python -m unittest benchmarks/scripts/scoring/tests/test_evaluate_t14.py
+uv run --project benchmarks/scripts/scoring python -m unittest benchmarks.scripts.scoring.tests.test_speaker_attributed
+uv run --project benchmarks/scripts/scoring python -m unittest benchmarks.scripts.dicow.tests.test_contract
+uv run --project benchmarks/env/dicow-aligner python -m unittest benchmarks.scripts.dicow.tests.test_inspect benchmarks.scripts.dicow.tests.test_preflight
+uv run --project benchmarks/env/dicow-reference python -m unittest benchmarks.datasets.tests.test_overlap_pack
 uv run --no-project python -m unittest benchmarks/scripts/runners/tests/test_moss_long_audio_eval_gate.py
 ```
 
@@ -92,11 +96,10 @@ What "verified" means for the core claims:
 | Originals immutable through post-processing | Byte-identical hash assertions before/after correction and translation | `swift test` |
 | Codex lane sends no audio or paths | Invocation-argument and payload fixtures; checksummed live roundtrip evidence | `swift test` |
 
-The T14 evaluator and the long-audio matrix need local run artifacts that are
-not in the repo, so those columns are owner-side verification; everything an
-external contributor needs runs from `swift test` and the Python suites above.
-Evaluation IDs and SHA-256 seals for the preserved runs are recorded in
-[docs/](docs/).
+The T14 evaluator, long-audio matrix, and sealed DiCoW integration replays need local
+artifacts that are not in the repository. Portable suites skip those owner-side paths
+unless their explicit environment variables are present. Evaluation IDs and SHA-256
+seals for preserved runs are recorded in [docs/](docs/).
 
 **Not verified:** real-world accents, overlapping speech, and noisy rooms
 beyond the public/synthetic fixtures; the OS-level read scope of the Codex app-server

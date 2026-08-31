@@ -1,0 +1,12 @@
+[project]
+name = "maccheroni-dicow-aligner"
+version = "0.0.0"
+requires-python = "==3.12.*"
+dependencies = [
+  "mlx==0.32.0",
+  "mlx-audio==0.4.6",
+  "soynlp==0.0.493",
+]
+
+[tool.uv]
+package = false

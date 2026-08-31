@@ -21,7 +21,7 @@
 
 ---
 
-**Maccheroni** (de *macaronic speech*, es decir, enunciados que mezclan idiomas) transcribe las conversaciones más difíciles de transcribir correctamente: reuniones en coreano con nombres de productos en inglés en cada frase, clases de idiomas y llamadas multilingües. Todo se ejecuta en el dispositivo con modelos MLX/CoreML fijados a versiones concretas.
+**Maccheroni** (de *macaronic speech*, es decir, enunciados que mezclan idiomas) transcribe las conversaciones más difíciles de transcribir correctamente: reuniones en coreano con nombres de productos en inglés en cada frase, clases de idiomas y llamadas multilingües. La transcripción del audio y la diarización se ejecutan localmente con modelos MLX/CoreML fijados; el posprocesamiento opcional mediante Codex solo envía texto y puede ejecutarse de forma remota.
 
 Así se ve una exportación (muestra ilustrativa, no es una salida del modelo):
 
@@ -67,7 +67,7 @@ Los segmentos fallidos se vuelven a dividir dentro de límites tipados (mínimo 
 
 ## Modelos
 
-Cada modelo se fija mediante ID de Hugging Face + revisión + cuantización y queda registrado en el manifiesto de cada ejecución.
+Las identidades de los modelos y servicios del producto quedan registradas en el manifiesto de cada ejecución. Los modelos descargables se fijan mediante ID de Hugging Face, revisión y cuantización.
 
 | Función | Modelo | Revisión | Cuantización |
 |---|---|---|---|
@@ -77,6 +77,8 @@ Cada modelo se fija mediante ID de Hugging Face + revisión + cuantización y qu
 | Diarización | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | Posprocesamiento (local) | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
 | Posprocesamiento (remoto, solo texto) | `gpt-5.6-sol` mediante el servidor de aplicaciones de Codex | gestionado por el servicio | n/a |
+
+Qwen3 ASR/ForcedAligner y DiCoW son candidatos de investigación. Aún no se han establecido la compatibilidad con los entornos de ejecución de Apple, la paridad de conversión ni las mejoras en la calidad del producto.
 
 ## Resultados medidos
 
@@ -93,7 +95,7 @@ Todos proceden de fixtures públicas o sintéticas. Los ID de evaluación y los 
 | Conversación sintética en italiano con 2 hablantes (10 min), glosario de 9 términos | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | Muestra de VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-El coreano y el italiano son los dos primeros perfiles de idioma. Como siguiente conjunto de fixtures está preparado un paquete de aceptación coreano-inglés fijado — extractos de HiKE con cambio de código y una reunión de AMI con cuatro hablantes — y las nuevas mediciones se suman a esta tabla a medida que llegan.
+El coreano y el italiano son los dos primeros perfiles de idioma. HiKE, FLEURS y AMI son fixtures de investigación que solo sirven para comprobar el transporte, la puntuación y la paridad de conversión. No pueden justificar promover un modelo sin demostrar primero que no forman parte de sus datos de entrenamiento y medir por separado el habla solapada.
 
 La estabilidad de los hablantes en los límites de los segmentos de la muestra de 78 minutos fue de 1.0 para ambos hablantes de referencia. Una matriz fija de 600 segundos demostró que los segmentos MOSS de más de 120 s pierden por completo la estructura de marcas de tiempo. Por eso, el límite de producción es de 120 s; los detalles están en [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 
@@ -102,9 +104,7 @@ La estabilidad de los hablantes en los límites de los segmentos de la muestra d
   <img src="docs/assets/leaf-cap-light.svg" alt="Gráfico de barras: con la misma entrada de 600 segundos, los segmentos de 120 s producen 5 hojas canónicas con fin de secuencia (aprobado), los de 240 y 300 s producen 0 hojas válidas (fallos tipados invalid_eos_output) y la recuperación forzada desde padres de 240 s produce 5 hijos válidos de 120 s" width="100%">
 </picture>
 
-Las mejoras de la corrección se miden, no se suponen. Un arnés de comparación de cuatro estados evalúa la salida bruta y la corregida de una ejecución completada contra la misma referencia, con y sin inyección del glosario en la decodificación, y cuenta cada corrección aplicada que alejó un segmento de la referencia. Una reparación errónea pero segura de sí misma no puede esconderse en un promedio.
-
-Una ejecución completada no queda congelada. `maccheroni postprocess` y la aplicación derivan nuevos conjuntos de corrección o traducción a partir de los segmentos sellados sin volver a ejecutar el ASR, y cada guardado del glosario se conserva como una revisión direccionada por contenido, de modo que una derivación posterior puede reutilizar exactamente los bytes del glosario que registró la ejecución original.
+Las mejoras de la corrección se miden con un arnés de cuatro estados que compara la salida bruta y la corregida contra una misma referencia, con y sin glosario durante la decodificación, y cuenta cada cambio que aleja un segmento de ella. `maccheroni postprocess` y la aplicación pueden derivar nuevos conjuntos de corrección o traducción a partir de los segmentos sellados sin repetir el ASR; cada guardado del glosario conserva una revisión direccionada por contenido para poder reutilizar los bytes exactos registrados en la ejecución original.
 
 ## Instalación
 
@@ -115,11 +115,11 @@ Requisitos: Mac con Apple Silicon, macOS 26, Xcode 26 y [uv](https://docs.astral
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 315 tests
+swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-La aplicación muestra la ruta de su paquete cuando la compilación, el inventario de recursos permitidos y las comprobaciones estrictas de firma de código terminan correctamente. Los pesos de los modelos se descargan con el primer uso. El ejecutable no incluye pesos de modelos ni entornos de Python; `maccheroni doctor` verifica los entornos de ejecución, las instantáneas fijadas y la preparación del almacenamiento por volumen configurado.
+La aplicación muestra la ruta de su paquete cuando la compilación, el inventario de recursos permitidos y las comprobaciones estrictas de firma de código terminan correctamente. El ejecutable no incluye pesos de modelos ni entornos de Python, pero sí las definiciones de perfil `ko-meeting` y `it-dialogue`. Desde una caché limpia, el ciclo completo de aprovisionamiento y `doctor` para `ko-meeting` sigue incompleto: el tokenizador indirecto de Qwen y los metadatos de Hugging Face deben prepararse manualmente.
 
 El ejecutable ofrece cinco comandos de producto:
 
@@ -133,7 +133,7 @@ El ejecutable ofrece cinco comandos de producto:
 
 Usa `maccheroni help`, `maccheroni doctor --json` y `maccheroni capabilities --json` para consultar la ayuda y obtener resultados estructurados. La breve [guía de la CLI](docs/cli-guide.md) describe los contratos de los comandos y la salida. La transcripción y la separación de hablantes se ejecutan en este Mac, por lo que el audio permanece en local.
 
-Se incluyen perfiles para reuniones en coreano (`ko-meeting`, VibeVoice) y diálogos en italiano (`it-dialogue`, MOSS). Para utilizar el modelo local opcional de posprocesamiento, ejecuta `zsh scripts/setup-postprocess-runtime.zsh`.
+Para utilizar el modelo local opcional de posprocesamiento, ejecuta `zsh scripts/setup-postprocess-runtime.zsh`.
 
 ## Privacidad
 
@@ -162,7 +162,7 @@ Se aceptan issues y pull requests específicos. Los comandos de compilación y p
 | Ruta | Contenido |
 |---|---|
 | `Sources/` | Paquete Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 315 pruebas basadas en fixtures en 24 suites |
+| `Tests/` | Pruebas basadas en fixtures |
 | `benchmarks/scripts/` | Ejecutores, evaluadores y el arnés de comparación de vías de corrección, con veredictos derivados y pruebas negativas |
 | `docs/` | Resumen de investigación, auditorías de código fuente, política de restricciones, contratos (esquemas JSON), diseño de interfaz |
 | `scripts/` | Compilación del paquete de la aplicación, compilación del harness MOSS, configuración del entorno de posprocesamiento |
