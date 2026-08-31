@@ -1,7 +1,48 @@
 import AVFoundation
+import CryptoKit
 import Darwin
 import Foundation
 import MaccheroniCore
+
+struct RuntimePayloadFile: Sendable {
+    let relativePath: String
+    let sha256: String
+}
+
+struct RuntimePayloadPin: Sendable {
+    let files: [RuntimePayloadFile]
+    let treeSHA256: String
+}
+
+private let sileroHarnessRuntimePayload = RuntimePayloadPin(
+    files: [
+        RuntimePayloadFile(
+            relativePath: "config.json",
+            sha256: "459e764d58cdc13f3db6878adfdf8a29b5fd467ad1f4ef2161137cc115339c81"
+        ),
+        RuntimePayloadFile(
+            relativePath: "silero_vad.mlmodelc/analytics/coremldata.bin",
+            sha256: "b777c3751d72b7430eac7f8544769a3d918faf77c15db184fec30e44c56007a3"
+        ),
+        RuntimePayloadFile(
+            relativePath: "silero_vad.mlmodelc/coremldata.bin",
+            sha256: "f6fcd92c3132c9c718e5f54e0e770a8c8075beaa50a5b212a6287273b4ddae67"
+        ),
+        RuntimePayloadFile(
+            relativePath: "silero_vad.mlmodelc/metadata.json",
+            sha256: "1b953eb3818e7092deedd96e976c05354f77beb2ddc2976fe416af17e47f62d2"
+        ),
+        RuntimePayloadFile(
+            relativePath: "silero_vad.mlmodelc/model.mil",
+            sha256: "b0a1384c4a664697989d9eb9cfb166b4b85f151206aeefd1bfa391ef9e5ad08f"
+        ),
+        RuntimePayloadFile(
+            relativePath: "silero_vad.mlmodelc/weights/weight.bin",
+            sha256: "83210545de90c65195e8d6db1b349b7e5c31f989f48d0a908a8dc0e2f586e5f9"
+        ),
+    ],
+    treeSHA256: "edd772745342372800516b0da27556cf4aae1db386784620b2590183d94da346"
+)
 
 public enum VoiceActivityKind: String, Codable, Equatable, Sendable {
     case speech
@@ -81,19 +122,24 @@ public struct SileroVADProvenance: Equatable, Sendable {
     }
 }
 
-/// Executes the installed `speech vad-stream` Silero VAD path. It never substitutes an energy VAD.
+/// Executes the pinned Silero VAD command. It never substitutes an energy VAD.
 public struct SpeechSileroVADAdapter: VoiceActivityDetecting, Sendable {
     public let executableURL: URL
     public let modelCacheURL: URL
     public let revisionMarkerURL: URL
+    /// When set, `executableURL` is the pinned local harness rather than the
+    /// stock speech CLI. The harness receives this exact repository root.
+    public let harnessModelRepositoryURL: URL?
     public let provenance: SileroVADProvenance
     public let runtime: BackendDescriptor
     public let timeoutS: TimeInterval
+    private let harnessRuntimePayload: RuntimePayloadPin
 
     public init(
         executableURL: URL = URL(fileURLWithPath: "/opt/homebrew/bin/speech"),
         modelCacheURL: URL = Self.defaultModelCacheURL(),
         revisionMarkerURL: URL = Self.defaultRevisionMarkerURL(),
+        harnessModelRepositoryURL: URL? = nil,
         runtime: BackendDescriptor = BackendDescriptor(name: "speech", version: "0.0.23"),
         timeoutS: TimeInterval = 300,
         provenance: SileroVADProvenance = .init()
@@ -101,9 +147,22 @@ public struct SpeechSileroVADAdapter: VoiceActivityDetecting, Sendable {
         self.executableURL = executableURL
         self.modelCacheURL = modelCacheURL
         self.revisionMarkerURL = revisionMarkerURL
+        self.harnessModelRepositoryURL = harnessModelRepositoryURL
         self.runtime = runtime
         self.timeoutS = timeoutS
         self.provenance = provenance
+        self.harnessRuntimePayload = sileroHarnessRuntimePayload
+    }
+
+    init(testing adapter: SpeechSileroVADAdapter, harnessRuntimePayload: RuntimePayloadPin) {
+        self.executableURL = adapter.executableURL
+        self.modelCacheURL = adapter.modelCacheURL
+        self.revisionMarkerURL = adapter.revisionMarkerURL
+        self.harnessModelRepositoryURL = adapter.harnessModelRepositoryURL
+        self.runtime = adapter.runtime
+        self.timeoutS = adapter.timeoutS
+        self.provenance = adapter.provenance
+        self.harnessRuntimePayload = harnessRuntimePayload
     }
 
     public static func defaultModelCacheURL() -> URL {
@@ -130,21 +189,46 @@ public struct SpeechSileroVADAdapter: VoiceActivityDetecting, Sendable {
                 modelCacheURL: modelCacheURL
             )
         }
+        if let repositoryURL = harnessModelRepositoryURL {
+            let expectedModelURL = repositoryURL.appendingPathComponent(
+                "silero_vad.mlmodelc",
+                isDirectory: true
+            )
+            guard expectedModelURL.standardizedFileURL == modelCacheURL.standardizedFileURL,
+                    runtimePayloadIsPinned(
+                        at: repositoryURL,
+                        expected: harnessRuntimePayload
+                    )
+            else {
+                throw VoiceActivityError.speechSileroUnavailable(
+                    executableURL: executableURL,
+                    modelCacheURL: modelCacheURL
+                )
+            }
+        }
 
         let process = Process()
         let captures = try ProcessCaptureFiles.create()
         defer { captures.remove() }
         process.executableURL = executableURL
-        process.arguments = [
-            "vad-stream", audioURL.path,
-            "--engine", "coreml",
-            "--model", provenance.model.hfModelID,
-            "--json",
-        ]
-        process.environment = ProcessInfo.processInfo.environment.merging(
-            ["HF_HUB_OFFLINE": "1"],
-            uniquingKeysWith: { _, offlineValue in offlineValue }
-        )
+        if let repositoryURL = harnessModelRepositoryURL {
+            process.arguments = [
+                "vad-stream", audioURL.path,
+                "--cache-dir", repositoryURL.path,
+                "--json",
+            ]
+        } else {
+            process.arguments = [
+                "vad-stream", audioURL.path,
+                "--engine", "coreml",
+                "--model", provenance.model.hfModelID,
+                "--json",
+            ]
+            process.environment = ProcessInfo.processInfo.environment.merging(
+                ["HF_HUB_OFFLINE": "1"],
+                uniquingKeysWith: { _, offlineValue in offlineValue }
+            )
+        }
         process.standardOutput = captures.standardOutput
         process.standardError = captures.standardError
         try process.run()
@@ -154,11 +238,10 @@ public struct SpeechSileroVADAdapter: VoiceActivityDetecting, Sendable {
         }
         try captures.closeForReading()
 
-        let stderr = String(data: try Data(contentsOf: captures.standardErrorURL), encoding: .utf8) ?? ""
         guard process.terminationStatus == 0 else {
             throw VoiceActivityError.executionFailed(
                 exitCode: process.terminationStatus,
-                message: stderr
+                message: "diagnostic unavailable"
             )
         }
         let outputText = String(data: try Data(contentsOf: captures.standardOutputURL), encoding: .utf8) ?? ""
@@ -174,9 +257,7 @@ public struct SpeechSileroVADAdapter: VoiceActivityDetecting, Sendable {
             if let voiceActivityError = error as? VoiceActivityError {
                 throw voiceActivityError
             }
-            throw VoiceActivityError.invalidOutput(
-                "speech vad-stream did not emit valid Silero JSON: \(error)"
-            )
+            throw VoiceActivityError.invalidOutput("VAD harness did not emit valid Silero JSON.")
         }
     }
 
@@ -235,6 +316,52 @@ public struct SpeechSileroVADAdapter: VoiceActivityDetecting, Sendable {
     }
 }
 
+private func runtimePayloadIsPinned(
+    at root: URL,
+    expected: RuntimePayloadPin
+) -> Bool {
+    do {
+        var treeHasher = SHA256()
+        for expectedFile in expected.files {
+            let file = root.appendingPathComponent(expectedFile.relativePath)
+            let values = try file.resourceValues(
+                forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+            )
+            guard values.isRegularFile == true,
+                    values.isSymbolicLink != true else {
+                return false
+            }
+
+            let name = Data(expectedFile.relativePath.utf8)
+            var nameLength = UInt32(name.count).bigEndian
+            withUnsafeBytes(of: &nameLength) {
+                treeHasher.update(data: Data($0))
+            }
+            treeHasher.update(data: name)
+
+            var fileHasher = SHA256()
+            let handle = try FileHandle(forReadingFrom: file)
+            defer { try? handle.close() }
+            while true {
+                let data = try handle.read(upToCount: 1_048_576) ?? Data()
+                if data.isEmpty { break }
+                fileHasher.update(data: data)
+                treeHasher.update(data: data)
+            }
+            guard hexDigest(fileHasher.finalize()) == expectedFile.sha256 else {
+                return false
+            }
+        }
+        return hexDigest(treeHasher.finalize()) == expected.treeSHA256
+    } catch {
+        return false
+    }
+}
+
+private func hexDigest<D: Sequence>(_ digest: D) -> String where D.Element == UInt8 {
+    digest.map { String(format: "%02x", $0) }.joined()
+}
+
 private final class ProcessCaptureFiles: @unchecked Sendable {
     let standardOutputURL: URL
     let standardErrorURL: URL
@@ -262,6 +389,14 @@ private final class ProcessCaptureFiles: @unchecked Sendable {
                 FileManager.default.createFile(atPath: standardErrorURL.path, contents: nil) else {
             throw VoiceActivityError.invalidOutput("Could not create VAD process capture files.")
         }
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: standardOutputURL.path
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: standardErrorURL.path
+        )
         return try ProcessCaptureFiles(
             standardOutputURL: standardOutputURL,
             standardErrorURL: standardErrorURL,

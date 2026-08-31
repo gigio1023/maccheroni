@@ -4,6 +4,62 @@ import Darwin
 import Foundation
 import MaccheroniCore
 
+struct RuntimePayloadFile: Sendable {
+    let relativePath: String
+    let sha256: String
+}
+
+struct RuntimePayloadPin: Sendable {
+    let files: [RuntimePayloadFile]
+    let treeSHA256: String
+}
+
+private let community1HarnessRuntimePayload = RuntimePayloadPin(
+    files: [
+        RuntimePayloadFile(
+            relativePath: "config.json",
+            sha256: "6bf96d3f361ad1b5bcfbcf2bdf70a2072d211fefd875700231e1f3b2fb69e713"
+        ),
+        RuntimePayloadFile(
+            relativePath: "embedding.mlmodelc/analytics/coremldata.bin",
+            sha256: "f4b5ad2e2ea815e334acaf162fa42e999ecd9881ecac4166ff43d6bc1d9322d6"
+        ),
+        RuntimePayloadFile(
+            relativePath: "embedding.mlmodelc/coremldata.bin",
+            sha256: "3ad7a2f309143107fc5394f34592ce80482bf6dbe6831e0588cff44cbaa609e5"
+        ),
+        RuntimePayloadFile(
+            relativePath: "embedding.mlmodelc/model.mil",
+            sha256: "66d248aad00b3e103151097a9bbba558402933c0cf31c010f66b086ac94d7aaf"
+        ),
+        RuntimePayloadFile(
+            relativePath: "embedding.mlmodelc/weights/weight.bin",
+            sha256: "1019c1bb4472abfe705da19db3b5d0764adcb2d59dabf766fef74f0963f810f2"
+        ),
+        RuntimePayloadFile(
+            relativePath: "plda.safetensors",
+            sha256: "aff6294b68b66adcbc1c2a402b1379ecfdd98d8d759dc2cca62b5380babea359"
+        ),
+        RuntimePayloadFile(
+            relativePath: "segmentation.mlmodelc/analytics/coremldata.bin",
+            sha256: "44d83274cec5ccfe4a959eca359a89e4fd757b1872962449f2206784fb2031e5"
+        ),
+        RuntimePayloadFile(
+            relativePath: "segmentation.mlmodelc/coremldata.bin",
+            sha256: "5385e1af87712e3027ac96915d3b85de9450681e73ef355dfadd4b274cc9ba58"
+        ),
+        RuntimePayloadFile(
+            relativePath: "segmentation.mlmodelc/model.mil",
+            sha256: "8c0956cbbce7bac956cb85176fde28353a0d4a1e623f5621b6277b3d256ad0e8"
+        ),
+        RuntimePayloadFile(
+            relativePath: "segmentation.mlmodelc/weights/weight.bin",
+            sha256: "d2c1c75adec19e64ea732808839b6b8da2968a8a26b8aa3e170ef283df44a6ca"
+        ),
+    ],
+    treeSHA256: "74247105450a08414a71ef5d512a52b706a7c23ac61efdcef051f4e44fae237a"
+)
+
 /// Runtime properties that the profile registry and `maccheroni doctor` can inspect
 /// without knowing a diarizer's implementation details.
 public struct DiarizerCapabilities: Equatable, Sendable {
@@ -111,6 +167,9 @@ public enum DiarizationError: Error, Equatable, LocalizedError, Sendable {
 public struct Community1DiarizerConfiguration: Sendable {
     public var executableURL: URL
     public var hfHomeURL: URL
+    /// When set, `executableURL` is the pinned local harness and this exact
+    /// Community-1 repository root is passed through `--cache-dir`.
+    public var harnessModelRepositoryURL: URL?
     public var timeoutS: Double
     /// Community-1 reports frame-quantized boundaries. Values farther than this
     /// outside the input are treated as data loss rather than normalized.
@@ -121,6 +180,7 @@ public struct Community1DiarizerConfiguration: Sendable {
     public init(
         executableURL: URL = Self.defaultExecutableURL,
         hfHomeURL: URL = Self.defaultHFHomeURL,
+        harnessModelRepositoryURL: URL? = nil,
         timeoutS: Double = 3_600,
         timestampRoundingToleranceS: Double = 0.1,
         environment: [String: String] = [:],
@@ -128,6 +188,7 @@ public struct Community1DiarizerConfiguration: Sendable {
     ) {
         self.executableURL = executableURL
         self.hfHomeURL = hfHomeURL
+        self.harnessModelRepositoryURL = harnessModelRepositoryURL
         self.timeoutS = timeoutS
         self.timestampRoundingToleranceS = timestampRoundingToleranceS
         self.environment = environment
@@ -240,9 +301,16 @@ public struct Community1Diarizer: DiarizerBackend {
         processesWholeFile: true,
         supportsSpeakerCountRange: true
     )
+    private let harnessRuntimePayload: RuntimePayloadPin
 
     public init(configuration: Community1DiarizerConfiguration = .init()) {
         self.configuration = configuration
+        self.harnessRuntimePayload = community1HarnessRuntimePayload
+    }
+
+    init(testing configuration: Community1DiarizerConfiguration, harnessRuntimePayload: RuntimePayloadPin) {
+        self.configuration = configuration
+        self.harnessRuntimePayload = harnessRuntimePayload
     }
 
     public func diarize(_ request: DiarizationRequest) async throws -> Timeline {
@@ -253,12 +321,26 @@ public struct Community1Diarizer: DiarizerBackend {
         try validateInput(request.audioURL)
         try validateSpeakerHint(request.speakerCountHint)
         try validateExecutable(configuration.executableURL)
-        if configuration.validatesPinnedModel {
+        if let repositoryURL = configuration.harnessModelRepositoryURL {
+            try validateCommunity1HarnessModel(
+                at: repositoryURL,
+                expected: harnessRuntimePayload
+            )
+        } else if configuration.validatesPinnedModel {
             try validateCommunity1Model(in: configuration.hfHomeURL)
         }
 
         let duration = try audioDuration(request.audioURL)
-        var arguments = ["diarize", request.audioURL.path, "--engine", "community1", "--json"]
+        var arguments: [String]
+        if let repositoryURL = configuration.harnessModelRepositoryURL {
+            arguments = [
+                "diarize", request.audioURL.path,
+                "--cache-dir", repositoryURL.path,
+                "--json",
+            ]
+        } else {
+            arguments = ["diarize", request.audioURL.path, "--engine", "community1", "--json"]
+        }
         if let hint = request.speakerCountHint {
             if hint.lowerBound == hint.upperBound {
                 arguments += ["--num-speakers", String(hint.lowerBound)]
@@ -268,7 +350,9 @@ public struct Community1Diarizer: DiarizerBackend {
             }
         }
         var environment = configuration.environment
-        environment["HF_HOME"] = configuration.hfHomeURL.path
+        if configuration.harnessModelRepositoryURL == nil {
+            environment["HF_HOME"] = configuration.hfHomeURL.path
+        }
         let output = try runProcess(
             executableURL: configuration.executableURL,
             arguments: arguments,
@@ -508,6 +592,62 @@ private func validateCommunity1Model(in hfHomeURL: URL) throws {
     }
 }
 
+private func validateCommunity1HarnessModel(
+    at repositoryURL: URL,
+    expected: RuntimePayloadPin
+) throws {
+    var treeHasher = SHA256()
+    for expectedFile in expected.files {
+        let file = repositoryURL.appendingPathComponent(expectedFile.relativePath)
+        let values: URLResourceValues
+        do {
+            values = try file.resourceValues(
+                forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+            )
+        } catch {
+            throw DiarizationError.modelMissing(file.path)
+        }
+        guard values.isRegularFile == true,
+                values.isSymbolicLink != true else {
+            throw DiarizationError.modelMissing(file.path)
+        }
+
+        let name = Data(expectedFile.relativePath.utf8)
+        var nameLength = UInt32(name.count).bigEndian
+        withUnsafeBytes(of: &nameLength) {
+            treeHasher.update(data: Data($0))
+        }
+        treeHasher.update(data: name)
+
+        var fileHasher = SHA256()
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        while true {
+            let data = try handle.read(upToCount: 1_048_576) ?? Data()
+            if data.isEmpty { break }
+            fileHasher.update(data: data)
+            treeHasher.update(data: data)
+        }
+        guard hexDigest(fileHasher.finalize()) == expectedFile.sha256 else {
+            throw community1PayloadMismatch()
+        }
+    }
+    guard hexDigest(treeHasher.finalize()) == expected.treeSHA256 else {
+        throw community1PayloadMismatch()
+    }
+}
+
+private func community1PayloadMismatch() -> DiarizationError {
+    .modelMismatch(
+        expected: "\(Community1Diarizer.modelID)@\(Community1Diarizer.modelRevision)",
+        actual: "local runtime payload"
+    )
+}
+
+private func hexDigest<D: Sequence>(_ digest: D) -> String where D.Element == UInt8 {
+    digest.map { String(format: "%02x", $0) }.joined()
+}
+
 private func validateFluidAudioModel(at modelsRootURL: URL) throws {
     let modelDirectory = modelsRootURL.appendingPathComponent("speaker-diarization", isDirectory: true)
     guard FileManager.default.fileExists(atPath: modelDirectory.path) else {
@@ -745,6 +885,8 @@ private func runProcess(
     else {
         throw DiarizationError.invalidOutput("could not create fresh process capture files")
     }
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: outputURL.path)
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: errorURL.path)
     let standardOutput: FileHandle
     let standardError: FileHandle
     do {
@@ -795,9 +937,11 @@ private func runProcess(
     }
     try closeCaptures()
     let output = try Data(contentsOf: outputURL)
-    let errorText = String(data: try Data(contentsOf: errorURL), encoding: .utf8) ?? ""
     guard process.terminationStatus == 0 else {
-        throw DiarizationError.processFailed(exitCode: process.terminationStatus, standardError: errorText)
+        throw DiarizationError.processFailed(
+            exitCode: process.terminationStatus,
+            standardError: "diagnostic unavailable"
+        )
     }
     return output
 }
@@ -815,14 +959,13 @@ private func decodeJSONOutput<T: Decodable>(_ output: Data) throws -> JSONOutput
     guard !starts.isEmpty else {
         throw DiarizationError.invalidJSON("no JSON object in standard output")
     }
-    var lastError: Error?
     for start in starts {
         let rawJSON = Data(output[start...])
         do {
             return JSONOutput(value: try JSONDecoder().decode(T.self, from: rawJSON), rawJSON: rawJSON)
         } catch {
-            lastError = error
+            continue
         }
     }
-    throw DiarizationError.invalidJSON(lastError?.localizedDescription ?? "could not decode output")
+    throw DiarizationError.invalidJSON("no decodable JSON object in standard output")
 }

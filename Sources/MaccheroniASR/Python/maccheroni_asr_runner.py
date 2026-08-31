@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,7 +23,7 @@ import wave
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 
 EXPECTED_MLX_AUDIO = "0.4.6"
@@ -50,6 +51,13 @@ class ModelSpec:
     injection_mode: str
 
 
+@dataclass(frozen=True)
+class HFFilePin:
+    size: int
+    sha256: str
+    blob_id: str
+
+
 MODELS = {
     "vibevoice": ModelSpec(
         backend="vibevoice",
@@ -74,11 +82,80 @@ MODELS = {
     ),
 }
 
+VIBEVOICE_TOKENIZER = ModelSpec(
+    backend="tokenizer",
+    hf_model_id="Qwen/Qwen2.5-7B",
+    revision="d149729398750b98c0af14eb82c78cfe92750796",
+    quantization="tokenizer-only",
+    injection_mode="none",
+)
+VIBEVOICE_MODEL_FILES = (
+    "config.json",
+    "model.safetensors.index.json",
+    "model-00001-of-00002.safetensors",
+    "model-00002-of-00002.safetensors",
+)
+VIBEVOICE_MODEL_PINS = {
+    "config.json": HFFilePin(
+        4_372, "f4418d57174253f52174c74d6dc3b53ae452d8234b2e007231bea53f2437f16a",
+        "8c1f7894ad6bbeef87088fbd161599d08cba9603",
+    ),
+    "model.safetensors.index.json": HFFilePin(
+        130_385, "8f282316181bcbd6bb4d7d57ce3e3c5601de35d9003b6bfe1da3a0a22a814a55",
+        "ebaa64b12e781344315901a56d64a3029a6626ac",
+    ),
+    "model-00001-of-00002.safetensors": HFFilePin(
+        5_331_193_271, "ce6e064d50295cb0100f33af8c69c9d2a3d647a8d375f764851e940180308650",
+        "bce75647675c562e2d8114d6a416336203c3cf00",
+    ),
+    "model-00002-of-00002.safetensors": HFFilePin(
+        4_190_296_379, "53750f68f0fca138e70d8ed5eb38c29a02e3b44c3e530142a7b0cb3453bf455a",
+        "6d47b73e4817fb0b0870286e45c876399dadc32e",
+    ),
+}
+VIBEVOICE_TOKENIZER_FILES = (
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "merges.txt",
+    "vocab.json",
+)
+VIBEVOICE_TOKENIZER_PINS = {
+    "config.json": HFFilePin(
+        686, "267ce68584c5f24c3b267d934db2de68dd21d1ca677fb78ed809eb60067f7642",
+        "1a90713f0e2cf13b8320cd576175ff9f0b587ea4",
+    ),
+    "tokenizer.json": HFFilePin(
+        7_031_645, "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+        "443909a61d429dff23010e5bddd28ff530edda00",
+    ),
+    "tokenizer_config.json": HFFilePin(
+        7_228, "c91efca15ceff6e9ee9424db58a6f59cd41294e550a86cbd07e3c1fb500b34f9",
+        "ba7e4c5637b9732dadcd66286ce48334e8b31e9e",
+    ),
+    "merges.txt": HFFilePin(
+        1_671_839, "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+        "20024bfe7c83998e9aeaf98a0cd6a2ce6306c2f0",
+    ),
+    "vocab.json": HFFilePin(
+        2_776_833, "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "4783fe10ac3adce15ac8f358ef5462739852c569",
+    ),
+}
+
 
 class RunnerError(RuntimeError):
     def __init__(self, code: str, message: str):
         self.code = code
         super().__init__(message)
+
+
+def safe_exception_class(error: BaseException) -> str:
+    """Return only a bounded Python identifier for structured diagnostics."""
+    candidate = type(error).__name__
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", candidate):
+        return candidate
+    return "Exception"
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -158,6 +235,151 @@ def hf_snapshot(cache_root: Path, spec: ModelSpec) -> Path:
     return cache_root / "models" / "huggingface" / "hub" / (
         "models--" + spec.hf_model_id.replace("/", "--")
     ) / "snapshots" / spec.revision
+
+
+def hf_repository(cache_root: Path, spec: ModelSpec) -> Path:
+    return hf_snapshot(cache_root, spec).parent.parent
+
+
+def hf_cache_checks(
+    cache_root: Path,
+    spec: ModelSpec,
+    *,
+    name_prefix: str,
+    required_files: Mapping[str, HFFilePin],
+    require_ref: bool = False,
+    require_tree: bool = False,
+) -> list[dict[str, Any]]:
+    repository = hf_repository(cache_root, spec)
+    snapshot = hf_snapshot(cache_root, spec)
+    reference = repository / "refs" / "main"
+    tree = repository / "trees" / f"{spec.revision}.json"
+    checks: list[dict[str, Any]] = []
+
+    snapshot_ok = snapshot.is_dir() and not snapshot.is_symlink()
+    checks.append({"name": f"{name_prefix}_snapshot", "ok": snapshot_ok, "path": str(snapshot)})
+
+    if require_ref:
+        try:
+            reference_value = reference.read_bytes()
+        except OSError:
+            reference_value = None
+        reference_ok = (
+            reference.is_file()
+            and not reference.is_symlink()
+            and reference_value == spec.revision.encode("ascii")
+        )
+        checks.append({
+            "name": f"{name_prefix}_ref",
+            "ok": reference_ok,
+            "path": str(reference),
+            "message": None if reference_ok else f"refs/main must equal pinned revision {spec.revision}",
+        })
+
+    tree_payload: dict[str, Any] | None = None
+    try:
+        candidate = json.loads(tree.read_text(encoding="utf-8"))
+        if (
+            tree.is_file()
+            and not tree.is_symlink()
+            and isinstance(candidate, dict)
+            and candidate.get("format_version") == 1
+            and isinstance(candidate.get("files"), dict)
+        ):
+            tree_payload = candidate
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        pass
+    if require_tree:
+        checks.append({"name": f"{name_prefix}_tree", "ok": tree_payload is not None, "path": str(tree)})
+
+    files_ok = snapshot_ok
+    for relative, pin in required_files.items():
+        path = snapshot / relative
+        try:
+            file_ok = (
+                path.is_file()
+                and path.stat().st_size == pin.size
+                and sha256_file(path) == pin.sha256
+            )
+        except OSError:
+            file_ok = False
+        if tree_payload is not None:
+            entry = tree_payload["files"].get(relative)
+            file_ok = file_ok and isinstance(entry, dict)
+            if isinstance(entry, dict):
+                file_ok = (
+                    file_ok
+                    and entry.get("size") == pin.size
+                    and entry.get("blob_id") == pin.blob_id
+                    and (
+                        "lfs_sha256" not in entry
+                        or entry.get("lfs_sha256") == pin.sha256
+                    )
+                )
+        elif require_tree:
+            file_ok = False
+        files_ok = files_ok and file_ok
+    checks.append({"name": f"{name_prefix}_files", "ok": files_ok})
+
+    return checks
+
+
+def assert_vibevoice_closure(cache_root: Path) -> None:
+    checks = hf_cache_checks(
+        cache_root,
+        MODELS["vibevoice"],
+        name_prefix="model",
+        required_files=VIBEVOICE_MODEL_PINS,
+        require_tree=True,
+    ) + hf_cache_checks(
+        cache_root,
+        VIBEVOICE_TOKENIZER,
+        name_prefix="tokenizer",
+        required_files=VIBEVOICE_TOKENIZER_PINS,
+        require_ref=True,
+        require_tree=True,
+    )
+    failed = next((check for check in checks if not check["ok"]), None)
+    if failed is not None:
+        raise RunnerError("dependency_missing", f"VibeVoice dependency check {failed['name']} failed")
+    if not vibevoice_tokenizer_semantics_are_valid(cache_root):
+        raise RunnerError(
+            "dependency_invalid",
+            "VibeVoice tokenizer is missing required offline Qwen control tokens",
+        )
+
+
+def vibevoice_tokenizer_semantics_are_valid(cache_root: Path) -> bool:
+    hf_home = cache_root / "models" / "huggingface"
+    previous_hf_home = os.environ.get("HF_HOME")
+    previous_offline = os.environ.get("HF_HUB_OFFLINE")
+    os.environ["HF_HOME"] = str(hf_home)
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    try:
+        from transformers import AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            VIBEVOICE_TOKENIZER.hf_model_id,
+            local_files_only=True,
+            trust_remote_code=True,
+        )
+        return (
+            tokenizer.eos_token_id == 151643
+            and tokenizer.convert_tokens_to_ids("<|object_ref_start|>") == 151646
+            and tokenizer.convert_tokens_to_ids("<|object_ref_end|>") == 151647
+            and tokenizer.convert_tokens_to_ids("<|box_start|>") == 151648
+        )
+    except Exception:
+        return False
+    finally:
+        if previous_hf_home is None:
+            os.environ.pop("HF_HOME", None)
+        else:
+            os.environ["HF_HOME"] = previous_hf_home
+        if previous_offline is None:
+            os.environ.pop("HF_HUB_OFFLINE", None)
+        else:
+            os.environ["HF_HUB_OFFLINE"] = previous_offline
 
 
 def assert_hf_snapshot(cache_root: Path, spec: ModelSpec) -> Path:
@@ -440,26 +662,45 @@ def run_vibevoice(
         raise RunnerError("environment_missing", "mlx-audio is not installed in the pinned uv environment") from error
     if found != EXPECTED_MLX_AUDIO:
         raise RunnerError("environment_version", f"requires mlx-audio {EXPECTED_MLX_AUDIO}, found {found}")
-    assert_hf_snapshot(cache_root, spec)
+    assert_vibevoice_closure(cache_root)
     if duration > MAX_VIBEVOICE_DURATION_SECONDS:
         raise RunnerError("duration_limit", "VibeVoice has a verified 59-minute limit; split this chunk before launch")
-    from mlx_audio.stt.generate import generate_transcription
-    from mlx_audio.stt.utils import load_model
+    try:
+        from mlx_audio.stt.generate import generate_transcription
+        from mlx_audio.stt.utils import load_model
+    except Exception as error:
+        raise RunnerError(
+            "backend_import_failed",
+            f"VibeVoice dependency import failed ({safe_exception_class(error)})",
+        ) from None
 
     raw_prefix = work / "vibevoice"
     context = canonical_context(entries) if entries else None
     os.environ["HF_HOME"] = str(cache_root / "models" / "huggingface")
     os.environ["HF_HUB_OFFLINE"] = "1"
-    model = load_model(spec.hf_model_id, revision=spec.revision)
-    result = generate_transcription(
-        model=model,
-        audio=str(audio),
-        output_path=str(raw_prefix),
-        format="json",
-        max_tokens=max_tokens,
-        prefill_step_size=2048,
-        context=context,
-    )
+    try:
+        model = load_model(spec.hf_model_id, revision=spec.revision)
+    except Exception as error:
+        raise RunnerError(
+            "backend_load_failed",
+            f"VibeVoice model load failed ({safe_exception_class(error)})",
+        ) from None
+    try:
+        result = generate_transcription(
+            model=model,
+            audio=str(audio),
+            output_path=str(raw_prefix),
+            format="json",
+            max_tokens=max_tokens,
+            prefill_step_size=2048,
+            context=context,
+        )
+    except Exception as error:
+        raise RunnerError(
+            "backend_inference_failed",
+            f"VibeVoice inference failed ({safe_exception_class(error)})",
+        ) from None
+    assert_vibevoice_closure(cache_root)
     raw_path = raw_prefix.with_suffix(".json")
     if not raw_path.is_file():
         raise RunnerError("malformed_output", "VibeVoice produced no JSON output")
@@ -595,7 +836,10 @@ def run_qwen(
     result = run_process(command, timeout_seconds=timeout_seconds, env=environment)
     raw_output = result.stdout
     if result.returncode != 0:
-        raise RunnerError("backend_failed", f"Qwen exited {result.returncode}: {result.stderr[-800:]}")
+        raise RunnerError(
+            "backend_failed",
+            f"Qwen backend exited with status {result.returncode}",
+        )
     lines = [line for line in raw_output.splitlines() if line.startswith("Result: ")]
     if len(lines) != 1:
         raise RunnerError("malformed_output", "Qwen must emit exactly one Result line per chunk")
@@ -730,9 +974,6 @@ def run_moss(
     metrics["requested_max_tokens"] = max_tokens
     common = {"command": command, "artifact": output, "fingerprint": fingerprint, "instruction_hash": instruction_hash, "metrics": metrics, "stop_reason": stop_reason, "helper_returncode": result.returncode}
     if invalid_eos_output:
-        message = failure.get("message") if isinstance(failure, dict) else None
-        if not isinstance(message, str) or not message.strip():
-            message = "MOSS emitted invalid EOS output"
         return {
             **common,
             "outcome": "invalid_eos_output",
@@ -740,7 +981,7 @@ def run_moss(
             "segments": [],
             "failure": {
                 "code": "invalid_eos_output",
-                "message": message,
+                "message": "MOSS EOS output has no validated segments",
             },
             "diagnostics": {"invalid_eos_source": "harness"},
         }
@@ -926,7 +1167,27 @@ def doctor(args: argparse.Namespace) -> dict[str, Any]:
     try:
         assert_pinned(spec)
         report["checks"].append({"name": "model_identity", "ok": True})
-        if spec.backend in {"vibevoice", "qwen3"}:
+        if spec.backend == "vibevoice":
+            report["checks"].extend(hf_cache_checks(
+                cache_root,
+                spec,
+                name_prefix="model",
+                required_files=VIBEVOICE_MODEL_PINS,
+                require_tree=True,
+            ))
+            report["checks"].extend(hf_cache_checks(
+                cache_root,
+                VIBEVOICE_TOKENIZER,
+                name_prefix="tokenizer",
+                required_files=VIBEVOICE_TOKENIZER_PINS,
+                require_ref=True,
+                require_tree=True,
+            ))
+            report["checks"].append({
+                "name": "tokenizer_semantics",
+                "ok": vibevoice_tokenizer_semantics_are_valid(cache_root),
+            })
+        elif spec.backend == "qwen3":
             assert_hf_snapshot(cache_root, spec)
             report["checks"].append({"name": "model_snapshot", "ok": True})
         else:
