@@ -65,6 +65,20 @@ project in the tree carries its own `pyproject.toml` and `uv.lock`, and
 `uv run --project <dir>` creates and reuses the pinned environment on demand.
 No system Python, manual virtualenv, or `pip install` step is required.
 
+The optional Stage 2 fixture reproduction is create-only and builds a long repeated
+audio reel, so it is not part of the ordinary contract suite. Acquire the pinned public
+datasets and use a fresh ignored mirror root:
+
+```bash
+fixture_root="benchmarks/runs/post-v1-reliability-reset/fixture-rebuild"
+uv run --project benchmarks/scripts/fixtures --frozen python benchmarks/scripts/fixtures/build_stage2_fixtures.py --source-root . --output-root "$fixture_root"
+uv run --project benchmarks/scripts/fixtures --frozen python benchmarks/scripts/fixtures/verify_stage2_fixtures.py --source-root . --fixture-root "$fixture_root"
+```
+
+Do not delete or overwrite a preserved rebuild. See [the dataset guide](benchmarks/datasets/README.md#rebuilding-the-legacy-stage-2-fixtures)
+for the acquisition command, deterministic hash ledger, and macOS `say` portability
+boundary.
+
 Benchmark run artifacts are create-only local directories under
 `benchmarks/runs/` and are gitignored. Never commit them, never overwrite or
 delete an existing run, and never retrofit a scorer to make a preserved run
