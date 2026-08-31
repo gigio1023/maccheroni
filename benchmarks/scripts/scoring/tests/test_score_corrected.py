@@ -8,7 +8,20 @@ import re
 import tempfile
 import unittest
 
-from score_corrected import main, score_corrected_run
+from score_corrected import main, score_corrected_run as _score_corrected_run
+
+
+def score_corrected_run(
+    run_root: Path, reference_path: Path, terms_path: Path
+) -> dict[str, object]:
+    """Exercise the one explicitly retained pre-D39 read path."""
+
+    return _score_corrected_run(
+        run_root,
+        reference_path,
+        terms_path,
+        allow_legacy_root_postprocess=True,
+    )
 
 
 def write_json(path: Path, value: object) -> None:
@@ -88,7 +101,7 @@ class CorrectedScorerTests(unittest.TestCase):
             run_root / "manifest.json",
             {
                 "schema_version": "1.0.0",
-                "run_id": "synthetic-correction-run",
+                "run_id": "run",
                 "status": "succeeded",
                 "input": {
                     "file_name": "synthetic.wav",
@@ -179,6 +192,105 @@ class CorrectedScorerTests(unittest.TestCase):
                 write_json(manifest_path, manifest)
                 return
         self.fail(f"fixture manifest does not declare {relative}")
+
+    def test_legacy_root_postprocess_requires_an_explicit_compatibility_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_root, reference_path, terms_path = self.make_run(
+                Path(temporary_directory)
+            )
+            manifest_path = run_root / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["postprocess"].pop("mode")
+            write_json(manifest_path, manifest)
+
+            with self.assertRaisesRegex(ValueError, r"selected derived ID"):
+                _score_corrected_run(run_root, reference_path, terms_path)
+
+            result = _score_corrected_run(
+                run_root,
+                reference_path,
+                terms_path,
+                allow_legacy_root_postprocess=True,
+            )
+            self.assertIsNone(result["run"]["derived_id"])
+
+    def test_preserves_preexisting_source_review_flags_without_a_new_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_root, reference_path, terms_path = self.make_run(
+                Path(temporary_directory)
+            )
+            for relative in (
+                "merged/segments.json",
+                "postprocess/segments.json",
+            ):
+                document = self.load_run_document(run_root, relative)
+                document["segments"][3]["flags"] = ["conflict", "uncertain"]
+                self.write_run_document(run_root, relative, document)
+
+            result = score_corrected_run(run_root, reference_path, terms_path)
+
+            self.assertEqual(
+                result["correction_outcomes"]["flagged_for_review"], 1
+            )
+            self.assertEqual(result["correction_outcomes"]["applied_text_changes"], 2)
+
+    def test_scorable_false_reference_keeps_changed_segment_unscorable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_root, reference_path, terms_path = self.make_run(
+                Path(temporary_directory)
+            )
+            reference = json.loads(reference_path.read_text(encoding="utf-8"))
+            reference["segments"][0]["scorable"] = False
+            write_json(reference_path, reference)
+
+            direction = score_corrected_run(
+                run_root, reference_path, terms_path
+            )["applied_correction_direction"]
+
+            self.assertEqual(direction["evaluated_applied_text_changes"], 1)
+            self.assertEqual(direction["unevaluated_applied_text_changes"], 1)
+            self.assertEqual(direction["unevaluated_segments"][0]["segment_index"], 0)
+
+    def test_rejects_a_reference_from_a_different_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_root, reference_path, terms_path = self.make_run(
+                Path(temporary_directory)
+            )
+            reference = json.loads(reference_path.read_text(encoding="utf-8"))
+            reference["source"]["sha256"] = "f" * 64
+            write_json(reference_path, reference)
+
+            with self.assertRaisesRegex(ValueError, r"reference source identity"):
+                score_corrected_run(run_root, reference_path, terms_path)
+
+    def test_cli_rejects_an_output_inside_the_source_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            run_root, reference_path, terms_path = self.make_run(root)
+            output_path = run_root / "corrected-scores.json"
+            manifest_before = (run_root / "manifest.json").read_bytes()
+
+            with self.assertRaisesRegex(
+                ValueError, r"outside immutable input tree"
+            ):
+                main(
+                    [
+                        "--run-root",
+                        str(run_root),
+                        "--reference",
+                        str(reference_path),
+                        "--terms",
+                        str(terms_path),
+                        "--allow-legacy-root-postprocess",
+                        "--output",
+                        str(output_path),
+                    ]
+                )
+
+            self.assertFalse(output_path.exists())
+            self.assertEqual(
+                (run_root / "manifest.json").read_bytes(), manifest_before
+            )
 
     def test_rejects_schema_invalid_review_artifact_from_hostile_probe(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -502,7 +614,8 @@ class CorrectedScorerTests(unittest.TestCase):
                     if mutation == "different_interval":
                         reference["segments"][0]["start_s"] = 0.01
                     else:
-                        reference["segments"].append(
+                        reference["segments"].insert(
+                            1,
                             deepcopy(reference["segments"][0])
                         )
                     write_json(reference_path, reference)
@@ -543,6 +656,7 @@ class CorrectedScorerTests(unittest.TestCase):
                         str(reference_path),
                         "--terms",
                         str(terms_path),
+                        "--allow-legacy-root-postprocess",
                         "--output",
                         str(output_path),
                     ]

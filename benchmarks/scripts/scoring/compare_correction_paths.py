@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare glossary injection and correction across four completed runs."""
+"""Compare two sealed source runs and their selected correction derivations."""
 
 from __future__ import annotations
 
@@ -12,7 +12,15 @@ from typing import Any, Sequence
 
 from check_run import validate_completed_run_manifest, validate_segments_document
 from metrics import term_recall, text_error_rate, utterance_omissions
-from score_corrected import score_corrected_run
+from score_corrected import (
+    _reject_output_within_inputs,
+    _validate_canonical_source_artifacts,
+    _validate_completed_source_coverage,
+    _validate_reference_document,
+    _validate_source_root,
+    _validate_source_tree_seal,
+    score_corrected_run,
+)
 
 
 SCHEMA_VERSION = "1.0.0"
@@ -39,21 +47,19 @@ COMPARISON_ENDPOINTS = {
 STATE_REQUIREMENTS = {
     "no_glossary": {"decode_glossary": False, "corrected": False},
     "decode_glossary": {"decode_glossary": True, "corrected": False},
-    "decode_glossary_corrected": {
-        "decode_glossary": True,
-        "corrected": True,
-    },
-    "no_glossary_corrected": {
-        "decode_glossary": False,
-        "corrected": True,
-    },
 }
 
 
 def _load_json(path: Path, *, label: str) -> Any:
+    def reject_nonfinite(value: str) -> None:
+        raise ValueError(f"non-finite JSON number is forbidden: {value}")
+
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        return json.loads(
+            path.read_text(encoding="utf-8"),
+            parse_constant=reject_nonfinite,
+        )
+    except (OSError, ValueError) as error:
         raise ValueError(f"cannot read {label}: {error}") from error
 
 
@@ -114,9 +120,18 @@ def _artifact_hash(run: Path, relative: str) -> str:
 def _load_state(run: Path, name: str) -> dict[str, Any]:
     run = Path(run)
     manifest_path = run / "manifest.json"
+    _validate_source_root(run)
+    prevalidated_manifest = _load_json(manifest_path, label=f"{name} source manifest")
+    if not isinstance(prevalidated_manifest, dict):
+        raise ValueError(f"{name} source manifest must be a JSON object")
+    _validate_source_tree_seal(run, prevalidated_manifest)
     manifest, artifact_paths = validate_completed_run_manifest(run)
+    if manifest.get("run_id") != run.name:
+        raise ValueError(f"{name} run ID differs from its directory name")
     if "merged/segments.json" not in artifact_paths:
         raise ValueError(f"{name} merged transcript is unlisted in manifest")
+    _validate_completed_source_coverage(manifest)
+    _validate_canonical_source_artifacts(manifest, artifact_paths)
 
     merged_path = run / "merged/segments.json"
     merged = _load_json(merged_path, label=f"{name} merged transcript")
@@ -126,6 +141,15 @@ def _load_state(run: Path, name: str) -> dict[str, Any]:
     source = merged.get("source")
     if not isinstance(source, dict):
         raise ValueError(f"{name} merged transcript has no source identity")
+    if source.get("file_name") != manifest.get("input", {}).get("file_name"):
+        raise ValueError(f"{name} merged source file differs from its manifest")
+    if source.get("sha256") != manifest.get("input", {}).get("sha256"):
+        raise ValueError(f"{name} merged source hash differs from its manifest")
+    input_duration = manifest.get("coverage", {}).get("input_duration_s")
+    if not isinstance(input_duration, (int, float)) or isinstance(input_duration, bool):
+        raise ValueError(f"{name} manifest has no numeric input duration")
+    if abs(float(source.get("duration_s", -1)) - float(input_duration)) > 0.01:
+        raise ValueError(f"{name} merged source duration differs from its manifest")
 
     requirement = STATE_REQUIREMENTS[name]
     glossary = manifest.get("glossary")
@@ -146,17 +170,11 @@ def _load_state(run: Path, name: str) -> dict[str, Any]:
     if not requirement["decode_glossary"] and not glossary_absent:
         raise ValueError(f"{name} glossary must be absent from decode-time ASR")
 
-    postprocess = manifest.get("postprocess")
-    if requirement["corrected"]:
-        if not isinstance(postprocess, dict):
-            raise ValueError(f"{name} has no correction metadata")
-        mode = postprocess.get("mode", "correction")
-        if mode == "translation":
-            raise ValueError(f"translation run cannot occupy corrected state {name}")
-        if mode != "correction":
-            raise ValueError(f"{name} postprocess mode is not correction")
-    elif postprocess is not None:
-        raise ValueError(f"{name} raw state unexpectedly has postprocess metadata")
+    if manifest.get("postprocess") is not None:
+        raise ValueError(f"{name} source run unexpectedly has postprocess metadata")
+    legacy_postprocess = run / "postprocess"
+    if legacy_postprocess.exists() or legacy_postprocess.is_symlink():
+        raise ValueError(f"{name} source run contains mutable root postprocess output")
 
     models = manifest.get("models")
     if not isinstance(models, list):
@@ -164,6 +182,17 @@ def _load_state(run: Path, name: str) -> dict[str, Any]:
     asr_models = [model for model in models if model.get("role") == "asr"]
     if not asr_models:
         raise ValueError(f"{name} manifest has no ASR model provenance")
+    model_identities = [
+        (
+            model.get("role"),
+            model.get("hf_model_id"),
+            model.get("revision"),
+            model.get("quantization"),
+        )
+        for model in models
+    ]
+    if len(set(model_identities)) != len(model_identities):
+        raise ValueError(f"{name} manifest has duplicate model identities")
     for field in ("backend", "preprocessing", "chunk_boundaries", "coverage"):
         if field not in manifest:
             raise ValueError(f"{name} manifest has no {field} record")
@@ -175,7 +204,7 @@ def _load_state(run: Path, name: str) -> dict[str, Any]:
         "merged": merged,
         "source": source,
         "compatibility": {
-            "asr_models": asr_models,
+            "models": sorted(model_identities),
             "backend": manifest["backend"],
             "preprocessing": manifest["preprocessing"],
             "chunk_policy": {
@@ -200,11 +229,8 @@ def _validate_across_states(states: dict[str, dict[str, Any]]) -> None:
     decode_hash = states["decode_glossary"]["manifest"]["glossary"].get(
         "sha256"
     )
-    corrected_decode_hash = states["decode_glossary_corrected"]["manifest"][
-        "glossary"
-    ].get("sha256")
-    if not isinstance(decode_hash, str) or decode_hash != corrected_decode_hash:
-        raise ValueError("decode glossary states have different glossary hashes")
+    if not isinstance(decode_hash, str):
+        raise ValueError("decode glossary source has no glossary hash")
 
 
 def _correct_to_incorrect(direction: dict[str, Any]) -> int:
@@ -226,16 +252,19 @@ def _correct_to_incorrect(direction: dict[str, Any]) -> int:
 
 def _corrected_state_result(
     state: dict[str, Any],
+    derived_id: str,
     reference_path: Path,
     terms_path: Path,
 ) -> dict[str, Any]:
     run = state["run"]
-    scored = score_corrected_run(run, reference_path, terms_path)
+    scored = score_corrected_run(
+        run, reference_path, terms_path, derived_id=derived_id
+    )
     scores = scored["scores"]
     outcomes = scored["correction_outcomes"]
     direction = scored["applied_correction_direction"]
-    corrected_relative = "postprocess/segments.json"
-    conflicts_relative = "postprocess/conflicts.json"
+    corrected_relative = f"derived/{derived_id}/postprocess/segments.json"
+    conflicts_relative = f"derived/{derived_id}/postprocess/conflicts.json"
     activity = {
         "applied": outcomes["applied_text_changes"],
         "review": outcomes["flagged_for_review"],
@@ -268,6 +297,10 @@ def _corrected_state_result(
     return {
         "run_id": state["manifest"]["run_id"],
         "manifest_sha256": state["manifest_sha256"],
+        "derived_id": derived_id,
+        "derived_manifest_sha256": scored["run"]["derived_manifest_sha256"],
+        "operation": scored["run"]["operation"],
+        "postprocess_identity": scored["run"]["postprocess_identity"],
         "selected_output": "corrected",
         "raw": {
             "artifact": "merged/segments.json",
@@ -498,8 +531,8 @@ def compare_correction_paths(
     terms_path: Path,
     no_glossary_run: Path,
     decode_glossary_run: Path,
-    decode_glossary_corrected_run: Path,
-    no_glossary_corrected_run: Path,
+    decode_glossary_derived_id: str,
+    no_glossary_derived_id: str,
     thresholds_path: Path,
 ) -> dict[str, Any]:
     reference_path = Path(reference_path)
@@ -512,6 +545,7 @@ def compare_correction_paths(
         reference.get("segments"), list
     ):
         raise ValueError("reference must be a segment document")
+    reference = _validate_reference_document(reference)
     if not isinstance(terms, list) or not all(
         isinstance(term, dict) for term in terms
     ):
@@ -522,13 +556,13 @@ def compare_correction_paths(
     state_inputs = {
         "no_glossary": Path(no_glossary_run),
         "decode_glossary": Path(decode_glossary_run),
-        "decode_glossary_corrected": Path(decode_glossary_corrected_run),
-        "no_glossary_corrected": Path(no_glossary_corrected_run),
     }
     loaded = {
         name: _load_state(run, name) for name, run in state_inputs.items()
     }
     _validate_across_states(loaded)
+    if reference.get("source") != loaded["no_glossary"]["source"]:
+        raise ValueError("reference source identity differs from both verified source runs")
 
     states = {
         "no_glossary": _raw_state_result(
@@ -538,12 +572,65 @@ def compare_correction_paths(
             loaded["decode_glossary"], reference, terms
         ),
         "decode_glossary_corrected": _corrected_state_result(
-            loaded["decode_glossary_corrected"], reference_path, terms_path
+            loaded["decode_glossary"],
+            decode_glossary_derived_id,
+            reference_path,
+            terms_path,
         ),
         "no_glossary_corrected": _corrected_state_result(
-            loaded["no_glossary_corrected"], reference_path, terms_path
+            loaded["no_glossary"],
+            no_glossary_derived_id,
+            reference_path,
+            terms_path,
         ),
     }
+    corrected_states = (
+        states["decode_glossary_corrected"],
+        states["no_glossary_corrected"],
+    )
+    if corrected_states[0]["operation"] != corrected_states[1]["operation"]:
+        raise ValueError("selected derived corrections have mismatched operation profiles")
+    decode_glossary = loaded["decode_glossary"]["manifest"]["glossary"]
+    operation = corrected_states[0]["operation"]
+    if (
+        operation.get("glossary_sha256"),
+        operation.get("glossary_item_count"),
+    ) != (decode_glossary.get("sha256"), decode_glossary.get("item_count")):
+        raise ValueError(
+            "selected correction glossary differs from the decode-time glossary"
+        )
+    identity_fields = (
+        "backend",
+        "model_id",
+        "model_revision",
+        "quantization",
+        "input_mode",
+    )
+    identities = [
+        {field: state["postprocess_identity"].get(field) for field in identity_fields}
+        for state in corrected_states
+    ]
+    if identities[0] != identities[1]:
+        raise ValueError("selected derived corrections have mismatched model identities")
+    policy_fields = (
+        "maximum_prompt_utf8_bytes",
+        "maximum_segments_per_batch",
+        "maximum_output_tokens",
+        "output_token_limit_status",
+        "output_token_planning_budget",
+        "output_tokens_per_input_utf8_byte_permille",
+        "base_output_token_reserve",
+        "per_segment_output_token_reserve",
+    )
+    policies = [
+        {
+            field: state["postprocess_identity"]["batching"].get(field)
+            for field in policy_fields
+        }
+        for state in corrected_states
+    ]
+    if policies[0] != policies[1]:
+        raise ValueError("selected derived corrections use mismatched batching policies")
     comparisons = _build_comparisons(states)
     status, passed, threshold_evaluation = _evaluate_thresholds(
         thresholds, comparisons, states
@@ -571,12 +658,8 @@ def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--terms", required=True, type=Path)
     parser.add_argument("--no-glossary-run", required=True, type=Path)
     parser.add_argument("--decode-glossary-run", required=True, type=Path)
-    parser.add_argument(
-        "--decode-glossary-corrected-run", required=True, type=Path
-    )
-    parser.add_argument(
-        "--no-glossary-corrected-run", required=True, type=Path
-    )
+    parser.add_argument("--decode-glossary-derived-id", required=True)
+    parser.add_argument("--no-glossary-derived-id", required=True)
     parser.add_argument("--thresholds", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     return parser.parse_args(argv)
@@ -584,6 +667,19 @@ def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parse_arguments(sys.argv[1:] if argv is None else argv)
+    _reject_output_within_inputs(
+        arguments.output,
+        [
+            arguments.no_glossary_run,
+            arguments.decode_glossary_run,
+            arguments.no_glossary_run
+            / "derived"
+            / arguments.no_glossary_derived_id,
+            arguments.decode_glossary_run
+            / "derived"
+            / arguments.decode_glossary_derived_id,
+        ],
+    )
     if arguments.output.exists() or arguments.output.is_symlink():
         raise FileExistsError(
             f"create-only comparison output exists: {arguments.output}"
@@ -593,8 +689,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         terms_path=arguments.terms,
         no_glossary_run=arguments.no_glossary_run,
         decode_glossary_run=arguments.decode_glossary_run,
-        decode_glossary_corrected_run=arguments.decode_glossary_corrected_run,
-        no_glossary_corrected_run=arguments.no_glossary_corrected_run,
+        decode_glossary_derived_id=arguments.decode_glossary_derived_id,
+        no_glossary_derived_id=arguments.no_glossary_derived_id,
         thresholds_path=arguments.thresholds,
     )
     encoded = json.dumps(
