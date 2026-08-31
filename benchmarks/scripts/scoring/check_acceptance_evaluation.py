@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import secrets
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -198,19 +199,84 @@ def file_record(path: Path) -> dict[str, object]:
     return {"sha256": sha256_file(path), "size_bytes": metadata.st_size}
 
 
-def pcm16_mono_samples(path: Path, *, label: str) -> bytes:
+def canonical_pcm16_mono_samples(
+    path: Path,
+    *,
+    label: str,
+    source_format: str,
+) -> bytes:
+    """Read a strict product WAV and return its canonical PCM16 sample bytes."""
+
     try:
-        with wave.open(str(path), "rb") as source:
-            if (
-                source.getframerate(),
-                source.getnchannels(),
-                source.getsampwidth(),
-                source.getcomptype(),
-            ) != (16_000, 1, 2, "NONE"):
-                raise EvaluationError(f"{label} is not 16 kHz mono PCM16 WAV")
-            return source.readframes(source.getnframes())
-    except (EOFError, OSError, wave.Error) as error:
-        raise EvaluationError(f"{label} is not a readable PCM WAV") from error
+        payload = path.read_bytes()
+    except OSError as error:
+        raise EvaluationError(f"{label} is not a readable WAV") from error
+    if len(payload) < 12 or payload[:4] != b"RIFF" or payload[8:12] != b"WAVE":
+        raise EvaluationError(f"{label} is not a little-endian RIFF/WAVE file")
+    if struct.unpack_from("<I", payload, 4)[0] != len(payload) - 8:
+        raise EvaluationError(f"{label} has an invalid RIFF size")
+
+    chunks: dict[bytes, bytes] = {}
+    offset = 12
+    while offset < len(payload):
+        if len(payload) - offset < 8:
+            raise EvaluationError(f"{label} has a truncated RIFF chunk header")
+        chunk_id = payload[offset : offset + 4]
+        chunk_size = struct.unpack_from("<I", payload, offset + 4)[0]
+        data_start = offset + 8
+        data_end = data_start + chunk_size
+        padded_end = data_end + (chunk_size & 1)
+        if data_end > len(payload) or padded_end > len(payload):
+            raise EvaluationError(f"{label} has a truncated RIFF chunk")
+        if chunk_size & 1 and payload[data_end] != 0:
+            raise EvaluationError(f"{label} has a nonzero RIFF padding byte")
+        if chunk_id in chunks:
+            raise EvaluationError(f"{label} repeats a RIFF chunk")
+        chunks[chunk_id] = payload[data_start:data_end]
+        offset = padded_end
+    if offset != len(payload):
+        raise EvaluationError(f"{label} has trailing bytes outside its RIFF chunks")
+
+    format_chunk = chunks.get(b"fmt ")
+    audio_data = chunks.get(b"data")
+    if format_chunk is None or audio_data is None or len(format_chunk) != 16:
+        raise EvaluationError(f"{label} lacks an exact fmt or data chunk")
+    audio_format, channels, sample_rate, byte_rate, block_align, bits_per_sample = (
+        struct.unpack("<HHIIHH", format_chunk)
+    )
+    expected_format = {
+        "float32": (3, 1, 16_000, 64_000, 4, 32),
+        "pcm16": (1, 1, 16_000, 32_000, 2, 16),
+    }.get(source_format)
+    if expected_format is None:
+        raise EvaluationError(f"unsupported internal WAV source format: {source_format}")
+    if (
+        audio_format,
+        channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bits_per_sample,
+    ) != expected_format:
+        raise EvaluationError(f"{label} is not 16 kHz mono {source_format} WAV")
+    if len(audio_data) % block_align != 0:
+        raise EvaluationError(f"{label} has a partial audio sample")
+    if source_format == "pcm16":
+        return audio_data
+
+    canonical = bytearray(len(audio_data) // 2)
+    output_offset = 0
+    for (sample,) in struct.iter_unpack("<f", audio_data):
+        if not math.isfinite(sample):
+            raise EvaluationError(f"{label} contains a non-finite Float32 sample")
+        if abs(sample) > 0.950001:
+            raise EvaluationError(f"{label} contains an out-of-range Float32 sample")
+        scaled = sample * 32_768.0
+        rounded = math.floor(scaled + 0.5) if scaled >= 0 else math.ceil(scaled - 0.5)
+        saturated = max(-32_768, min(32_767, rounded))
+        struct.pack_into("<h", canonical, output_offset, saturated)
+        output_offset += 2
+    return bytes(canonical)
 
 
 def reject_symlink_components(path: Path, *, label: str) -> None:
@@ -770,9 +836,10 @@ def validate_runner_evidence(
         label="preprocessed audio path",
     )
     sealed_evidence_file(preprocessed_relative)
-    preprocessed_pcm = pcm16_mono_samples(
+    preprocessed_pcm = canonical_pcm16_mono_samples(
         source_run / preprocessed_relative,
         label="preprocessed acceptance input",
+        source_format="float32",
     )
     boundaries = manifest.get("chunk_boundaries")
     if not isinstance(boundaries, list) or not boundaries:
@@ -798,9 +865,10 @@ def validate_runner_evidence(
         root_record_relative = f"primary/chunks/{root_index}/backend.raw"
         sealed_evidence_file(chunk_audio_relative)
         sealed_evidence_file(root_record_relative)
-        chunk_pcm = pcm16_mono_samples(
+        chunk_pcm = canonical_pcm16_mono_samples(
             source_run / chunk_audio_relative,
             label=f"ASR root {root_index} audio",
+            source_format="pcm16",
         )
         if chunk_pcm != preprocessed_pcm[start_sample * 2 : end_sample * 2]:
             raise EvaluationError("ASR root audio differs from its preprocessed-input sample range")
@@ -932,9 +1000,10 @@ def validate_runner_evidence(
         request_audio_hash = request.get("audio_sha256")
         if request_audio_hash != evidence_records[audio_relative]["sha256"]:
             raise EvaluationError(f"ASR leaf {raw_attempt_id} request audio hash differs from audio.wav")
-        leaf_pcm = pcm16_mono_samples(
+        leaf_pcm = canonical_pcm16_mono_samples(
             source_run / audio_relative,
             label=f"ASR leaf {raw_attempt_id} audio",
+            source_format="pcm16",
         )
         if leaf_pcm != preprocessed_pcm[request["start_sample"] * 2 : request["end_sample"] * 2]:
             raise EvaluationError(f"ASR leaf {raw_attempt_id} audio differs from its preprocessed-input range")
@@ -977,12 +1046,20 @@ def validate_runner_evidence(
             == manifest["glossary"]["item_count"]
         ):
             raise EvaluationError(f"ASR leaf {raw_attempt_id} lacks exact glossary application evidence")
-        expected_language = {
+        expected_runner_language = {
             "requested": "auto",
             "instruction_sha256": runner_glossary["instruction_sha256"],
             "prompt_guidance_applied": False,
         }
-        if runner.get("language") != expected_language or outcome.get("language") != expected_language:
+        expected_outcome_language = {
+            "requested": "auto",
+            "instructionSHA256": runner_glossary["instruction_sha256"],
+            "promptGuidanceApplied": False,
+        }
+        if (
+            runner.get("language") != expected_runner_language
+            or outcome.get("language") != expected_outcome_language
+        ):
             raise EvaluationError(f"ASR leaf {raw_attempt_id} lacks exact auto-language evidence")
         if outcome.get("glossary") != manifest["glossary"]:
             raise EvaluationError(f"ASR leaf {raw_attempt_id} outcome glossary differs from the manifest")

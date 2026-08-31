@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -22,6 +23,7 @@ from check_acceptance_evaluation import (  # noqa: E402
     MINIMUM_ACCEPTANCE_MEMORY_BYTES,
     EvaluationError,
     acceptance_memory_supported,
+    canonical_pcm16_mono_samples,
     create_evaluation,
     snapshot_tree,
     validate_exact_partition,
@@ -50,6 +52,30 @@ def write_wav(path: Path, seconds: int = 2) -> None:
         output.setsampwidth(2)
         output.setframerate(16_000)
         output.writeframes(b"\0\0" * 16_000 * seconds)
+
+
+def riff_chunk(chunk_id: bytes, payload: bytes) -> bytes:
+    padding = b"\0" if len(payload) & 1 else b""
+    return chunk_id + struct.pack("<I", len(payload)) + payload + padding
+
+
+def write_float32_wav(
+    path: Path,
+    samples: list[float] | None = None,
+    *,
+    seconds: int = 2,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    values = samples if samples is not None else [0.0] * (16_000 * seconds)
+    format_chunk = struct.pack("<HHIIHH", 3, 1, 16_000, 64_000, 4, 32)
+    audio_data = b"".join(struct.pack("<f", sample) for sample in values)
+    chunks = (
+        riff_chunk(b"JUNK", b"\0" * 28)
+        + riff_chunk(b"fmt ", format_chunk)
+        + riff_chunk(b"FLLR", b"\0" * 32)
+        + riff_chunk(b"data", audio_data)
+    )
+    path.write_bytes(b"RIFF" + struct.pack("<I", len(chunks) + 4) + b"WAVE" + chunks)
 
 
 class AcceptanceEvaluationTests(unittest.TestCase):
@@ -224,7 +250,7 @@ esac
         merged["num_speakers"] = 1
         (run / "primary").mkdir(parents=True)
         preprocessed_relative = "preprocess/normalized.wav"
-        write_wav(run / preprocessed_relative)
+        write_float32_wav(run / preprocessed_relative)
         (run / "primary/raw.txt").write_text("hello API\n", encoding="utf-8")
         write_json(run / "primary/segments.json", primary)
         write_json(
@@ -323,8 +349,8 @@ esac
                 "glossary_payload_entry_count": 1,
                 "language": {
                     "requested": "auto",
-                    "instruction_sha256": payload_hash,
-                    "prompt_guidance_applied": False,
+                    "instructionSHA256": payload_hash,
+                    "promptGuidanceApplied": False,
                 },
                 "error_code": None,
                 "error_message": None,
@@ -1107,6 +1133,156 @@ esac
                     vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
                 )
 
+    def test_product_float32_preprocess_converts_to_canonical_pcm16(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "normalized.wav"
+            write_float32_wav(
+                path,
+                [
+                    0.0,
+                    0.5 / 32_768.0,
+                    -0.5 / 32_768.0,
+                    1.5 / 32_768.0,
+                    -1.5 / 32_768.0,
+                    0.95,
+                    -0.95,
+                ],
+            )
+            canonical = canonical_pcm16_mono_samples(
+                path,
+                label="production-shaped preprocess",
+                source_format="float32",
+            )
+            self.assertEqual(
+                struct.unpack("<7h", canonical),
+                (0, 1, -1, 2, -2, 31_130, -31_130),
+            )
+
+    def test_float32_preprocess_rejects_nonfinite_out_of_range_and_malformed_riff(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for label, sample, message in (
+                ("nan", float("nan"), "non-finite"),
+                ("positive-infinity", float("inf"), "non-finite"),
+                ("negative-infinity", float("-inf"), "non-finite"),
+                ("above-normalized-peak", 0.95001, "out-of-range"),
+                ("below-normalized-peak", -0.95001, "out-of-range"),
+            ):
+                with self.subTest(label=label):
+                    path = root / f"{label}.wav"
+                    write_float32_wav(path, [sample])
+                    with self.assertRaisesRegex(EvaluationError, message):
+                        canonical_pcm16_mono_samples(
+                            path,
+                            label=label,
+                            source_format="float32",
+                        )
+
+            duplicate = root / "duplicate-data.wav"
+            write_float32_wav(duplicate, [0.0])
+            original = duplicate.read_bytes()
+            body = original[12:] + riff_chunk(b"data", b"")
+            duplicate.write_bytes(
+                b"RIFF" + struct.pack("<I", len(body) + 4) + b"WAVE" + body
+            )
+            with self.assertRaisesRegex(EvaluationError, "repeats a RIFF chunk"):
+                canonical_pcm16_mono_samples(
+                    duplicate,
+                    label="duplicate",
+                    source_format="float32",
+                )
+
+            truncated = root / "truncated.wav"
+            write_float32_wav(truncated, [0.0])
+            truncated.write_bytes(truncated.read_bytes()[:-1])
+            with self.assertRaisesRegex(EvaluationError, "invalid RIFF size"):
+                canonical_pcm16_mono_samples(
+                    truncated,
+                    label="truncated",
+                    source_format="float32",
+                )
+
+    def test_runner_evidence_requires_float32_preprocess_and_pcm16_partitions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, input_path, run = self.make_case(root, "hike-code-switch-v1")
+            manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
+            preprocess_relative = "preprocess/normalized.wav"
+            write_wav(run / preprocess_relative)
+            self.reseal_manifest_artifact(manifest, run, preprocess_relative)
+            with self.assertRaisesRegex(EvaluationError, "not 16 kHz mono float32 WAV"):
+                validate_runner_evidence(
+                    run,
+                    manifest,
+                    vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
+                )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, input_path, run = self.make_case(root, "hike-code-switch-v1")
+            manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
+            root_relative = "primary/chunks/0/audio.wav"
+            write_float32_wav(run / root_relative)
+            self.reseal_manifest_artifact(manifest, run, root_relative)
+            with self.assertRaisesRegex(EvaluationError, "not 16 kHz mono pcm16 WAV"):
+                validate_runner_evidence(
+                    run,
+                    manifest,
+                    vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
+                )
+
+    def test_runner_and_swift_outcome_language_shapes_are_distinct(self) -> None:
+        for label, target, replacement in (
+            (
+                "runner-camel-case",
+                "runner-record.json",
+                {
+                    "requested": "auto",
+                    "instructionSHA256": "placeholder",
+                    "promptGuidanceApplied": False,
+                },
+            ),
+            (
+                "outcome-snake-case",
+                "outcome.json",
+                {
+                    "requested": "auto",
+                    "instruction_sha256": "placeholder",
+                    "prompt_guidance_applied": False,
+                },
+            ),
+        ):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                _, input_path, run = self.make_case(root, "hike-code-switch-v1")
+                manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
+                relative = f"primary/attempts/chunk-0/{target}"
+                path = run / relative
+                record = json.loads(path.read_text(encoding="utf-8"))
+                glossary_hash = record["language"].get(
+                    "instruction_sha256",
+                    record["language"].get("instructionSHA256"),
+                )
+                record["language"] = {
+                    key: glossary_hash if value == "placeholder" else value
+                    for key, value in replacement.items()
+                }
+                write_json(path, record)
+                if target == "runner-record.json":
+                    outcome_relative = "primary/attempts/chunk-0/outcome.json"
+                    outcome_path = run / outcome_relative
+                    outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
+                    outcome["runner_record_sha256"] = digest(path)
+                    write_json(outcome_path, outcome)
+                    self.reseal_manifest_artifact(manifest, run, outcome_relative)
+                self.reseal_manifest_artifact(manifest, run, relative)
+                with self.assertRaisesRegex(EvaluationError, "auto-language evidence"):
+                    validate_runner_evidence(
+                        run,
+                        manifest,
+                        vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
+                    )
+
     def test_runner_evidence_hashes_actual_leaf_audio_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -1272,22 +1448,26 @@ esac
             fixture, input_path, run = self.make_case(root, "hike-code-switch-v1")
             manifest_path = run / "manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            normalized_paths = (
-                run / "preprocess/normalized.wav",
+            normalized_preprocess = run / "preprocess/normalized.wav"
+            normalized_pcm_paths = (
                 run / "primary/chunks/0/audio.wav",
                 run / "primary/attempts/chunk-0/audio.wav",
             )
-            for path in normalized_paths:
+            write_float32_wav(
+                normalized_preprocess,
+                [1.0 / 32_768.0] * 32_000,
+            )
+            for path in normalized_pcm_paths:
                 with wave.open(str(path), "wb") as output:
                     output.setnchannels(1)
                     output.setsampwidth(2)
                     output.setframerate(16_000)
                     output.writeframes(b"\x01\x00" * 32_000)
-            self.assertNotEqual(digest(input_path), digest(normalized_paths[0]))
+            self.assertNotEqual(digest(input_path), digest(normalized_preprocess))
             request_path = run / "primary/attempts/chunk-0/request.json"
             runner_path = run / "primary/attempts/chunk-0/runner-record.json"
             outcome_path = run / "primary/attempts/chunk-0/outcome.json"
-            normalized_hash = digest(normalized_paths[0])
+            normalized_hash = digest(normalized_pcm_paths[0])
             request = json.loads(request_path.read_text(encoding="utf-8"))
             request["audio_sha256"] = normalized_hash
             write_json(request_path, request)
@@ -1337,12 +1517,12 @@ esac
             runner["glossary"]["instruction_sha256"] = fake_hash
             runner["language"]["instruction_sha256"] = fake_hash
             outcome["glossary_payload_sha256"] = fake_hash
-            outcome["language"]["instruction_sha256"] = fake_hash
+            outcome["language"]["instructionSHA256"] = fake_hash
 
         def instruction_tamper(runner: dict[str, object], outcome: dict[str, object]) -> None:
             runner["glossary"]["instruction_sha256"] = fake_hash
             runner["language"]["instruction_sha256"] = fake_hash
-            outcome["language"]["instruction_sha256"] = fake_hash
+            outcome["language"]["instructionSHA256"] = fake_hash
 
         for label, mutate in (
             ("canonical-payload", canonical_tamper),
