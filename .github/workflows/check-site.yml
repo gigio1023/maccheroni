@@ -1,0 +1,35 @@
+name: Check research journal
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'site/**'
+      - '.github/workflows/check-site.yml'
+      - '.github/workflows/deploy-site.yml'
+
+concurrency:
+  group: journal-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Docusaurus
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Build journal
+        run: npm run build
