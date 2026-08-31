@@ -84,6 +84,10 @@ HEX64 = set("0123456789abcdef")
 EVALUATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 ATTEMPT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
 MINIMUM_ACCEPTANCE_MEMORY_BYTES = 36 * 1024 * 1024 * 1024
+# Root is depth 0. The shipped run tree is fewer than 8 directories deep;
+# 24 leaves 3x observed headroom while staying far below Python's recursion
+# limit and the macOS open-file soft limit during depth-first no-follow walks.
+SOURCE_ENVELOPE_MAX_DIRECTORY_DEPTH: int = 24
 EXPECTED_MODELS = [
     {
         "role": "asr",
@@ -390,6 +394,383 @@ def snapshot_tree(root: Path) -> dict[str, dict[str, object]]:
     if "manifest.json" not in records:
         raise EvaluationError("source run has no manifest.json")
     return dict(sorted(records.items()))
+
+
+def snapshot_source_run_envelope(root: Path) -> dict[str, dict[str, object]]:
+    """Inventory only the immutable source-run evidence sealed by its manifest.
+
+    Existing-run operations append create-only evidence below the top-level
+    ``derived/`` directory. That later evidence is not part of the canonical
+    source-run envelope. Finder metadata is likewise outside the manifest
+    inventory. Refuse aliases or non-directories at the boundary itself, then
+    avoid traversing the unrelated derived tree.
+    """
+
+    if root.is_symlink():
+        raise EvaluationError(f"source run root is a symlink: {root}")
+    root = root.resolve(strict=True)
+    if not root.is_dir():
+        raise EvaluationError(f"source run is not a directory: {root}")
+
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    root_fd = os.open(root, directory_flags)
+    derived_fd: int | None = None
+    evidence_stable_fields = (
+        "st_dev",
+        "st_ino",
+        "st_mode",
+        "st_nlink",
+        "st_size",
+        "st_mtime_ns",
+        "st_ctime_ns",
+    )
+    file_anchors: dict[str, os.stat_result] = {}
+    directory_snapshots: dict[
+        str,
+        tuple[os.stat_result, dict[str, os.stat_result], bool],
+    ] = {}
+
+    def same_derived_directory() -> bool:
+        if derived_fd is None:
+            return False
+        try:
+            path_metadata = os.stat("derived", dir_fd=root_fd, follow_symlinks=False)
+            descriptor_metadata = os.fstat(derived_fd)
+        except OSError:
+            return False
+        return (
+            stat.S_ISDIR(path_metadata.st_mode)
+            and path_metadata.st_dev == descriptor_metadata.st_dev
+            and path_metadata.st_ino == descriptor_metadata.st_ino
+        )
+
+    def open_derived_directory() -> int | None:
+        try:
+            path_metadata = os.stat("derived", dir_fd=root_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        if stat.S_ISLNK(path_metadata.st_mode):
+            raise EvaluationError("source run derived evidence root is a symlink")
+        if not stat.S_ISDIR(path_metadata.st_mode):
+            raise EvaluationError("source run derived evidence root is not a directory")
+        try:
+            descriptor = os.open("derived", directory_flags, dir_fd=root_fd)
+        except OSError as error:
+            raise EvaluationError("source run derived evidence root changed during inventory") from error
+        descriptor_metadata = os.fstat(descriptor)
+        if (
+            path_metadata.st_dev != descriptor_metadata.st_dev
+            or path_metadata.st_ino != descriptor_metadata.st_ino
+        ):
+            os.close(descriptor)
+            raise EvaluationError("source run derived evidence root changed during inventory")
+        return descriptor
+
+    def anchored_file_record(
+        parent_fd: int,
+        name: str,
+        relative: str,
+        expected: os.stat_result,
+    ) -> dict[str, object]:
+        try:
+            path_metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except OSError as error:
+            raise EvaluationError(f"evidence path is not a regular file: {relative}") from error
+        if not stat.S_ISREG(path_metadata.st_mode):
+            raise EvaluationError(f"evidence path is not a regular file: {relative}")
+        if path_metadata.st_nlink != 1:
+            raise EvaluationError(f"evidence path is not a unique regular file: {relative}")
+        if any(
+            getattr(expected, field) != getattr(path_metadata, field)
+            for field in evidence_stable_fields
+        ):
+            raise EvaluationError(f"evidence path changed before it was opened: {relative}")
+        try:
+            descriptor = os.open(
+                name,
+                os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0),
+                dir_fd=parent_fd,
+            )
+        except OSError as error:
+            raise EvaluationError(f"evidence path changed while it was opened: {relative}") from error
+        try:
+            before = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_nlink != 1
+                or any(
+                    getattr(expected, field) != getattr(before, field)
+                    for field in evidence_stable_fields
+                )
+            ):
+                raise EvaluationError(f"evidence path changed while it was opened: {relative}")
+            digest = sha256()
+            size_bytes = 0
+            while True:
+                block = os.read(descriptor, 1024 * 1024)
+                if not block:
+                    break
+                digest.update(block)
+                size_bytes += len(block)
+            after = os.fstat(descriptor)
+            if (
+                any(
+                    getattr(before, field) != getattr(after, field)
+                    for field in evidence_stable_fields
+                )
+                or size_bytes != after.st_size
+            ):
+                raise EvaluationError(f"evidence path changed while it was read: {relative}")
+            try:
+                final_path_metadata = os.stat(
+                    name,
+                    dir_fd=parent_fd,
+                    follow_symlinks=False,
+                )
+            except OSError as error:
+                raise EvaluationError(f"evidence path changed while it was read: {relative}") from error
+            if any(
+                getattr(final_path_metadata, field) != getattr(after, field)
+                for field in evidence_stable_fields
+            ):
+                raise EvaluationError(f"evidence path changed while it was read: {relative}")
+            file_anchors[relative] = expected
+            return {"sha256": digest.hexdigest(), "size_bytes": size_bytes}
+        finally:
+            os.close(descriptor)
+
+    def inventory_directory(
+        directory_fd: int,
+        relative_root: Path,
+        records: dict[str, dict[str, object]],
+        *,
+        source_root: bool = False,
+        expected_directory: os.stat_result | None = None,
+        depth: int = 0,
+    ) -> bool:
+        nonlocal derived_fd
+        if depth > SOURCE_ENVELOPE_MAX_DIRECTORY_DEPTH:
+            raise EvaluationError("source run directory depth exceeds the configured maximum")
+        saw_derived = False
+        try:
+            names = sorted(os.listdir(directory_fd))
+        except OSError as error:
+            raise EvaluationError("source run directory changed during inventory") from error
+        initial_entries: dict[str, os.stat_result] = {}
+        for name in names:
+            try:
+                initial_entries[name] = os.stat(
+                    name,
+                    dir_fd=directory_fd,
+                    follow_symlinks=False,
+                )
+            except OSError as error:
+                raise EvaluationError("source run directory changed during inventory") from error
+        directory_metadata = os.fstat(directory_fd)
+        if expected_directory is not None and any(
+            getattr(expected_directory, field) != getattr(directory_metadata, field)
+            for field in evidence_stable_fields
+        ):
+            raise EvaluationError("source run directory changed during inventory")
+        relative_directory = "" if relative_root == Path() else relative_root.as_posix()
+        directory_snapshots[relative_directory] = (
+            directory_metadata,
+            initial_entries,
+            source_root,
+        )
+        for name in names:
+            relative_path = relative_root / name
+            relative = relative_path.as_posix()
+            metadata = initial_entries[name]
+            if source_root and name == "derived":
+                if stat.S_ISLNK(metadata.st_mode):
+                    raise EvaluationError("source run derived evidence root is a symlink")
+                if not stat.S_ISDIR(metadata.st_mode):
+                    raise EvaluationError("source run derived evidence root is not a directory")
+                if derived_fd is None:
+                    derived_fd = open_derived_directory()
+                if derived_fd is None or not same_derived_directory():
+                    raise EvaluationError("source run derived evidence root changed during inventory")
+                saw_derived = True
+                continue
+            if stat.S_ISDIR(metadata.st_mode):
+                child_depth = depth + 1
+                if child_depth > SOURCE_ENVELOPE_MAX_DIRECTORY_DEPTH:
+                    raise EvaluationError(
+                        "source run directory depth exceeds the configured maximum"
+                    )
+                try:
+                    child_fd = os.open(name, directory_flags, dir_fd=directory_fd)
+                except OSError as error:
+                    raise EvaluationError(
+                        f"source run directory changed during inventory: {relative}"
+                    ) from error
+                try:
+                    child_metadata = os.fstat(child_fd)
+                    if any(
+                        getattr(metadata, field) != getattr(child_metadata, field)
+                        for field in evidence_stable_fields
+                    ):
+                        raise EvaluationError(
+                            f"source run directory changed during inventory: {relative}"
+                        )
+                    inventory_directory(
+                        child_fd,
+                        relative_path,
+                        records,
+                        expected_directory=metadata,
+                        depth=child_depth,
+                    )
+                finally:
+                    os.close(child_fd)
+                continue
+            record = anchored_file_record(directory_fd, name, relative, metadata)
+            if name != ".DS_Store":
+                records[relative] = record
+        verify_directory_roster(
+            directory_fd,
+            initial_entries,
+            source_root=source_root,
+            final=False,
+        )
+        return saw_derived
+
+    def verify_directory_roster(
+        directory_fd: int,
+        initial_entries: dict[str, os.stat_result],
+        *,
+        source_root: bool,
+        final: bool,
+    ) -> None:
+        label = "final inventory" if final else "inventory"
+        try:
+            final_names = sorted(os.listdir(directory_fd))
+        except OSError as error:
+            raise EvaluationError(f"source run directory changed during {label}") from error
+        if final_names != sorted(initial_entries):
+            raise EvaluationError(f"source run directory changed during {label}")
+        for name, initial_metadata in initial_entries.items():
+            try:
+                final_metadata = os.stat(
+                    name,
+                    dir_fd=directory_fd,
+                    follow_symlinks=False,
+                )
+            except OSError as error:
+                raise EvaluationError(f"source run directory changed during {label}") from error
+            fields = (
+                ("st_dev", "st_ino", "st_mode")
+                if source_root and name == "derived"
+                else evidence_stable_fields
+            )
+            if any(
+                getattr(final_metadata, field) != getattr(initial_metadata, field)
+                for field in fields
+            ):
+                raise EvaluationError(f"source run directory changed during {label}")
+
+    def verify_complete_inventory() -> None:
+        visited_directories: set[str] = set()
+        visited_files: set[str] = set()
+
+        def verify_directory(
+            descriptor: int,
+            relative_root: Path,
+            *,
+            source_root: bool = False,
+            depth: int = 0,
+        ) -> None:
+            if depth > SOURCE_ENVELOPE_MAX_DIRECTORY_DEPTH:
+                raise EvaluationError("source run directory depth exceeds the configured maximum")
+            relative_directory = "" if relative_root == Path() else relative_root.as_posix()
+            snapshot = directory_snapshots.get(relative_directory)
+            if snapshot is None:
+                raise EvaluationError("source run contains an unrecorded directory")
+            expected_directory, initial_entries, expected_source_root = snapshot
+            if expected_source_root != source_root:
+                raise EvaluationError("source run directory role changed during final inventory")
+            try:
+                descriptor_metadata = os.fstat(descriptor)
+            except OSError as error:
+                raise EvaluationError("source run directory changed during final inventory") from error
+            if any(
+                getattr(expected_directory, field) != getattr(descriptor_metadata, field)
+                for field in evidence_stable_fields
+            ):
+                raise EvaluationError("source run directory changed during final inventory")
+            verify_directory_roster(
+                descriptor,
+                initial_entries,
+                source_root=source_root,
+                final=True,
+            )
+            visited_directories.add(relative_directory)
+            for name, initial_metadata in initial_entries.items():
+                relative_path = relative_root / name
+                relative = relative_path.as_posix()
+                if source_root and name == "derived":
+                    continue
+                if stat.S_ISDIR(initial_metadata.st_mode):
+                    child_depth = depth + 1
+                    if child_depth > SOURCE_ENVELOPE_MAX_DIRECTORY_DEPTH:
+                        raise EvaluationError(
+                            "source run directory depth exceeds the configured maximum"
+                        )
+                    try:
+                        child_fd = os.open(name, directory_flags, dir_fd=descriptor)
+                    except OSError as error:
+                        raise EvaluationError(
+                            "source run directory changed during final inventory"
+                        ) from error
+                    try:
+                        verify_directory(child_fd, relative_path, depth=child_depth)
+                    finally:
+                        os.close(child_fd)
+                    continue
+                expected_file = file_anchors.get(relative)
+                if expected_file is None or any(
+                    getattr(expected_file, field) != getattr(initial_metadata, field)
+                    for field in evidence_stable_fields
+                ):
+                    raise EvaluationError("source run file anchor changed during final inventory")
+                visited_files.add(relative)
+
+        verify_directory(root_fd, Path(), source_root=True)
+        if visited_directories != set(directory_snapshots):
+            raise EvaluationError("source run directory inventory is incomplete")
+        if visited_files != set(file_anchors):
+            raise EvaluationError("source run file inventory is incomplete")
+
+    try:
+        if not same_open_directory(root, root_fd):
+            raise EvaluationError("source run root identity changed during inventory")
+        derived_fd = open_derived_directory()
+        records: dict[str, dict[str, object]] = {}
+        saw_derived = inventory_directory(root_fd, Path(), records, source_root=True)
+        if (derived_fd is not None) != saw_derived:
+            raise EvaluationError("source run derived evidence root changed during inventory")
+        if not same_open_directory(root, root_fd):
+            raise EvaluationError("source run root identity changed during inventory")
+        if derived_fd is not None:
+            if not same_derived_directory():
+                raise EvaluationError("source run derived evidence root changed during inventory")
+        else:
+            try:
+                os.stat("derived", dir_fd=root_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise EvaluationError("source run derived evidence root changed during inventory")
+        verify_complete_inventory()
+        if "manifest.json" not in records:
+            raise EvaluationError("source run has no manifest.json")
+        return dict(sorted(records.items()))
+    finally:
+        if derived_fd is not None:
+            os.close(derived_fd)
+        os.close(root_fd)
 
 
 def snapshot_fixture_tree(root: Path) -> dict[str, dict[str, object]]:
@@ -795,7 +1176,7 @@ def validate_source_run(
     validate_segments(source_run / "merged/segments.json", schema_validator=None, input_path=input_path, duration=duration)
     validate_timeline(source_run / "diarization/timeline.json", duration=duration)
     validate_conflicts(source_run / "merged/conflicts.json")
-    source_files = snapshot_tree(source_run)
+    source_files = snapshot_source_run_envelope(source_run)
     expected_files = {"manifest.json", *artifact_paths}
     if set(source_files) != expected_files:
         raise EvaluationError("source run contains files outside its sealed manifest artifacts")
@@ -1414,7 +1795,7 @@ def create_evaluation(
                 fixture_root / "reference.rttm",
             )
         run_scorer(fixture_root, source_run, kind, scores_path, hypothesis_rttm)
-        source_after = snapshot_tree(source_run)
+        source_after = snapshot_source_run_envelope(source_run)
         if source_after != source_before:
             raise EvaluationError("scoring changed the source run")
         envelope = build_envelope(
@@ -1436,7 +1817,7 @@ def create_evaluation(
             input_path=input_path,
             source_run=source_run,
         )
-        if snapshot_tree(source_run) != source_before:
+        if snapshot_source_run_envelope(source_run) != source_before:
             raise EvaluationError("prepublication verification changed the immutable source run")
         if output.parent.resolve(strict=True) != output_canonical.parent:
             raise EvaluationError("evaluation output parent ancestry changed before publication")
@@ -1600,7 +1981,7 @@ def verify_evaluation(
         run_scorer(fixture_root, source_run, kind, replay, replay_rttm)
         if replay.read_bytes() != scores_path.read_bytes():
             raise EvaluationError("evaluation result is not reproducible from sealed inputs")
-    if snapshot_tree(source_run) != source_files:
+    if snapshot_source_run_envelope(source_run) != source_files:
         raise EvaluationError("verification changed the source run")
     expected_envelope = build_envelope(
         evaluation_id=evaluation_id,

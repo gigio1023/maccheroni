@@ -5,6 +5,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import resource
 import shutil
 import struct
 import subprocess
@@ -22,11 +23,13 @@ sys.path.insert(0, str(SCORING))
 import check_acceptance_evaluation as evaluation_module  # noqa: E402
 from check_acceptance_evaluation import (  # noqa: E402
     MINIMUM_ACCEPTANCE_MEMORY_BYTES,
+    SOURCE_ENVELOPE_MAX_DIRECTORY_DEPTH,
     EvaluationError,
     acceptance_memory_supported,
     canonical_pcm16_mono_samples,
     create_evaluation,
     snapshot_tree,
+    snapshot_source_run_envelope,
     validate_exact_partition,
     validate_fixture,
     validate_runner_evidence,
@@ -525,6 +528,395 @@ esac
                     source_run=run,
                     output=evaluation,
                 )
+
+    def test_later_derived_evidence_and_finder_metadata_are_outside_source_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            fixture, input_path, run, evaluation, envelope = self.create(
+                root, "hike-code-switch-v1"
+            )
+            source_files = deepcopy(envelope["source_run"]["files"])
+            derived = run / "derived/derived-1"
+            write_json(derived / "manifest.json", {"derived_id": "derived-1"})
+            write_json(derived / "postprocess/segments.json", {"segments": []})
+            write_json(derived / "postprocess/conflicts.json", [])
+            (run / ".DS_Store").write_bytes(b"finder metadata")
+            (run / "primary/.DS_Store").write_bytes(b"nested finder metadata")
+
+            self.assertEqual(
+                verify_evaluation(
+                    evaluation=evaluation,
+                    fixture_root=fixture,
+                    input_path=input_path,
+                    source_run=run,
+                ),
+                envelope,
+            )
+            self.assertEqual(snapshot_source_run_envelope(run), source_files)
+            self.assertTrue(any(path.startswith("derived/") for path in snapshot_tree(run)))
+
+    def test_only_top_level_derived_directory_is_outside_source_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            fixture, input_path, run, evaluation, _ = self.create(
+                root, "hike-code-switch-v1"
+            )
+            derived = run / "derived/derived-1"
+            write_json(derived / "manifest.json", {"derived_id": "derived-1"})
+            unexpected = run / "unexpected.txt"
+            unexpected.write_text("not sealed\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(EvaluationError, "outside its sealed manifest"):
+                verify_evaluation(
+                    evaluation=evaluation,
+                    fixture_root=fixture,
+                    input_path=input_path,
+                    source_run=run,
+                )
+
+    def test_hardlink_hidden_below_derived_cannot_alias_a_sealed_source_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            fixture, input_path, run, evaluation, _ = self.create(
+                root, "hike-code-switch-v1"
+            )
+            derived = run / "derived/derived-1"
+            derived.mkdir(parents=True)
+            os.link(run / "merged/segments.json", derived / "source-alias.json")
+
+            with self.assertRaisesRegex(EvaluationError, "not a unique regular file"):
+                verify_evaluation(
+                    evaluation=evaluation,
+                    fixture_root=fixture,
+                    input_path=input_path,
+                    source_run=run,
+                )
+
+    def test_derived_boundary_rejects_file_and_symlink_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            fixture, input_path, run, evaluation, _ = self.create(
+                root, "hike-code-switch-v1"
+            )
+            derived = run / "derived"
+            derived.write_text("not a directory\n", encoding="utf-8")
+            with self.assertRaisesRegex(EvaluationError, "not a directory"):
+                verify_evaluation(
+                    evaluation=evaluation,
+                    fixture_root=fixture,
+                    input_path=input_path,
+                    source_run=run,
+                )
+
+            derived.unlink()
+            derived.symlink_to(root, target_is_directory=True)
+            with self.assertRaisesRegex(EvaluationError, "derived evidence root is a symlink"):
+                verify_evaluation(
+                    evaluation=evaluation,
+                    fixture_root=fixture,
+                    input_path=input_path,
+                    source_run=run,
+                )
+
+            derived.unlink()
+            derived.mkdir()
+            source_alias = run / "unexpected-link"
+            source_alias.symlink_to(run / "merged/segments.json")
+            with self.assertRaisesRegex(EvaluationError, "not a regular file"):
+                verify_evaluation(
+                    evaluation=evaluation,
+                    fixture_root=fixture,
+                    input_path=input_path,
+                    source_run=run,
+                )
+
+    def test_derived_boundary_rejects_concurrent_swap_to_outside_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            fixture, input_path, run, evaluation, _ = self.create(
+                root, "hike-code-switch-v1"
+            )
+            derived = run / "derived"
+            derived.mkdir()
+            write_json(derived / "derived-1/manifest.json", {"derived_id": "derived-1"})
+            outside = root / "outside-derived"
+            outside.mkdir()
+            (outside / "attacker.txt").write_text("outside\n", encoding="utf-8")
+            original_listdir = os.listdir
+            run_identity = (run.stat().st_dev, run.stat().st_ino)
+            swapped = False
+
+            def swapping_listdir(path: object):
+                nonlocal swapped
+                names = original_listdir(path)
+                if isinstance(path, int) and not swapped:
+                    metadata = os.fstat(path)
+                    if (metadata.st_dev, metadata.st_ino) == run_identity:
+                        derived.rename(run / "moved-derived")
+                        derived.symlink_to(outside, target_is_directory=True)
+                        swapped = True
+                return names
+
+            with mock.patch.object(evaluation_module.os, "listdir", swapping_listdir):
+                with self.assertRaisesRegex(EvaluationError, "derived evidence root"):
+                    verify_evaluation(
+                        evaluation=evaluation,
+                        fixture_root=fixture,
+                        input_path=input_path,
+                        source_run=run,
+                    )
+            self.assertTrue(swapped)
+
+    def test_source_inventory_rejects_root_path_aba_even_after_restore(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, _, run = self.make_case(root, "hike-code-switch-v1")
+            expected = snapshot_source_run_envelope(run)
+            moved = root / "moved-source-run"
+            original_same_open_directory = evaluation_module.same_open_directory
+            root_checks = 0
+            replacement_active = False
+
+            def swapping_same_open_directory(path: Path, descriptor: int) -> bool:
+                nonlocal root_checks, replacement_active
+                if path == run:
+                    root_checks += 1
+                    if root_checks == 1:
+                        matched = original_same_open_directory(path, descriptor)
+                        run.rename(moved)
+                        run.mkdir()
+                        (run / "attacker.txt").write_text("replacement bytes\n", encoding="utf-8")
+                        replacement_active = True
+                        return matched
+                    if root_checks == 2 and replacement_active:
+                        shutil.rmtree(run)
+                        moved.rename(run)
+                        replacement_active = False
+                return original_same_open_directory(path, descriptor)
+
+            with mock.patch.object(
+                evaluation_module,
+                "same_open_directory",
+                swapping_same_open_directory,
+            ):
+                with self.assertRaisesRegex(EvaluationError, "changed during final inventory"):
+                    snapshot_source_run_envelope(run)
+
+            self.assertEqual(root_checks, 2)
+            self.assertFalse(replacement_active)
+            self.assertEqual(snapshot_source_run_envelope(run), expected)
+
+    def test_source_inventory_rejects_entry_added_after_initial_directory_list(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, _, run = self.make_case(root, "hike-code-switch-v1")
+            original_listdir = os.listdir
+            run_identity = (run.stat().st_dev, run.stat().st_ino)
+            added = False
+
+            def adding_listdir(path: object):
+                nonlocal added
+                names = original_listdir(path)
+                if isinstance(path, int) and not added:
+                    metadata = os.fstat(path)
+                    if (metadata.st_dev, metadata.st_ino) == run_identity:
+                        (run / "late-extra.txt").write_text("late bytes\n", encoding="utf-8")
+                        added = True
+                return names
+
+            with mock.patch.object(evaluation_module.os, "listdir", adding_listdir):
+                with self.assertRaisesRegex(EvaluationError, "directory changed during (?:final )?inventory"):
+                    snapshot_source_run_envelope(run)
+            self.assertTrue(added)
+
+    def test_source_inventory_rejects_file_aba_after_initial_roster(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, _, run = self.make_case(root, "hike-code-switch-v1")
+            target = run / "merged/segments.json"
+            saved = run / "merged/original-segments.json"
+            original_digest = digest(target)
+            merged_identity = ((run / "merged").stat().st_dev, (run / "merged").stat().st_ino)
+            original_fstat = os.fstat
+            merged_fstats = 0
+            swapped = False
+
+            def swapping_fstat(descriptor: int):
+                nonlocal merged_fstats, swapped
+                metadata = original_fstat(descriptor)
+                if (metadata.st_dev, metadata.st_ino) == merged_identity:
+                    merged_fstats += 1
+                    if merged_fstats == 2:
+                        target.rename(saved)
+                        target.write_bytes(b'{"attacker":"replacement"}\n')
+                        swapped = True
+                return metadata
+
+            try:
+                with mock.patch.object(evaluation_module.os, "fstat", swapping_fstat):
+                    with self.assertRaisesRegex(EvaluationError, "changed before it was opened"):
+                        snapshot_source_run_envelope(run)
+            finally:
+                if swapped:
+                    target.unlink(missing_ok=True)
+                    saved.rename(target)
+
+            self.assertEqual(merged_fstats, 2)
+            self.assertTrue(swapped)
+            self.assertEqual(digest(target), original_digest)
+
+    def test_source_inventory_rejects_late_nested_file_hardlink_hidden_in_derived(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, _, run = self.make_case(root, "hike-code-switch-v1")
+            derived = run / "derived/derived-1"
+            derived.mkdir(parents=True)
+            source = run / "primary/raw.txt"
+            alias = derived / "raw-alias.txt"
+            original_listdir = os.listdir
+            run_identity = (run.stat().st_dev, run.stat().st_ino)
+            root_lists = 0
+            linked = False
+
+            def linking_listdir(path: object):
+                nonlocal root_lists, linked
+                names = original_listdir(path)
+                if isinstance(path, int):
+                    metadata = os.fstat(path)
+                    if (metadata.st_dev, metadata.st_ino) == run_identity:
+                        root_lists += 1
+                        if root_lists == 2:
+                            os.link(source, alias)
+                            linked = True
+                return names
+
+            try:
+                with mock.patch.object(evaluation_module.os, "listdir", linking_listdir):
+                    with self.assertRaisesRegex(EvaluationError, "directory changed during final inventory"):
+                        snapshot_source_run_envelope(run)
+            finally:
+                alias.unlink(missing_ok=True)
+
+            self.assertEqual(root_lists, 3)
+            self.assertTrue(linked)
+            self.assertEqual(source.stat().st_nlink, 1)
+
+    def test_source_inventory_rejects_late_nested_file_content_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, _, run = self.make_case(root, "hike-code-switch-v1")
+            source = run / "primary/raw.txt"
+            original_bytes = source.read_bytes()
+            original_listdir = os.listdir
+            run_identity = (run.stat().st_dev, run.stat().st_ino)
+            root_lists = 0
+            replaced = False
+
+            def replacing_listdir(path: object):
+                nonlocal root_lists, replaced
+                names = original_listdir(path)
+                if isinstance(path, int):
+                    metadata = os.fstat(path)
+                    if (metadata.st_dev, metadata.st_ino) == run_identity:
+                        root_lists += 1
+                        if root_lists == 2:
+                            source.write_bytes(b"persistent replacement bytes\n")
+                            replaced = True
+                return names
+
+            try:
+                with mock.patch.object(evaluation_module.os, "listdir", replacing_listdir):
+                    with self.assertRaisesRegex(EvaluationError, "directory changed during final inventory"):
+                        snapshot_source_run_envelope(run)
+            finally:
+                source.write_bytes(original_bytes)
+
+            self.assertEqual(root_lists, 3)
+            self.assertTrue(replaced)
+            self.assertEqual(source.read_bytes(), original_bytes)
+
+    def test_source_inventory_bounds_fds_for_a_wide_valid_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, _, run = self.make_case(root, "hike-code-switch-v1")
+            baseline = snapshot_source_run_envelope(run)
+            wide_count = 128
+            for index in range(wide_count):
+                (run / f"wide-{index:03d}").mkdir()
+
+            original_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
+            soft_limit = min(original_limit[0], 64)
+            if soft_limit < 32:
+                self.skipTest("open-file soft limit is already below the safe regression bound")
+            try:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (soft_limit, original_limit[1]))
+                snapshot = snapshot_source_run_envelope(run)
+            finally:
+                resource.setrlimit(resource.RLIMIT_NOFILE, original_limit)
+
+            self.assertEqual(snapshot, baseline)
+
+    def test_source_inventory_directory_depth_boundary(self) -> None:
+        cases = (
+            ("below", SOURCE_ENVELOPE_MAX_DIRECTORY_DEPTH - 1, True),
+            ("at", SOURCE_ENVELOPE_MAX_DIRECTORY_DEPTH, True),
+            ("above", SOURCE_ENVELOPE_MAX_DIRECTORY_DEPTH + 1, False),
+        )
+        for label, depth, accepted in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                _, _, run = self.make_case(root, "hike-code-switch-v1")
+                baseline = snapshot_source_run_envelope(run)
+                directory = run
+                for index in range(depth):
+                    directory /= f"depth-{index:02d}"
+                    directory.mkdir()
+
+                if accepted:
+                    self.assertEqual(snapshot_source_run_envelope(run), baseline)
+                else:
+                    with self.assertRaisesRegex(
+                        EvaluationError,
+                        "directory depth exceeds the configured maximum",
+                    ):
+                        snapshot_source_run_envelope(run)
+
+    def test_source_inventory_nonblocking_open_rejects_regular_file_fifo_swap(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, _, run = self.make_case(root, "hike-code-switch-v1")
+            target = run / "primary/raw.txt"
+            saved = run / "primary/original-raw.txt"
+            primary_identity = ((run / "primary").stat().st_dev, (run / "primary").stat().st_ino)
+            original_open = os.open
+            swapped = False
+            observed_nonblocking = False
+
+            def swapping_open(path: object, flags: int, *args: object, **kwargs: object):
+                nonlocal swapped, observed_nonblocking
+                directory_fd = kwargs.get("dir_fd")
+                if path == "raw.txt" and isinstance(directory_fd, int) and not swapped:
+                    metadata = os.fstat(directory_fd)
+                    if (metadata.st_dev, metadata.st_ino) == primary_identity:
+                        observed_nonblocking = bool(flags & os.O_NONBLOCK)
+                        if not observed_nonblocking:
+                            raise AssertionError("FIFO regression would block without O_NONBLOCK")
+                        target.rename(saved)
+                        os.mkfifo(target)
+                        swapped = True
+                return original_open(path, flags, *args, **kwargs)
+
+            try:
+                with mock.patch.object(evaluation_module.os, "open", swapping_open):
+                    with self.assertRaisesRegex(EvaluationError, "changed while it was opened"):
+                        snapshot_source_run_envelope(run)
+            finally:
+                if swapped:
+                    target.unlink(missing_ok=True)
+                    saved.rename(target)
+
+            self.assertTrue(swapped)
+            self.assertTrue(observed_nonblocking)
 
     def test_ami_derives_and_reverifies_hypothesis_rttm(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
