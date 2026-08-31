@@ -118,6 +118,14 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "MaccheroniModelIntegrationTests",
+            dependencies: [
+                "MaccheroniCLI",
+                "MaccheroniASR",
+                "MaccheroniPreprocess",
+            ]
+        ),
+        .testTarget(
             name: "MaccheroniAppTests",
             dependencies: [
                 "MaccheroniApp",

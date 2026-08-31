@@ -121,9 +121,29 @@ swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-O aplicativo exibe o caminho do bundle quando a compilação, o inventário da lista de recursos permitidos e as verificações rigorosas de assinatura de código passam. O executável não inclui pesos de modelos nem ambientes Python, mas inclui as definições dos perfis `ko-meeting` e `it-dialogue`. A partir de um cache limpo, o ciclo completo de provisionamento e validação pelo `doctor` para `ko-meeting` continua incompleto: o tokenizer indireto do Qwen e os metadados do Hugging Face devem ser preparados manualmente.
+A suíte Swift padrão usa fixtures incluídas no repositório ou geradas durante os testes. Ela não depende do cache de modelos de um mantenedor, de execuções externas de benchmark nem do ambiente Python de modelos preparado pelo mantenedor, e não executa inferência real.
 
-O executável oferece cinco comandos do produto:
+Prepare o runtime externo exato do perfil de reuniões em coreano com:
+
+```bash
+cache_root="$HOME/Library/Caches/Maccheroni/benchmarks"
+MACCHERONI_BENCHMARK_CACHE="$cache_root" \
+  zsh scripts/setup-transcription-runtime.zsh --profile ko-meeting
+```
+
+O comando instala o conjunto completo e fixado de dependências de `ko-meeting`, com VibeVoice, Silero e Community-1, além do ambiente Python, no cache de benchmarks do Maccheroni. Os pesos dos modelos e os ambientes Python permanecem fora do repositório e do bundle do aplicativo. A dependência indireta `Qwen/Qwen2.5-7B` contém somente arquivos do tokenizer. Esse perfil não instala pesos de inferência do MOSS nem do Qwen ASR/ForcedAligner.
+
+Depois do provisionamento, ative explicitamente os testes de integração real de VibeVoice, Silero e Community-1:
+
+```bash
+MACCHERONI_RUN_MODEL_INTEGRATION=1 MACCHERONI_BENCHMARK_CACHE="$cache_root" MACCHERONI_HF_HOME="$cache_root/models/huggingface" swift test --filter MaccheroniModelIntegrationTests
+```
+
+A suíte opcional falha com um erro claro de pré-requisito quando o runtime exato está ausente ou incompleto. Altere `cache_root` para usar outro cache externo.
+
+O aplicativo exibe o caminho do bundle quando a compilação, o inventário da lista de recursos permitidos e as verificações rigorosas de assinatura de código passam. O executável não inclui pesos de modelos nem ambientes Python, mas inclui as definições dos perfis `ko-meeting` e `it-dialogue`.
+
+O executável oferece estes comandos do produto:
 
 ```bash
 .build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
@@ -167,7 +187,7 @@ Issues e pull requests focados são bem-vindos. Os comandos de compilação e te
 | `Tests/` | Testes baseados em fixtures |
 | `benchmarks/scripts/` | Executores, avaliadores e o arnês de comparação de vias de correção, com veredictos derivados e testes negativos |
 | `docs/` | Resumo da pesquisa, auditorias de código-fonte, política de restrições, contratos (esquemas JSON), design da interface |
-| `scripts/` | Compilação do bundle do aplicativo, compilação do harness MOSS, configuração do runtime de pós-processamento |
+| `scripts/` | Compilação do bundle do aplicativo, configuração dos runtimes de transcrição e pós-processamento e compilação dos harnesses de benchmark |
 | [PROJECT.md](PROJECT.md) | Hierarquia de intenções: pilares, objetivos excluídos, regras de decisão e registro de decisões somente de acréscimo |
 | [AGENTS.md](AGENTS.md) | Convenções operacionais para trabalhar neste repositório |
 
@@ -175,4 +195,4 @@ Cada afirmação de conclusão nos documentos inclui o comando que a produziu e 
 
 ## Licença e agradecimentos
 
-MIT. Com base no trabalho de [speech-swift](https://github.com/soniqo/speech-swift) (runtimes de voz MLX/CoreML), dos autores dos modelos MOSS, VibeVoice, Silero e pyannote e de [mlx](https://github.com/ml-explore/mlx). A auditoria do código-fonte dos projetos de referência em `docs/` dá crédito aos 24 projetos de código aberto cujos designs, bons ou ruins, ajudaram a moldar este projeto.
+MIT. Com base no trabalho de [speech-swift](https://github.com/soniqo/speech-swift) (runtimes de voz MLX/CoreML), dos autores dos modelos MOSS, VibeVoice, Silero e pyannote e de [mlx](https://github.com/ml-explore/mlx). A auditoria do código-fonte dos projetos de referência em `docs/` dá crédito aos projetos de código aberto cujos designs, bons ou ruins, ajudaram a moldar este projeto.

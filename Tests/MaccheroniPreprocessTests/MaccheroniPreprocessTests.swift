@@ -317,28 +317,6 @@ import MaccheroniCore
         #expect(try String(contentsOf: environmentURL, encoding: .utf8) == "1")
     }
 
-    @Test func speechSileroAdapterRunsOnSyntheticWAVAndReturnsCompleteMap() async throws {
-        let directory = try freshTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let sourceURL = directory.appendingPathComponent("synthetic.wav")
-        try writeSineWAV(to: sourceURL, amplitude: 0.2)
-
-        let adapter = SpeechSileroVADAdapter()
-        let map = try await adapter.detect(audioURL: sourceURL)
-
-        #expect(adapter.provenance.model.hfModelID == "aufklarer/Silero-VAD-v6.2.1-CoreML")
-        #expect(adapter.provenance.model.revision == "523876545a57961474fee9df913e833e130560b8")
-        #expect(adapter.provenance.model.quantization == "coreml-float16")
-        #expect(adapter.runtime == BackendDescriptor(name: "speech", version: "0.0.23"))
-        #expect(map.durationS > 0.99 && map.durationS < 1.01)
-        #expect(!map.regions.isEmpty)
-        #expect(abs(map.regions.first!.startS) < 0.000_001)
-        #expect(abs(map.regions.last!.endS - map.durationS) < 0.000_001)
-        #expect(zip(map.regions, map.regions.dropFirst()).allSatisfy {
-            abs($0.endS - $1.startS) < 0.000_001
-        })
-    }
-
     @Test func speechSileroAdapterCapturesLargeOutputWithoutPipeDeadlock() async throws {
         let directory = try freshTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -121,9 +121,21 @@ swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-L’app stampa il percorso del bundle quando la compilazione, l’inventario della lista delle risorse consentite e i controlli rigorosi della firma del codice hanno esito positivo. L’eseguibile non include i pesi dei modelli né gli ambienti Python. Sono incluse le definizioni dei profili `ko-meeting` e `it-dialogue`; `maccheroni doctor` riporta le dipendenze osservate e lo stato dell’archiviazione. Il provisioning di `ko-meeting` da una cache vuota e la relativa verifica completa con `maccheroni doctor` non sono ancora disponibili: il tokenizer Qwen indiretto e i metadati Hugging Face devono essere preparati manualmente in anticipo.
+La suite predefinita di `swift test` usa fixture incluse o generate. Non dipende dalla cache dei modelli dell’utente, da run esterni, da un ambiente Python per modelli predisposto dall’utente né da inferenza reale.
 
-L’eseguibile offre cinque comandi del prodotto:
+Per predisporre l’insieme fissato di dipendenze di `ko-meeting` e avviare esplicitamente i test di integrazione con i modelli:
+
+```bash
+cache_root="${MACCHERONI_BENCHMARK_CACHE:-$HOME/Library/Caches/Maccheroni/benchmarks}"
+MACCHERONI_BENCHMARK_CACHE="$cache_root" zsh scripts/setup-transcription-runtime.zsh --profile ko-meeting
+MACCHERONI_RUN_MODEL_INTEGRATION=1 MACCHERONI_BENCHMARK_CACHE="$cache_root" MACCHERONI_HF_HOME="$cache_root/models/huggingface" swift test --filter MaccheroniModelIntegrationTests
+```
+
+I test di integrazione eseguono inferenza soltanto con VibeVoice, Silero e Community-1. `Qwen/Qwen2.5-7B` viene predisposto esclusivamente come tokenizer indiretto e non esegue inferenza. Il percorso facoltativo termina con un errore esplicito se manca un prerequisito fissato.
+
+L’app stampa il percorso del bundle quando la compilazione, l’inventario della lista delle risorse consentite e i controlli rigorosi della firma del codice hanno esito positivo. L’eseguibile non include i pesi dei modelli né gli ambienti Python. Sono incluse le definizioni dei profili `ko-meeting` e `it-dialogue`; `maccheroni doctor` riporta le dipendenze osservate e lo stato dell’archiviazione.
+
+L’eseguibile offre questi comandi del prodotto:
 
 ```bash
 .build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
@@ -167,7 +179,7 @@ Issue e pull request mirate sono benvenute. I comandi di build e test, lo standa
 | `Tests/` | Test Swift basati su fixture |
 | `benchmarks/scripts/` | Runner, script di valutazione e il banco di confronto dei percorsi di correzione, con verdetti derivati e test negativi |
 | `docs/` | Sintesi della ricerca, analisi del codice sorgente, regole sui vincoli, contratti (schemi JSON), progettazione dell’interfaccia |
-| `scripts/` | Compilazione del bundle dell’app, compilazione dell’harness MOSS, configurazione del runtime di post-elaborazione |
+| `scripts/` | Compilazione del bundle dell’app e degli harness di benchmark, configurazione dei runtime di trascrizione e post-elaborazione |
 | [PROJECT.md](PROJECT.md) | Gerarchia degli intenti: principi, non-obiettivi, regole di giudizio e registro decisionale append-only |
 | [AGENTS.md](AGENTS.md) | Convenzioni operative per lavorare in questo repository |
 
@@ -175,4 +187,4 @@ Ogni dichiarazione di completamento nei documenti riporta il comando che l’ha 
 
 ## Licenza e ringraziamenti
 
-MIT. Basato sul lavoro di: [speech-swift](https://github.com/soniqo/speech-swift) (runtime vocali MLX/CoreML), gli autori dei modelli MOSS, VibeVoice, Silero e pyannote, e [mlx](https://github.com/ml-explore/mlx). L’analisi del codice sorgente dei progetti di riferimento in `docs/` riconosce i 24 progetti open source le cui scelte progettuali, riuscite o meno, hanno contribuito a questo progetto.
+MIT. Basato sul lavoro di: [speech-swift](https://github.com/soniqo/speech-swift) (runtime vocali MLX/CoreML), gli autori dei modelli MOSS, VibeVoice, Silero e pyannote, e [mlx](https://github.com/ml-explore/mlx). L’analisi del codice sorgente dei progetti di riferimento in `docs/` riconosce i progetti open source le cui scelte progettuali, riuscite o meno, hanno contribuito a questo progetto.

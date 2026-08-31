@@ -120,9 +120,21 @@ swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-build、resource allowlist inventory、strict codesignの各チェックに合格すると、アプリがbundle pathを表示します。実行ファイルにはモデルweightもPython環境も含まれません。`ko-meeting`と`it-dialogue`のprofile定義は付属し、`maccheroni doctor`は観測した依存関係とストレージの状態を報告します。空のcacheからの`ko-meeting` provisioningと`doctor`による完全な検証は、まだ完了していません。間接依存するQwen tokenizerとHugging Face metadataを手動で準備しておく必要があります。
+通常の`swift test`は同梱または生成したfixtureを使います。利用者のモデルキャッシュ、外部run、利用者が用意したモデル用Python環境、実際の推論のいずれにも依存しません。
 
-実行ファイルには5つの製品コマンドがあります。
+固定された`ko-meeting`の依存セットを用意し、モデル統合テストを明示的に実行する場合は次のコマンドを使います。
+
+```bash
+cache_root="${MACCHERONI_BENCHMARK_CACHE:-$HOME/Library/Caches/Maccheroni/benchmarks}"
+MACCHERONI_BENCHMARK_CACHE="$cache_root" zsh scripts/setup-transcription-runtime.zsh --profile ko-meeting
+MACCHERONI_RUN_MODEL_INTEGRATION=1 MACCHERONI_BENCHMARK_CACHE="$cache_root" MACCHERONI_HF_HOME="$cache_root/models/huggingface" swift test --filter MaccheroniModelIntegrationTests
+```
+
+統合テストで推論を実行するのはVibeVoice、Silero、Community-1だけです。`Qwen/Qwen2.5-7B`は間接的なトークナイザとしてのみ用意され、推論には使われません。固定された前提条件が一つでも欠けている場合、この任意経路は明示的なエラーで終了します。
+
+build、resource allowlist inventory、strict codesignの各チェックに合格すると、アプリがbundle pathを表示します。実行ファイルにはモデルweightもPython環境も含まれません。`ko-meeting`と`it-dialogue`のprofile定義は付属し、`maccheroni doctor`は観測した依存関係とストレージの状態を報告します。
+
+実行ファイルには次の製品コマンドがあります。
 
 ```bash
 .build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
@@ -166,7 +178,7 @@ Issueと対象を絞ったpull requestを歓迎します。Buildとtestのコマ
 | `Tests/` | fixtureベースのSwift test |
 | `benchmarks/scripts/` | Derived verdictとnegative testを備えたrunner、scorer、correction経路比較harness |
 | `docs/` | 調査digest、source audit、constraint policy、契約（JSON schema）、UI design |
-| `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |
+| `scripts/` | App bundleとbenchmark harnessのbuild、transcription runtimeとpost-processing runtimeのsetup |
 | [PROJECT.md](PROJECT.md) | 意図の階層：柱、対象外、判断規則、追記専用の意思決定記録 |
 | [AGENTS.md](AGENTS.md) | このリポジトリで作業するための運用規約 |
 
@@ -174,4 +186,4 @@ Issueと対象を絞ったpull requestを歓迎します。Buildとtestのコマ
 
 ## ライセンスと謝辞
 
-MIT。このプロジェクトは、[speech-swift](https://github.com/soniqo/speech-swift)のMLX/CoreML音声runtime、MOSS、VibeVoice、Silero、pyannoteの各モデル作者、[mlx](https://github.com/ml-explore/mlx)の成果を土台にしています。`docs/`にあるreference project source auditでは、良い設計も悪い設計も含め、このプロジェクトに影響を与えた24件のオープンソースプロジェクトをクレジットしています。
+MIT。このプロジェクトは、[speech-swift](https://github.com/soniqo/speech-swift)のMLX/CoreML音声runtime、MOSS、VibeVoice、Silero、pyannoteの各モデル作者、[mlx](https://github.com/ml-explore/mlx)の成果を土台にしています。`docs/`にあるreference project source auditでは、良い設計も悪い設計も含め、このプロジェクトに影響を与えたオープンソースプロジェクトをクレジットしています。

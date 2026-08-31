@@ -121,9 +121,29 @@ swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-The app prints its bundle path when the build, resource-allowlist inventory, and strict codesign checks all pass. The executable bundles neither model weights nor Python environments. Profile definitions for `ko-meeting` and `it-dialogue` are included, and `maccheroni doctor` reports their observed dependencies and storage state. Empty-cache provisioning for `ko-meeting` is not complete yet: its indirect Qwen tokenizer and Hugging Face metadata must already be present.
+The default Swift suite uses bundled and generated fixtures. It is portable across clean Apple Silicon checkouts and does not read an owner model cache or run model inference.
 
-The executable provides five product commands:
+Provision the exact external runtime for the Korean meeting profile with:
+
+```bash
+cache_root="$HOME/Library/Caches/Maccheroni/benchmarks"
+MACCHERONI_BENCHMARK_CACHE="$cache_root" \
+  zsh scripts/setup-transcription-runtime.zsh --profile ko-meeting
+```
+
+The setup command installs the pinned VibeVoice, Silero, and Community-1 closure plus its Python environment under the Maccheroni benchmark cache. Model weights and Python environments remain outside the repository and app bundle. The indirect `Qwen/Qwen2.5-7B` dependency contains tokenizer files only. This profile does not provision MOSS or Qwen ASR/aligner inference weights.
+
+After provisioning, opt into real VibeVoice, Silero, and Community-1 integration tests explicitly:
+
+```bash
+MACCHERONI_RUN_MODEL_INTEGRATION=1 MACCHERONI_BENCHMARK_CACHE="$cache_root" MACCHERONI_HF_HOME="$cache_root/models/huggingface" swift test --filter MaccheroniModelIntegrationTests
+```
+
+The opt-in suite fails with a prerequisite error when the exact runtime is missing or incomplete. Change `cache_root` to use a non-default external cache.
+
+The app prints its bundle path when the build, resource-allowlist inventory, and strict codesign checks all pass. Profile definitions for `ko-meeting` and `it-dialogue` are included, and `maccheroni doctor` reports their observed dependencies and storage state.
+
+The executable provides these product commands:
 
 ```bash
 .build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
@@ -167,7 +187,7 @@ Issues and focused pull requests are welcome. Build and test commands, the verif
 | `Tests/` | Fixture-based Swift tests |
 | `benchmarks/scripts/` | Runners, scorers, and the correction-path comparison harness, with derived verdicts and negative tests |
 | `docs/` | Research digest, source audits, constraint policy, contracts (JSON schemas), UI design |
-| `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |
+| `scripts/` | App bundle build, transcription and post-processing runtime setup, benchmark harness builds |
 | [PROJECT.md](PROJECT.md) | Intent hierarchy: pillars, non-goals, judgment rules, append-only decision log |
 | [AGENTS.md](AGENTS.md) | Operating conventions for working in this repo |
 
@@ -175,4 +195,4 @@ Every completion claim in the docs carries the command that produced it and its 
 
 ## License & acknowledgements
 
-MIT. Standing on: [speech-swift](https://github.com/soniqo/speech-swift) (MLX/CoreML speech runtimes), the MOSS, VibeVoice, Silero, and pyannote model authors, and [mlx](https://github.com/ml-explore/mlx). The reference-project source audit in `docs/` credits the 24 open-source projects whose designs — good and bad — shaped this one.
+MIT. Standing on: [speech-swift](https://github.com/soniqo/speech-swift) (MLX/CoreML speech runtimes), the MOSS, VibeVoice, Silero, and pyannote model authors, and [mlx](https://github.com/ml-explore/mlx). The reference-project source audit in `docs/` credits the open-source projects whose designs — good and bad — shaped this one.
