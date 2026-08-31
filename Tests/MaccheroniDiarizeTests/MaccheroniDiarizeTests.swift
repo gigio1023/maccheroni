@@ -6,14 +6,6 @@ import Testing
 import MaccheroniCore
 
 @Suite(.serialized) struct MaccheroniDiarizeTests {
-    private func repositoryURL(_ relativePath: String) -> URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent(relativePath)
-    }
-
     private func fixtureURL(_ name: String) throws -> URL {
         guard let fixture = Bundle.module.url(
             forResource: name,
@@ -224,7 +216,10 @@ import MaccheroniCore
 
     @Test func community1DrainsLargeProcessOutputBeforeParsingJSON() async throws {
         let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
         let fixture = try fixtureURL("community1-valid.json")
+        let audioURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 30)
         let script = try writeExecutable(
             """
             #!/bin/sh
@@ -240,13 +235,16 @@ import MaccheroniCore
             validatesPinnedModel: false
         ))
         let timeline = try await backend.diarize(DiarizationRequest(
-            audioURL: repositoryURL("benchmarks/runs/diarization/fixtures/it-dialogue/input.wav")
+            audioURL: audioURL
         ))
         #expect(timeline.segments.count == 2)
     }
 
     @Test func processAndCoverageFailuresAreExplicit() async throws {
-        let audio = repositoryURL("benchmarks/runs/diarization/fixtures/it-dialogue/input.wav")
+        let audioDirectory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: audioDirectory) }
+        let audio = audioDirectory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audio, durationS: 28.8898125)
 
         let noOutputDirectory = try temporaryDirectory()
         let noOutput = Community1Diarizer(configuration: .init(
@@ -379,14 +377,17 @@ import MaccheroniCore
 
     @Test func fluidAudioCanBeSelectedThroughDiarizerProtocolWithPinnedProvenance() async throws {
         let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
         let fixture = try fixtureURL("fluid-valid.json")
+        let audioURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 28.8898125)
         let script = try writeFluidHarnessCopying(fixture, in: directory)
         let backend: any DiarizerBackend = FluidAudioDiarizer(configuration: .init(
             executableURL: script,
-            modelsRootURL: FluidAudioDiarizerConfiguration.defaultModelsRootURL,
+            modelsRootURL: directory,
             outputRootURL: directory.appendingPathComponent("outputs", isDirectory: true),
             timeoutS: 5,
-            validatesPinnedModel: true
+            validatesPinnedModel: false
         ))
         #expect(backend.model.hfModelID == "FluidInference/speaker-diarization-coreml")
         #expect(backend.model.revision.count == 40)
@@ -394,23 +395,27 @@ import MaccheroniCore
         #expect(backend.model.quantization == "coreml-fp32+fp16")
 
         let timeline = try await backend.diarize(DiarizationRequest(
-            audioURL: repositoryURL("benchmarks/runs/diarization/fixtures/it-dialogue/input.wav")
+            audioURL: audioURL
         ))
         #expect(timeline.segments.map(\.speaker) == ["S2", "S1"])
         #expect(timeline.segments.allSatisfy { $0.endS > $0.startS })
     }
 
     @Test func fluidAudioRejectsUnsupportedSpeakerCountHint() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let audioURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 1)
         let backend = FluidAudioDiarizer(configuration: .init(
             executableURL: URL(fileURLWithPath: "/usr/bin/true"),
-            modelsRootURL: try temporaryDirectory(),
-            outputRootURL: try temporaryDirectory(),
+            modelsRootURL: directory,
+            outputRootURL: directory.appendingPathComponent("outputs", isDirectory: true),
             timeoutS: 5,
             validatesPinnedModel: false
         ))
         do {
             _ = try await backend.diarize(DiarizationRequest(
-                audioURL: repositoryURL("benchmarks/runs/diarization/fixtures/it-dialogue/input.wav"),
+                audioURL: audioURL,
                 speakerCountHint: 2...3
             ))
             Issue.record("expected unsupported speaker count hint")
@@ -419,10 +424,37 @@ import MaccheroniCore
         }
     }
 
-    @Test func community1RunsPinnedTwoSpeakerFixture() async throws {
-        let backend = Community1Diarizer()
+    @Test func community1NormalizesBoundedTerminalRoundingFromFixtureOutput() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let audioURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 28.8898125)
+        let rawOutputURL = try writeFile(
+            """
+            {
+              "segments": [
+                { "speaker": 0, "start": 0.0, "end": 3.2, "duration": 3.2 },
+                { "speaker": 1, "start": 3.7, "end": 28.972, "duration": 25.272 }
+              ],
+              "num_speakers": 2
+            }
+
+            """,
+            named: "community1-rounded.json",
+            in: directory
+        )
+        let script = try writeExecutable(
+            "#!/bin/sh\ncat '\(rawOutputURL.path)'\n",
+            in: directory
+        )
+        let backend = Community1Diarizer(configuration: .init(
+            executableURL: script,
+            hfHomeURL: directory,
+            timeoutS: 5,
+            validatesPinnedModel: false
+        ))
         let result = try await backend.diarizeWithEvidence(DiarizationRequest(
-            audioURL: repositoryURL("benchmarks/runs/diarization/fixtures/it-dialogue/input.wav"),
+            audioURL: audioURL,
             speakerCountHint: 2...2
         ))
         let timeline = result.timeline

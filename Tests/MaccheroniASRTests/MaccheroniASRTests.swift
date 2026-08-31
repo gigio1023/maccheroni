@@ -4,18 +4,13 @@ import Testing
 @testable import MaccheroniCore
 
 @Suite(.serialized) struct MaccheroniASRTests {
-    private let cacheRoot = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Caches/Maccheroni/benchmarks")
+    private let systemPython = URL(fileURLWithPath: "/usr/bin/python3")
 
     private var repositoryRoot: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-    }
-
-    private func fixture(_ path: String) -> URL {
-        repositoryRoot.appendingPathComponent(path)
     }
 
     private func expectRegularPackagedFile(_ url: URL) throws {
@@ -37,24 +32,58 @@ import Testing
         #expect(runtime.runnerURL.lastPathComponent == "maccheroni_asr_runner.py")
     }
 
-    private func freshRuntime() -> ASRRuntime {
-        let output = FileManager.default.temporaryDirectory
-            .appendingPathComponent("maccheroni-asr-tests/\(UUID().uuidString)", isDirectory: true)
-        return ASRRuntime(
-            pythonExecutable: cacheRoot.appendingPathComponent("venvs/mlx-audio/bin/python"),
-            runnerURL: repositoryRoot.appendingPathComponent("Sources/MaccheroniASR/Python/maccheroni_asr_runner.py"),
-            cacheRoot: cacheRoot,
-            outputRoot: output,
-            timeout: 900
+    private func scratchDirectory(_ label: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "maccheroni-asr-\(label)-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false
         )
+        return directory
     }
 
-    private func glossary(_ path: String) throws -> Glossary {
-        try Glossary.parse(data: Data(contentsOf: fixture(path)))
+    private func syntheticAudio(in directory: URL) throws -> URL {
+        let sampleCount: UInt32 = 1_600
+        let dataSize = sampleCount * 2
+        var wav = Data()
+        func appendASCII(_ value: String) {
+            wav.append(contentsOf: value.utf8)
+        }
+        func appendUInt16LE(_ value: UInt16) {
+            wav.append(UInt8(truncatingIfNeeded: value))
+            wav.append(UInt8(truncatingIfNeeded: value >> 8))
+        }
+        func appendUInt32LE(_ value: UInt32) {
+            wav.append(UInt8(truncatingIfNeeded: value))
+            wav.append(UInt8(truncatingIfNeeded: value >> 8))
+            wav.append(UInt8(truncatingIfNeeded: value >> 16))
+            wav.append(UInt8(truncatingIfNeeded: value >> 24))
+        }
+
+        appendASCII("RIFF")
+        appendUInt32LE(36 + dataSize)
+        appendASCII("WAVEfmt ")
+        appendUInt32LE(16)
+        appendUInt16LE(1)
+        appendUInt16LE(1)
+        appendUInt32LE(16_000)
+        appendUInt32LE(32_000)
+        appendUInt16LE(2)
+        appendUInt16LE(16)
+        appendASCII("data")
+        appendUInt32LE(dataSize)
+        wav.append(Data(repeating: 0, count: Int(dataSize)))
+
+        let audio = directory.appendingPathComponent("synthetic-silence.wav")
+        try wav.write(to: audio, options: .withoutOverwriting)
+        return audio
     }
 
-    private func originalHashSensitiveGlossary() throws -> Glossary {
-        try Glossary.parse(data: Data("\u{FEFF}# owner evidence\r\nMaccheroni\r\nMaccheroni\r\n".utf8))
+    private func syntheticGlossary() throws -> Glossary {
+        try Glossary.parse(data: Data("Maccheroni\nMLX\n".utf8))
     }
 
     private func fakeLimitRuntime(
@@ -94,7 +123,7 @@ import Testing
           "outcome":"invalid_eos_output" if invalid_eos else "limit", "stop_reason":"endOfSequence" if invalid_eos else "maximumTokens", "terminal_evidence":"observed", "timing_granularity":"segment", "raw_text":"", "segments":[],
           "failure":{"code":"invalid_eos_output","message":failure_message} if invalid_eos else None,
           "language":{"requested":args.language,"instruction_sha256":instruction,"prompt_guidance_applied":args.language != "auto"},
-          "glossary":{"provided":bool(entries),"sha256":args.glossary_sha256,"item_count":len(entries),"injection_mode":args.injection_mode if entries else "none","applied":bool(entries),"payload_sha256":instruction,"payload_entry_count":len(entries),"instruction_sha256":instruction},
+          "glossary":{"provided":bool(entries),"sha256":args.glossary_sha256,"item_count":len(entries),"injection_mode":args.injection_mode if entries else "none","applied":bool(entries),"payload_sha256":instruction if entries else None,"payload_entry_count":len(entries),"instruction_sha256":instruction},
           "coverage":{"input_duration_s":args.end_s-args.start_s,"processed_duration_s":0,"truncated":True},
           "input":{"sha256_before":audio_hash,"sha256_after":audio_hash}, "command":["synthetic-helper","--max-tokens",args.max_tokens,"--language",args.language],
           "backend_raw_artifact":{"path":str(raw),"sha256":hashlib.sha256(raw.read_bytes()).hexdigest()},
@@ -106,9 +135,9 @@ import Testing
         """#
         try Data(source.utf8).write(to: runner, options: .withoutOverwriting)
         return (ASRRuntime(
-            pythonExecutable: cacheRoot.appendingPathComponent("venvs/mlx-audio/bin/python"),
+            pythonExecutable: systemPython,
             runnerURL: runner,
-            cacheRoot: cacheRoot,
+            cacheRoot: scratch.appendingPathComponent("cache", isDirectory: true),
             outputRoot: scratch.appendingPathComponent("output", isDirectory: true),
             timeout: 10
         ), scratch)
@@ -178,11 +207,12 @@ import Testing
         try Data(source.utf8).write(to: runner, options: .withoutOverwriting)
         return (
             ASRRuntime(
-                pythonExecutable: cacheRoot.appendingPathComponent(
-                    "venvs/mlx-audio/bin/python"
-                ),
+                pythonExecutable: systemPython,
                 runnerURL: runner,
-                cacheRoot: cacheRoot,
+                cacheRoot: scratch.appendingPathComponent(
+                    "cache",
+                    isDirectory: true
+                ),
                 outputRoot: scratch.appendingPathComponent(
                     "output",
                     isDirectory: true
@@ -242,11 +272,12 @@ import Testing
         try Data(source.utf8).write(to: runner, options: .withoutOverwriting)
         return (
             ASRRuntime(
-                pythonExecutable: cacheRoot.appendingPathComponent(
-                    "venvs/mlx-audio/bin/python"
-                ),
+                pythonExecutable: systemPython,
                 runnerURL: runner,
-                cacheRoot: cacheRoot,
+                cacheRoot: scratch.appendingPathComponent(
+                    "cache",
+                    isDirectory: true
+                ),
                 outputRoot: scratch.appendingPathComponent(
                     "output",
                     isDirectory: true
@@ -287,13 +318,23 @@ import Testing
     }
 
     @Test func rejectsWrongGlossaryModeBeforeLaunching() async throws {
-        let adapter = PinnedASRAdapter(.moss, runtime: freshRuntime())
+        let scratch = try scratchDirectory("wrong-glossary-mode")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
+        let runtime = ASRRuntime(
+            pythonExecutable: scratch.appendingPathComponent("missing-python"),
+            runnerURL: scratch.appendingPathComponent("missing-runner.py"),
+            cacheRoot: scratch.appendingPathComponent("cache"),
+            outputRoot: scratch.appendingPathComponent("output"),
+            timeout: 1
+        )
+        let adapter = PinnedASRAdapter(.moss, runtime: runtime)
         let request = ASRRequest(
-            audioURL: fixture("benchmarks/runs/it-asr/fixtures/italian-dialogue/input.wav"),
+            audioURL: audio,
             startS: 0,
-            endS: 28.8898125,
+            endS: 0.1,
             language: .fixed("it"),
-            glossary: try glossary("benchmarks/runs/it-asr/fixtures/italian-dialogue/glossary.txt"),
+            glossary: try syntheticGlossary(),
             injectionMode: .freeTextContext
         )
         await #expect(throws: ASRAdapterError.unsupportedInjectionMode(
@@ -304,10 +345,63 @@ import Testing
         }
     }
 
+    @Test func missingPinnedPythonIsTypedBeforeRunnerLaunch() async throws {
+        let scratch = try scratchDirectory("missing-runtime")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
+        let runner = scratch.appendingPathComponent("must-not-run.py")
+        try Data("raise SystemExit('runner must not launch')\n".utf8)
+            .write(to: runner, options: .withoutOverwriting)
+        let missingPython = scratch.appendingPathComponent("missing-python")
+        let runtime = ASRRuntime(
+            pythonExecutable: missingPython,
+            runnerURL: runner,
+            cacheRoot: scratch.appendingPathComponent("cache"),
+            outputRoot: scratch.appendingPathComponent("output"),
+            timeout: 1
+        )
+        let adapter = PinnedASRAdapter(.vibeVoice, runtime: runtime)
+
+        await #expect(throws: ASRAdapterError.runtimeMissing(
+            "pinned Python executable is missing: \(missingPython.path)"
+        )) {
+            _ = try await adapter.transcribeDetailed(ASRRequest(
+                audioURL: audio,
+                startS: 0,
+                endS: 0.1,
+                language: .automatic
+            ))
+        }
+        #expect(!FileManager.default.fileExists(atPath: runtime.outputRoot.path))
+    }
+
     @Test func turnsCoverageShortfallIntoTypedBackendFailure() async throws {
-        let adapter = PinnedASRAdapter(.vibeVoice, runtime: freshRuntime())
+        let scratch = try scratchDirectory("coverage-shortfall")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
+        let runner = scratch.appendingPathComponent("coverage-shortfall.py")
+        try Data(#"""
+        import json
+        import sys
+        error = {
+          "error": {
+            "code": "coverage_shortfall",
+            "message": "chunk duration 0.100s does not match request range 3600.000s"
+          }
+        }
+        print(json.dumps(error), file=sys.stderr)
+        raise SystemExit(2)
+        """#.utf8).write(to: runner, options: .withoutOverwriting)
+        let runtime = ASRRuntime(
+            pythonExecutable: systemPython,
+            runnerURL: runner,
+            cacheRoot: scratch.appendingPathComponent("cache"),
+            outputRoot: scratch.appendingPathComponent("output"),
+            timeout: 5
+        )
+        let adapter = PinnedASRAdapter(.vibeVoice, runtime: runtime)
         let request = ASRRequest(
-            audioURL: fixture("benchmarks/runs/it-asr/fixtures/italian-dialogue/input.wav"),
+            audioURL: audio,
             startS: 0,
             endS: 3_600,
             language: .fixed("it")
@@ -318,190 +412,47 @@ import Testing
         } catch let error as ASRAdapterError {
             #expect(error == .backendFailed(
                 code: "coverage_shortfall",
-                message: "chunk duration 28.890s does not match request range 3600.000s"
+                message: "chunk duration 0.100s does not match request range 3600.000s"
             ))
         }
     }
 
-    @Test func vibeVoiceRunsPinnedGlossaryPathOnPublicFixture() async throws {
-        let adapter = PinnedASRAdapter(.vibeVoice, runtime: freshRuntime())
-        let terms = try originalHashSensitiveGlossary()
-        let record = try await adapter.transcribeDetailed(ASRRequest(
-            audioURL: fixture("benchmarks/runs/it-asr/fixtures/italian-dialogue/input.wav"),
-            startS: 0,
-            endS: 28.8898125,
-            language: .fixed("it"),
-            glossary: terms,
-            injectionMode: .freeTextContext
-        ))
-        #expect(record.result.rawText.contains("Maccheroni"))
-        #expect(!record.result.segments.isEmpty)
-        #expect(record.result.segments.allSatisfy { $0.speaker == "UNASSIGNED" })
-        #expect(record.result.segments.contains { $0.flags?.contains("backend_speaker_evidence") == true })
-        #expect(record.glossary.applied)
-        #expect(record.glossary.sha256 == terms.sha256)
-        #expect(record.glossary.itemCount == terms.entries.count)
-        #expect(record.glossary.injectionMode == .freeTextContext)
-        #expect(record.glossaryPayloadEntryCount == terms.entries.count)
-        #expect(record.glossaryPayloadSHA256?.count == 64)
-        #expect(record.glossaryPayloadSHA256 != terms.sha256)
-        #expect(!record.coverage.truncated)
-        #expect(abs(record.coverage.processedDurationS - 28.8898125) < 0.01)
-        #expect(record.outputURL.path.contains("maccheroni-asr-tests"))
-        #expect(FileManager.default.fileExists(atPath: record.backendRawArtifactURL.path))
-        #expect(record.backendRawArtifactSHA256.count == 64)
-    }
-
-    @Test func mossRunsPinnedHotwordPathOnPublicFixture() async throws {
-        let runtime = freshRuntime()
+    @Test func mossLanguageOnlyLimitDoesNotClaimGlossaryTransport() async throws {
+        let (runtime, scratch) = try fakeLimitRuntime()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
         let adapter = PinnedASRAdapter(.moss, runtime: runtime)
-        let terms = try glossary("benchmarks/runs/it-asr/fixtures/italian-dialogue/glossary.txt")
-        let plan = try await MOSSContextPlanner.plan(
-            sampleCount: 462_237,
-            language: .fixed("it"),
-            glossary: terms,
-            runtime: runtime
-        )
-        let record = try await adapter.transcribeDetailed(ASRRequest(
-            audioURL: fixture("benchmarks/runs/it-asr/fixtures/italian-dialogue/input.wav"),
-            startS: 0,
-            endS: 28.8898125,
-            language: .fixed("it"),
-            glossary: terms,
-            injectionMode: .hotwordInstruction
-        ))
-        #expect(record.result.rawText.hasPrefix("[0.00][S01]"))
-        #expect(record.result.segments.allSatisfy { $0.speaker == "UNASSIGNED" })
-        #expect(record.result.segments.contains { $0.flags?.contains("backend_speaker_evidence") == true })
-        #expect(record.glossary.applied)
-        #expect(record.glossary.injectionMode == .hotwordInstruction)
-        #expect(record.glossaryPayloadEntryCount == terms.entries.count)
-        #expect(record.glossaryPayloadSHA256?.count == 64)
-        #expect(!record.coverage.truncated)
-        #expect(plan.promptTokens == 518)
-        #expect(record.metrics?.promptTokens == plan.promptTokens)
-        #expect(record.metrics?.contextHardCapTokens == plan.contextHardCapTokens)
-        #expect(record.language?.instructionSHA256 == plan.instructionSHA256)
-        #expect(record.helperFingerprint?.sha256
-            == plan.helperFingerprintSHA256)
 
-        let sourceHashSensitiveTerms = try originalHashSensitiveGlossary()
-        let sourceHashSensitivePlan = try await MOSSContextPlanner.plan(
-            sampleCount: 462_237,
-            language: .fixed("it"),
-            glossary: sourceHashSensitiveTerms,
-            runtime: runtime
-        )
-        #expect(sourceHashSensitivePlan.glossarySHA256
-            == sourceHashSensitiveTerms.sha256)
-        #expect(sourceHashSensitivePlan.glossaryPayloadSHA256
-            != sourceHashSensitiveTerms.sha256)
-    }
-
-    @Test func mossLanguageOnlyPathDoesNotClaimGlossaryTransport() async throws {
-        let runtime = freshRuntime()
-        let adapter = PinnedASRAdapter(.moss, runtime: runtime)
-        let record = try await adapter.transcribeDetailed(ASRRequest(
-            audioURL: fixture(
-                "benchmarks/runs/it-asr/fixtures/italian-dialogue/input.wav"
-            ),
+        let outcome = try await adapter.transcribeAttempt(ASRRequest(
+            audioURL: audio,
             startS: 0,
-            endS: 28.8898125,
+            endS: 0.1,
             language: .fixed("it")
         ))
-
-        #expect(!record.glossary.provided)
-        #expect(!record.glossary.applied)
-        #expect(record.glossaryPayloadEntryCount == 0)
-        #expect(record.glossaryPayloadSHA256 == nil)
-        #expect(record.language?.requested == "it")
-        #expect(record.language?.promptGuidanceApplied == true)
-    }
-
-    @Test func mossPromptPlannerRejectsLargeGlossaryWithRealTokenizer() async throws {
-        let source = (0..<40_000)
-            .map { String(format: "Maccheroni-%05d", $0) }
-            .joined(separator: "\n") + "\n"
-        let terms = try Glossary.parse(data: Data(source.utf8))
-
-        do {
-            _ = try await MOSSContextPlanner.plan(
-                sampleCount: 240 * 16_000,
-                language: .fixed("it"),
-                glossary: terms,
-                runtime: freshRuntime()
-            )
-            Issue.record("expected the real tokenizer preflight to reject the glossary")
-        } catch let error as ASRAdapterError {
-            guard case let .backendFailed(code, message) = error else {
-                Issue.record("unexpected planner error: \(error)")
-                return
-            }
-            #expect(code == "context_preflight")
-            #expect(message.contains("exceeding 131072"))
-        }
-    }
-
-    @Test func qwenRetainsRealContextEvidenceButRefusesPromotion() async throws {
-        let runtime = freshRuntime()
-        let adapter = PinnedASRAdapter(.qwen3, runtime: runtime)
-        let terms = try glossary("benchmarks/runs/ko-asr/fixtures/hike-tech/glossary.txt")
-        do {
-            _ = try await adapter.transcribeDetailed(ASRRequest(
-                audioURL: fixture(
-                    "benchmarks/runs/ko-asr/fixtures/hike-tech/items/000.wav"
-                ),
-                startS: 0,
-                endS: 4.08,
-                language: .fixed("ko"),
-                glossary: terms,
-                injectionMode: .freeTextContext
-            ))
-            Issue.record("expected Qwen evidence refusal")
-            return
-        } catch let error as ASRAdapterError {
-            let expected = ASRAdapterError.evidenceUnavailable(
-                "Qwen output cannot be promoted without terminal and intra-chunk timing evidence"
-            )
-            guard error == expected else { throw error }
-        }
-        let records = try FileManager.default.contentsOfDirectory(
-            at: runtime.outputRoot,
-            includingPropertiesForKeys: nil
-        ).filter { $0.pathExtension == "json" }
-        #expect(records.count == 1)
-        guard let recordURL = records.first,
-              let record = try JSONSerialization.jsonObject(
-                  with: Data(contentsOf: recordURL)
-              ) as? [String: Any]
-        else {
-            Issue.record("expected one protected Qwen runner record")
+        guard case let .limit(limit) = outcome else {
+            Issue.record("expected typed MOSS limit")
             return
         }
-        #expect(record["outcome"] as? String == "unverified")
-        #expect(record["terminal_evidence"] as? String == "unavailable")
-        #expect(record["timing_granularity"] as? String == "chunk")
-        #expect(record["stop_reason"] is NSNull)
-        #expect((record["raw_text"] as? String)?.isEmpty == false)
-        #expect((record["segments"] as? [Any])?.isEmpty == true)
-        let command = record["command"] as? [String]
-        #expect(command?.contains("--context") == true)
-        #expect(command?.contains("--language") == true)
-        #expect(command?.contains("ko") == true)
+
+        #expect(!limit.glossary.provided)
+        #expect(!limit.glossary.applied)
+        #expect(limit.glossaryPayloadEntryCount == 0)
+        #expect(limit.glossaryPayloadSHA256 == nil)
+        #expect(limit.language.requested == "it")
+        #expect(limit.language.promptGuidanceApplied)
     }
 
     @Test func qwenRefusesUnavailableTerminalAndTimingEvidence() async throws {
         let (runtime, scratch) = try fakeQwenEvidenceRuntime(unavailable: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
         let adapter = PinnedASRAdapter(.qwen3, runtime: runtime)
 
         await #expect(throws: ASRAdapterError.evidenceUnavailable(
             "Qwen output cannot be promoted without terminal and intra-chunk timing evidence"
         )) {
             _ = try await adapter.transcribeDetailed(ASRRequest(
-                audioURL: fixture(
-                    "benchmarks/runs/ko-asr/fixtures/hike-tech/items/000.wav"
-                ),
+                audioURL: audio,
                 startS: 0,
                 endS: 4.08,
                 language: .fixed("ko")
@@ -512,15 +463,14 @@ import Testing
     @Test func qwenRefusesChunkOnlyTimingEvenWithClaimedEOS() async throws {
         let (runtime, scratch) = try fakeQwenEvidenceRuntime(unavailable: false)
         defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
         let adapter = PinnedASRAdapter(.qwen3, runtime: runtime)
 
         await #expect(throws: ASRAdapterError.evidenceUnavailable(
             "Qwen output has no intra-chunk timestamp evidence"
         )) {
             _ = try await adapter.transcribeDetailed(ASRRequest(
-                audioURL: fixture(
-                    "benchmarks/runs/ko-asr/fixtures/hike-tech/items/000.wav"
-                ),
+                audioURL: audio,
                 startS: 0,
                 endS: 4.08,
                 language: .fixed("ko")
@@ -531,11 +481,10 @@ import Testing
     @Test func vibeVoiceTokenCapReturnsTypedLimitWithUnavailableMetrics() async throws {
         let (runtime, scratch) = try fakeVibeVoiceLimitRuntime()
         defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
         let adapter = PinnedASRAdapter(.vibeVoice, runtime: runtime)
         let request = ASRRequest(
-            audioURL: fixture(
-                "benchmarks/runs/ko-asr/fixtures/hike-tech/items/000.wav"
-            ),
+            audioURL: audio,
             startS: 0,
             endS: 4.08,
             language: .fixed("ko")
@@ -561,16 +510,6 @@ import Testing
         }
     }
 
-    @Test func doctorReportsPinnedRuntimeAndModelSnapshots() async throws {
-        for selected in SelectedASRBackend.allCases {
-            let report = try await ASRDoctor.diagnose(selected, runtime: freshRuntime())
-            #expect(report.ok)
-            #expect(report.model == selected.model)
-            #expect(report.python.hasPrefix("3.12."))
-            #expect(report.checks.contains { $0.name == "model_snapshot" && $0.ok })
-        }
-    }
-
     @Test func timeoutKillsAChildAndRemovesCaptureFiles() async throws {
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("maccheroni-asr-timeout-test-\(UUID().uuidString)", isDirectory: true)
@@ -584,23 +523,24 @@ import Testing
         time.sleep(60)
         """.utf8)
             .write(to: runner, options: .withoutOverwriting)
+        let audio = try syntheticAudio(in: scratch)
         let capturePrefix = "maccheroni-asr-stdout-"
         let capturesBefore = Set(try FileManager.default.contentsOfDirectory(
             atPath: FileManager.default.temporaryDirectory.path
         ).filter { $0.hasPrefix(capturePrefix) })
         let runtime = ASRRuntime(
-            pythonExecutable: cacheRoot.appendingPathComponent("venvs/mlx-audio/bin/python"),
+            pythonExecutable: systemPython,
             runnerURL: runner,
-            cacheRoot: cacheRoot,
+            cacheRoot: scratch.appendingPathComponent("cache"),
             outputRoot: scratch.appendingPathComponent("output", isDirectory: true),
             timeout: 0.05
         )
         let adapter = PinnedASRAdapter(.vibeVoice, runtime: runtime)
         await #expect(throws: ASRAdapterError.timedOut(0.05)) {
             _ = try await adapter.transcribeDetailed(ASRRequest(
-                audioURL: fixture("benchmarks/runs/it-asr/fixtures/italian-dialogue/input.wav"),
+                audioURL: audio,
                 startS: 0,
-                endS: 28.8898125,
+                endS: 0.1,
                 language: .fixed("it")
             ))
         }
@@ -616,9 +556,10 @@ import Testing
     @Test func typedMossLimitPreservesEvidenceWithoutPromotingPartialText() async throws {
         let (runtime, scratch) = try fakeLimitRuntime()
         defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
         let adapter = PinnedASRAdapter(.moss, runtime: runtime)
-        let terms = try glossary("benchmarks/runs/it-asr/fixtures/italian-dialogue/glossary.txt")
-        let request = ASRRequest(audioURL: fixture("benchmarks/runs/it-asr/fixtures/italian-dialogue/input.wav"), startS: 0, endS: 28.8898125, language: .fixed("it"), glossary: terms, injectionMode: .hotwordInstruction)
+        let terms = try syntheticGlossary()
+        let request = ASRRequest(audioURL: audio, startS: 0, endS: 0.1, language: .fixed("it"), glossary: terms, injectionMode: .hotwordInstruction)
         let outcome = try await adapter.transcribeAttempt(request)
         guard case let .limit(limit) = outcome else { Issue.record("expected typed limit"); return }
         #expect(limit.stopReason == .maximumTokens)
@@ -638,9 +579,10 @@ import Testing
     @Test func nonzeroPythonRunnerNeverLeaksALimitAsSuccess() async throws {
         let (runtime, scratch) = try fakeLimitRuntime(nonzeroExit: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
         let adapter = PinnedASRAdapter(.moss, runtime: runtime)
         await #expect(throws: ASRAdapterError.backendFailed(code: "subprocess_exit_75", message: "diagnostic unavailable")) {
-            _ = try await adapter.transcribeAttempt(ASRRequest(audioURL: fixture("benchmarks/runs/it-asr/fixtures/italian-dialogue/input.wav"), startS: 0, endS: 28.8898125, language: .fixed("it")))
+            _ = try await adapter.transcribeAttempt(ASRRequest(audioURL: audio, startS: 0, endS: 0.1, language: .fixed("it")))
         }
     }
 
@@ -664,7 +606,7 @@ import Testing
         raise SystemExit(9)
         """#.utf8).write(to: runner, options: .withoutOverwriting)
         let runtime = ASRRuntime(
-            pythonExecutable: URL(fileURLWithPath: "/usr/bin/python3"),
+            pythonExecutable: systemPython,
             runnerURL: runner,
             cacheRoot: scratch,
             outputRoot: scratch.appendingPathComponent("outputs"),
@@ -685,14 +627,13 @@ import Testing
             unsafeInvalidEOSMessage: true
         )
         defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
         let adapter = PinnedASRAdapter(.moss, runtime: runtime)
-        let terms = try glossary(
-            "benchmarks/runs/it-asr/fixtures/italian-dialogue/glossary.txt"
-        )
+        let terms = try syntheticGlossary()
         let request = ASRRequest(
-            audioURL: fixture("benchmarks/runs/it-asr/fixtures/italian-dialogue/input.wav"),
+            audioURL: audio,
             startS: 0,
-            endS: 28.8898125,
+            endS: 0.1,
             language: .fixed("it"),
             glossary: terms,
             injectionMode: .hotwordInstruction
@@ -708,7 +649,15 @@ import Testing
         let record = try #require(FileManager.default.contentsOfDirectory(
             at: output,
             includingPropertiesForKeys: nil
-        ).first { $0.pathExtension == "json" })
+        ).first { url in
+            guard url.pathExtension == "json",
+                  let data = try? Data(contentsOf: url),
+                  let document = try? JSONSerialization.jsonObject(
+                    with: data
+                  ) as? [String: Any]
+            else { return false }
+            return document["outcome"] as? String == "invalid_eos_output"
+        })
         let protectedData = try Data(contentsOf: record)
         let protectedRecord = try #require(
             JSONSerialization.jsonObject(with: protectedData) as? [String: Any]
@@ -723,14 +672,13 @@ import Testing
     @Test func invalidEOSOutputIsTypedAndKeepsOnlyTheProtectedRecord() async throws {
         let (runtime, scratch) = try fakeLimitRuntime(invalidEOSOutput: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
         let adapter = PinnedASRAdapter(.moss, runtime: runtime)
-        let terms = try glossary(
-            "benchmarks/runs/it-asr/fixtures/italian-dialogue/glossary.txt"
-        )
+        let terms = try syntheticGlossary()
         let request = ASRRequest(
-            audioURL: fixture("benchmarks/runs/it-asr/fixtures/italian-dialogue/input.wav"),
+            audioURL: audio,
             startS: 0,
-            endS: 28.8898125,
+            endS: 0.1,
             language: .fixed("it"),
             glossary: terms,
             injectionMode: .hotwordInstruction

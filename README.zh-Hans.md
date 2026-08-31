@@ -120,9 +120,29 @@ swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-build、resource allowlist inventory 和 strict codesign 检查全部通过后，应用会输出 bundle path。可执行文件不内置模型 weight 或 Python 环境。项目包含 `ko-meeting` 和 `it-dialogue` 的 profile 定义，`maccheroni doctor` 会报告实际检测到的依赖项和存储状态。全新 cache 下的 `ko-meeting` provisioning 和完整 `doctor` 验证尚未完成；它间接依赖的 Qwen tokenizer 和 Hugging Face metadata 必须手动准备。
+默认 Swift 测试套件只使用仓库内置或测试期间生成的 fixture。它不依赖维护者的模型缓存、外部 benchmark 运行结果或维护者预置的模型 Python 环境，也不执行真实推理。
 
-可执行文件提供五个产品命令：
+用以下命令为韩语会议 profile 准备精确的外部 runtime：
+
+```bash
+cache_root="$HOME/Library/Caches/Maccheroni/benchmarks"
+MACCHERONI_BENCHMARK_CACHE="$cache_root" \
+  zsh scripts/setup-transcription-runtime.zsh --profile ko-meeting
+```
+
+该命令会在 Maccheroni benchmark cache 中安装固定版本的完整 `ko-meeting` 依赖，包括 VibeVoice、Silero、Community-1 及其 Python 环境。模型 weight 和 Python 环境不会写入仓库或 App bundle。间接依赖 `Qwen/Qwen2.5-7B` 只包含 tokenizer 文件。该 profile 不安装 MOSS、Qwen ASR 或 ForcedAligner 的推理 weight。
+
+provisioning 完成后，显式启用 VibeVoice、Silero 和 Community-1 的真实推理集成测试：
+
+```bash
+MACCHERONI_RUN_MODEL_INTEGRATION=1 MACCHERONI_BENCHMARK_CACHE="$cache_root" MACCHERONI_HF_HOME="$cache_root/models/huggingface" swift test --filter MaccheroniModelIntegrationTests
+```
+
+如果精确 runtime 缺失或不完整，可选测试套件会给出清晰的前置条件错误并失败。可修改 `cache_root` 来使用其他外部 cache。
+
+build、resource allowlist inventory 和 strict codesign 检查全部通过后，应用会输出 bundle path。可执行文件不内置模型 weight 或 Python 环境。项目包含 `ko-meeting` 和 `it-dialogue` 的 profile 定义，`maccheroni doctor` 会报告实际检测到的依赖项和存储状态。
+
+可执行文件提供以下产品命令：
 
 ```bash
 .build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
@@ -166,7 +186,7 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 | `Tests/` | 基于 fixture 的 Swift test |
 | `benchmarks/scripts/` | 带有 derived verdict 和 negative test 的 runner、scorer 与 correction 路径对比 harness |
 | `docs/` | 调研 digest、source audit、constraint policy、契约（JSON schema）、UI design |
-| `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |
+| `scripts/` | App bundle build、transcription 和 post-processing runtime setup、benchmark harness build |
 | [PROJECT.md](PROJECT.md) | 意图层级：支柱、非目标、判断规则和只追加不删除的决策日志 |
 | [AGENTS.md](AGENTS.md) | 在本仓库中工作的操作约定 |
 
@@ -174,4 +194,4 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 
 ## 许可证与致谢
 
-MIT。本项目建立在 [speech-swift](https://github.com/soniqo/speech-swift) 的 MLX/CoreML 语音 runtime、MOSS、VibeVoice、Silero 和 pyannote 模型作者的成果以及 [mlx](https://github.com/ml-explore/mlx) 之上。`docs/` 中的 reference project source audit 列出了24个影响本项目设计的开源项目，无论其设计经验值得借鉴还是警惕。
+MIT。本项目建立在 [speech-swift](https://github.com/soniqo/speech-swift) 的 MLX/CoreML 语音 runtime、MOSS、VibeVoice、Silero 和 pyannote 模型作者的成果以及 [mlx](https://github.com/ml-explore/mlx) 之上。`docs/` 中的 reference project source audit 列出了影响本项目设计的开源项目，无论其设计经验值得借鉴还是警惕。

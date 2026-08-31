@@ -121,9 +121,21 @@ swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-La aplicación muestra la ruta de su paquete cuando la compilación, el inventario de recursos permitidos y las comprobaciones estrictas de firma de código terminan correctamente. El ejecutable no incluye pesos de modelos ni entornos de Python, pero sí las definiciones de perfil `ko-meeting` y `it-dialogue`. Desde una caché limpia, el ciclo completo de aprovisionamiento y `doctor` para `ko-meeting` sigue incompleto: el tokenizador indirecto de Qwen y los metadatos de Hugging Face deben prepararse manualmente.
+La suite predeterminada `swift test` usa fixtures incluidas o generadas. No accede a la caché de modelos de un usuario, ejecuciones externas de benchmark ni un entorno Python de modelos preparado por el usuario, y no ejecuta inferencia real. El script de aprovisionamiento instala el entorno fijado completo de `ko-meeting`, con VibeVoice ASR, Silero VAD y la diarización Community-1. También descarga los archivos del tokenizador `Qwen/Qwen2.5-7B` que VibeVoice necesita de forma indirecta; esta vía no usa pesos de inferencia de Qwen.
 
-El ejecutable ofrece cinco comandos de producto:
+Prepara la caché fijada y ejecuta la integración de modelos de forma explícita:
+
+```bash
+cache_root="${MACCHERONI_BENCHMARK_CACHE:-$HOME/Library/Caches/Maccheroni/benchmarks}"
+MACCHERONI_BENCHMARK_CACHE="$cache_root" zsh scripts/setup-transcription-runtime.zsh --profile ko-meeting
+MACCHERONI_RUN_MODEL_INTEGRATION=1 MACCHERONI_BENCHMARK_CACHE="$cache_root" MACCHERONI_HF_HOME="$cache_root/models/huggingface" swift test --filter MaccheroniModelIntegrationTests
+```
+
+La suite activada de forma explícita solo comprueba VibeVoice, Silero y Community-1. Si faltan requisitos fijados o están incompletos, falla antes de iniciar un backend con un error claro de prerrequisito.
+
+La aplicación muestra la ruta de su paquete cuando la compilación, el inventario de recursos permitidos y las comprobaciones estrictas de firma de código terminan correctamente. El ejecutable no incluye pesos de modelos ni entornos de Python, pero sí las definiciones de perfil `ko-meeting` y `it-dialogue`.
+
+El ejecutable ofrece estos comandos de producto:
 
 ```bash
 .build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
@@ -167,7 +179,7 @@ Se aceptan issues y pull requests específicos. Los comandos de compilación y p
 | `Tests/` | Pruebas basadas en fixtures |
 | `benchmarks/scripts/` | Ejecutores, evaluadores y el arnés de comparación de vías de corrección, con veredictos derivados y pruebas negativas |
 | `docs/` | Resumen de investigación, auditorías de código fuente, política de restricciones, contratos (esquemas JSON), diseño de interfaz |
-| `scripts/` | Compilación del paquete de la aplicación, compilación del harness MOSS, configuración del entorno de posprocesamiento |
+| `scripts/` | Compilación del paquete de la aplicación, configuración de los entornos de transcripción y posprocesamiento, compilación de los harnesses de benchmark |
 | [PROJECT.md](PROJECT.md) | Jerarquía de intenciones: pilares, objetivos excluidos, reglas de decisión y registro de decisiones de solo adición |
 | [AGENTS.md](AGENTS.md) | Convenciones operativas para trabajar en este repositorio |
 
@@ -175,4 +187,4 @@ Cada afirmación de finalización incluida en los documentos lleva el comando qu
 
 ## Licencia y agradecimientos
 
-MIT. Basado en el trabajo de [speech-swift](https://github.com/soniqo/speech-swift) (entornos de voz MLX/CoreML), los autores de los modelos MOSS, VibeVoice, Silero y pyannote, y [mlx](https://github.com/ml-explore/mlx). La auditoría del código fuente de los proyectos de referencia en `docs/` reconoce los 24 proyectos de código abierto cuyos diseños, tanto los acertados como los fallidos, dieron forma a este proyecto.
+MIT. Basado en el trabajo de [speech-swift](https://github.com/soniqo/speech-swift) (entornos de voz MLX/CoreML), los autores de los modelos MOSS, VibeVoice, Silero y pyannote, y [mlx](https://github.com/ml-explore/mlx). La auditoría del código fuente de los proyectos de referencia en `docs/` reconoce los proyectos de código abierto cuyos diseños, tanto los acertados como los fallidos, dieron forma a este proyecto.
