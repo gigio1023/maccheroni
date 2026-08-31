@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 from copy import deepcopy
 from hashlib import sha256
+import io
 import json
 from pathlib import Path
 import sys
@@ -13,6 +15,7 @@ SCORING = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCORING))
 
 from compare_correction_paths import compare_correction_paths, main  # noqa: E402
+from score_corrected import score_corrected_run  # noqa: E402
 
 
 SOURCE_SHA256 = "0" * 64
@@ -23,6 +26,13 @@ ASR_MODEL = {
     "hf_model_id": "example/asr-model",
     "revision": "a" * 40,
     "quantization": "int8",
+}
+SOURCE_ARTIFACT_KINDS = {
+    "primary/raw.txt": "primary_raw",
+    "primary/segments.json": "primary_segments",
+    "diarization/timeline.json": "diarization_timeline",
+    "merged/segments.json": "merged_segments",
+    "merged/conflicts.json": "merged_conflicts",
 }
 REFERENCE_TEXTS = (
     "Maccheroni builds transcripts",
@@ -70,6 +80,14 @@ def load_json(path: Path) -> dict[str, object]:
 
 def file_sha256(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
+
+
+def tree_hashes(root: Path) -> dict[str, str]:
+    return {
+        path.relative_to(root).as_posix(): file_sha256(path)
+        for path in root.rglob("*")
+        if path.is_file() and not path.is_symlink()
+    }
 
 
 def segments_document(
@@ -132,8 +150,6 @@ def create_run(
     run_id: str,
     raw_texts: tuple[str, ...],
     decode_glossary: bool,
-    corrected_texts: tuple[str, ...] | None = None,
-    conflicts: list[dict[str, object]] | None = None,
 ) -> Path:
     run = root / run_id
     primary = segments_document(raw_texts, assigned_speakers=False)
@@ -161,32 +177,6 @@ def create_run(
         "merged/segments.json",
         "merged/conflicts.json",
     ]
-    postprocess = None
-    if corrected_texts is not None:
-        conflict_values = conflicts or []
-        reviewed = {int(value["segment_index"]) for value in conflict_values}
-        corrected = segments_document(
-            corrected_texts,
-            reviewed_indices=reviewed,
-        )
-        write_json(run / "postprocess/segments.json", corrected)
-        write_json(run / "postprocess/conflicts.json", conflict_values)
-        artifact_paths.extend(
-            ("postprocess/segments.json", "postprocess/conflicts.json")
-        )
-        postprocess = {
-            "backend": {"name": "codex-app-server", "version": "0.146.0"},
-            "model_id": "gpt-5.6-sol",
-            "model_revision": None,
-            "quantization": None,
-            "input_mode": "text-only",
-            "glossary_sha256": GLOSSARY_SHA256,
-            "mode": "correction",
-            "target_language": None,
-            "source_segments_sha256": None,
-            "batching": batching_provenance(),
-        }
-
     manifest: dict[str, object] = {
         "schema_version": "1.0.0",
         "run_id": run_id,
@@ -241,7 +231,7 @@ def create_run(
         "peak_memory_bytes": 1,
         "artifacts": [
             {
-                "kind": relative.replace("/", "_").replace(".", "_"),
+                "kind": SOURCE_ARTIFACT_KINDS[relative],
                 "path": relative,
                 "sha256": file_sha256(run / relative),
             }
@@ -249,10 +239,76 @@ def create_run(
         ],
         "failure": None,
     }
-    if postprocess is not None:
-        manifest["postprocess"] = postprocess
     write_json(run / "manifest.json", manifest)
     return run
+
+
+def create_derived(
+    run: Path,
+    *,
+    derived_id: str,
+    corrected_texts: tuple[str, ...],
+    conflicts: list[dict[str, object]],
+) -> str:
+    derived = run / "derived" / derived_id
+    reviewed = {int(value["segment_index"]) for value in conflicts}
+    corrected = segments_document(corrected_texts, reviewed_indices=reviewed)
+    write_json(derived / "postprocess/segments.json", corrected)
+    write_json(derived / "postprocess/conflicts.json", conflicts)
+    source_manifest = load_json(run / "manifest.json")
+    write_json(
+        derived / "manifest.json",
+        {
+            "schema_version": "1.0.0",
+            "derived_id": derived_id,
+            "status": "succeeded",
+            "source": {
+                "run_id": source_manifest["run_id"],
+                "manifest_sha256": file_sha256(run / "manifest.json"),
+                "segments_path": "merged/segments.json",
+                "segments_sha256": file_sha256(run / "merged/segments.json"),
+            },
+            "operation": {
+                "profile_name": "ko-meeting",
+                "mode": "correction",
+                "target_language": None,
+                "glossary_semantics": "current-profile",
+                "glossary_sha256": GLOSSARY_SHA256,
+                "glossary_item_count": 2,
+            },
+            "timing": {
+                "started_at": "2026-08-12T00:00:00Z",
+                "finished_at": "2026-08-12T00:00:01Z",
+                "wall_time_s": 1.0,
+            },
+            "artifacts": [
+                {
+                    "kind": "postprocess_segments",
+                    "path": "postprocess/segments.json",
+                    "sha256": file_sha256(derived / "postprocess/segments.json"),
+                },
+                {
+                    "kind": "postprocess_conflicts",
+                    "path": "postprocess/conflicts.json",
+                    "sha256": file_sha256(derived / "postprocess/conflicts.json"),
+                },
+            ],
+            "failure": None,
+            "postprocess": {
+                "backend": {"name": "codex-app-server", "version": "0.146.0"},
+                "model_id": "gpt-5.6-sol",
+                "model_revision": None,
+                "quantization": None,
+                "input_mode": "text-only",
+                "glossary_sha256": GLOSSARY_SHA256,
+                "mode": "correction",
+                "target_language": None,
+                "source_segments_sha256": None,
+                "batching": batching_provenance(),
+            },
+        },
+    )
+    return derived_id
 
 
 def write_placeholder_thresholds(path: Path) -> None:
@@ -344,11 +400,9 @@ class FourStateFixture:
             raw_texts=DECODE_GLOSSARY_TEXTS,
             decode_glossary=True,
         )
-        self.decode_glossary_corrected = create_run(
-            runs,
-            run_id="fixture-decode-glossary-corrected",
-            raw_texts=DECODE_GLOSSARY_TEXTS,
-            decode_glossary=True,
+        self.decode_glossary_derived_id = create_derived(
+            self.decode_glossary,
+            derived_id="derived-decode-corrected",
             corrected_texts=DECODE_CORRECTED_TEXTS,
             conflicts=[
                 {
@@ -359,11 +413,9 @@ class FourStateFixture:
                 }
             ],
         )
-        self.no_glossary_corrected = create_run(
-            runs,
-            run_id="fixture-no-glossary-corrected",
-            raw_texts=NO_GLOSSARY_TEXTS,
-            decode_glossary=False,
+        self.no_glossary_derived_id = create_derived(
+            self.no_glossary,
+            derived_id="derived-no-glossary-corrected",
             corrected_texts=NO_GLOSSARY_CORRECTED_TEXTS,
             conflicts=[
                 {
@@ -381,8 +433,8 @@ class FourStateFixture:
             terms_path=self.terms,
             no_glossary_run=self.no_glossary,
             decode_glossary_run=self.decode_glossary,
-            decode_glossary_corrected_run=self.decode_glossary_corrected,
-            no_glossary_corrected_run=self.no_glossary_corrected,
+            decode_glossary_derived_id=self.decode_glossary_derived_id,
+            no_glossary_derived_id=self.no_glossary_derived_id,
             thresholds_path=self.thresholds,
         )
 
@@ -396,10 +448,10 @@ class FourStateFixture:
             str(self.no_glossary),
             "--decode-glossary-run",
             str(self.decode_glossary),
-            "--decode-glossary-corrected-run",
-            str(self.decode_glossary_corrected),
-            "--no-glossary-corrected-run",
-            str(self.no_glossary_corrected),
+            "--decode-glossary-derived-id",
+            self.decode_glossary_derived_id,
+            "--no-glossary-derived-id",
+            self.no_glossary_derived_id,
             "--thresholds",
             str(self.thresholds),
             "--output",
@@ -412,6 +464,32 @@ def rewrite_manifest(run: Path, update) -> None:
     manifest = load_json(path)
     update(manifest)
     write_json(path, manifest)
+
+
+def rewrite_derived_manifest(run: Path, derived_id: str, update) -> None:
+    path = run / "derived" / derived_id / "manifest.json"
+    manifest = load_json(path)
+    update(manifest)
+    write_json(path, manifest)
+
+
+def rewrite_derived_artifact(
+    run: Path, derived_id: str, relative: str, update
+) -> None:
+    root = run / "derived" / derived_id
+    path = root / relative
+    document = load_json(path)
+    update(document)
+    write_json(path, document)
+
+    def reseal(manifest: dict[str, object]) -> None:
+        artifact = next(
+            value for value in manifest["artifacts"]
+            if value["path"] == relative
+        )
+        artifact["sha256"] = file_sha256(path)
+
+    rewrite_derived_manifest(run, derived_id, reseal)
 
 
 def replace_run_source(run: Path, source_sha256: str) -> None:
@@ -704,6 +782,210 @@ class CompareCorrectionPathsTests(unittest.TestCase):
 
             self.assertEqual(output.read_text(encoding="utf-8"), "sentinel\n")
 
+    def test_cli_creates_a_placeholder_verdict_from_selected_derived_sets(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = FourStateFixture(root)
+            output = root / "verdict.json"
+
+            with redirect_stdout(io.StringIO()):
+                exit_code = main(fixture.cli_arguments(output))
+            self.assertEqual(exit_code, 0)
+
+            verdict = load_json(output)
+            self.assertEqual(verdict["status"], "not_configured")
+            self.assertIsNone(verdict["passed"])
+            self.assertEqual(
+                verdict["states"]["decode_glossary_corrected"]["derived_id"],
+                fixture.decode_glossary_derived_id,
+            )
+            self.assertEqual(
+                verdict["states"]["no_glossary_corrected"]["derived_id"],
+                fixture.no_glossary_derived_id,
+            )
+
+    def test_rejects_source_and_derived_hash_tampering(self) -> None:
+        mutations = ("source_artifact", "source_manifest", "derived_artifact")
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                with tempfile.TemporaryDirectory() as temporary:
+                    fixture = FourStateFixture(Path(temporary))
+                    if mutation == "source_artifact":
+                        path = fixture.decode_glossary / "merged/segments.json"
+                        path.write_bytes(path.read_bytes() + b" \n")
+                    elif mutation == "source_manifest":
+                        rewrite_manifest(
+                            fixture.decode_glossary,
+                            lambda manifest: manifest.update(
+                                {"peak_memory_bytes": 2}
+                            ),
+                        )
+                    else:
+                        path = (
+                            fixture.decode_glossary
+                            / "derived"
+                            / fixture.decode_glossary_derived_id
+                            / "postprocess/segments.json"
+                        )
+                        path.write_bytes(path.read_bytes() + b" \n")
+                    with self.assertRaisesRegex(
+                        ValueError, r"hash mismatch|source lineage"
+                    ):
+                        fixture.compare()
+
+    def test_rejects_mutated_selected_derived_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = FourStateFixture(Path(temporary))
+            rewrite_derived_manifest(
+                fixture.decode_glossary,
+                fixture.decode_glossary_derived_id,
+                lambda manifest: manifest.update({"derived_id": "different-id"}),
+            )
+            with self.assertRaisesRegex(ValueError, r"selected derived ID"):
+                fixture.compare()
+
+    def test_rejects_derived_speaker_timestamp_source_and_coverage_mutation(self) -> None:
+        mutations = {
+            "speaker": lambda document: document["segments"][1].update(
+                {"speaker": "SPEAKER_99"}
+            ),
+            "timestamp": lambda document: document["segments"][1].update(
+                {"end_s": 1.75}
+            ),
+            "source": lambda document: document["source"].update(
+                {"sha256": OTHER_SOURCE_SHA256}
+            ),
+            "coverage": lambda document: document["segments"].pop(),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as temporary:
+                    fixture = FourStateFixture(Path(temporary))
+                    rewrite_derived_artifact(
+                        fixture.decode_glossary,
+                        fixture.decode_glossary_derived_id,
+                        "postprocess/segments.json",
+                        mutate,
+                    )
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        r"speaker|immutable|source|segment|schema|semantics",
+                    ):
+                        fixture.compare()
+
+    def test_rejects_mismatched_derived_profile_and_model_identity(self) -> None:
+        mutations = {
+            "profile": lambda manifest: manifest["operation"].update(
+                {"profile_name": "different-profile"}
+            ),
+            "model": lambda manifest: manifest["postprocess"].update(
+                {"model_id": "different/model"}
+            ),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as temporary:
+                    fixture = FourStateFixture(Path(temporary))
+                    rewrite_derived_manifest(
+                        fixture.no_glossary,
+                        fixture.no_glossary_derived_id,
+                        mutate,
+                    )
+                    with self.assertRaisesRegex(
+                        ValueError, r"mismatched.*(profile|model)"
+                    ):
+                        fixture.compare()
+
+    def test_default_comparator_rejects_mutable_root_postprocess_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = FourStateFixture(Path(temporary))
+            write_json(
+                fixture.no_glossary / "postprocess/segments.json",
+                segments_document(NO_GLOSSARY_TEXTS),
+            )
+            with self.assertRaisesRegex(
+                ValueError, r"inventory|mutable root postprocess"
+            ):
+                fixture.compare()
+
+    def test_rejects_a_foreign_reference_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = FourStateFixture(Path(temporary))
+            reference = load_json(fixture.reference)
+            reference["source"]["sha256"] = OTHER_SOURCE_SHA256
+            write_json(fixture.reference, reference)
+
+            with self.assertRaisesRegex(ValueError, r"reference source identity"):
+                fixture.compare()
+
+    def test_rejects_unlisted_and_symlinked_source_artifacts(self) -> None:
+        mutations = ("unlisted", "symlink", "duplicate_required_kind")
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                with tempfile.TemporaryDirectory() as temporary:
+                    fixture = FourStateFixture(Path(temporary))
+                    if mutation == "unlisted":
+                        (fixture.no_glossary / "unlisted.txt").write_text(
+                            "synthetic unlisted evidence\n", encoding="utf-8"
+                        )
+                    elif mutation == "symlink":
+                        merged = fixture.no_glossary / "merged/segments.json"
+                        merged.unlink()
+                        merged.symlink_to("../primary/segments.json")
+                    else:
+                        scores = fixture.no_glossary / "scores.json"
+                        write_json(scores, {"synthetic": True})
+                        rewrite_manifest(
+                            fixture.no_glossary,
+                            lambda manifest: manifest["artifacts"].append(
+                                {
+                                    "kind": "primary_raw",
+                                    "path": "scores.json",
+                                    "sha256": file_sha256(scores),
+                                }
+                            ),
+                        )
+
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        r"inventory|symbolic link|unsafe|exactly one canonical",
+                    ):
+                        fixture.compare()
+
+    def test_cli_rejects_outputs_inside_source_and_selected_derived_trees(self) -> None:
+        locations = ("source", "derived")
+        for location in locations:
+            with self.subTest(location=location):
+                with tempfile.TemporaryDirectory() as temporary:
+                    fixture = FourStateFixture(Path(temporary))
+                    if location == "source":
+                        output = fixture.no_glossary / "verdict.json"
+                    else:
+                        output = (
+                            fixture.decode_glossary
+                            / "derived"
+                            / fixture.decode_glossary_derived_id
+                            / "verdict.json"
+                        )
+                    before = {
+                        "no_glossary": tree_hashes(fixture.no_glossary),
+                        "decode_glossary": tree_hashes(fixture.decode_glossary),
+                    }
+
+                    with self.assertRaisesRegex(
+                        ValueError, r"outside immutable input tree"
+                    ):
+                        main(fixture.cli_arguments(output))
+
+                    self.assertFalse(output.exists())
+                    self.assertEqual(
+                        before,
+                        {
+                            "no_glossary": tree_hashes(fixture.no_glossary),
+                            "decode_glossary": tree_hashes(fixture.decode_glossary),
+                        },
+                    )
+
     def test_rejects_a_glossary_role_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = FourStateFixture(Path(temporary))
@@ -725,7 +1007,7 @@ class CompareCorrectionPathsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             fixture = FourStateFixture(Path(temporary))
             replace_run_source(
-                fixture.no_glossary_corrected,
+                fixture.no_glossary,
                 OTHER_SOURCE_SHA256,
             )
             with self.assertRaisesRegex(ValueError, "source"):
@@ -741,11 +1023,12 @@ class CompareCorrectionPathsTests(unittest.TestCase):
                 postprocess["target_language"] = "en"
                 postprocess["source_segments_sha256"] = "2" * 64
 
-            rewrite_manifest(
-                fixture.decode_glossary_corrected,
+            rewrite_derived_manifest(
+                fixture.decode_glossary,
+                fixture.decode_glossary_derived_id,
                 make_translation,
             )
-            with self.assertRaisesRegex(ValueError, "translation"):
+            with self.assertRaisesRegex(ValueError, r"translation|correction|schema"):
                 fixture.compare()
 
     def test_rejects_succeeded_truncated_and_incomplete_runs(self) -> None:
@@ -775,8 +1058,6 @@ class CompareCorrectionPathsTests(unittest.TestCase):
                     for run in (
                         fixture.no_glossary,
                         fixture.decode_glossary,
-                        fixture.decode_glossary_corrected,
-                        fixture.no_glossary_corrected,
                     ):
                         rewrite_manifest(
                             run,
@@ -791,22 +1072,146 @@ class CompareCorrectionPathsTests(unittest.TestCase):
                     ):
                         fixture.compare()
 
-    def test_accepts_legacy_correction_manifests_without_mode(self) -> None:
+    def test_rejects_failed_gapped_overlapping_and_incomplete_chunk_coverage(self) -> None:
+        def failed(manifest: dict[str, object]) -> None:
+            manifest["chunk_boundaries"][0]["status"] = "failed"
+
+        def chunked(
+            manifest: dict[str, object],
+            first_end: float,
+            second_start: float,
+            second_end: float = 4.0,
+        ) -> None:
+            manifest["coverage"].update(
+                {
+                    "strategy": "chunked",
+                    "chunks_planned": 2,
+                    "chunks_completed": 2,
+                    "processed_duration_s": 4.0,
+                    "truncated": False,
+                }
+            )
+            manifest["chunk_boundaries"] = [
+                {
+                    "index": 0,
+                    "start_s": 0.0,
+                    "end_s": first_end,
+                    "status": "succeeded",
+                },
+                {
+                    "index": 1,
+                    "start_s": second_start,
+                    "end_s": second_end,
+                    "status": "succeeded",
+                },
+            ]
+
+        mutations = {
+            "failed": failed,
+            "gap": lambda manifest: chunked(manifest, 1.9, 2.1),
+            "overlap": lambda manifest: chunked(manifest, 2.1, 1.9),
+            "incomplete": lambda manifest: chunked(manifest, 2.0, 2.0, 3.9),
+            "truncated": lambda manifest: manifest["coverage"].update(
+                {"truncated": True}
+            ),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as temporary:
+                    fixture = FourStateFixture(Path(temporary))
+                    rewrite_manifest(fixture.decode_glossary, mutate)
+
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        r"coverage|boundary|truncated|successful run",
+                    ):
+                        fixture.compare()
+
+    def test_standalone_current_scorer_rejects_an_unapplied_source_glossary(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = FourStateFixture(Path(temporary))
-            for run in (
-                fixture.decode_glossary_corrected,
-                fixture.no_glossary_corrected,
-            ):
-                rewrite_manifest(
-                    run,
-                    lambda manifest: manifest["postprocess"].pop("mode"),
+            rewrite_manifest(
+                fixture.decode_glossary,
+                lambda manifest: manifest["glossary"].update({"applied": False}),
+            )
+            rewrite_derived_manifest(
+                fixture.decode_glossary,
+                fixture.decode_glossary_derived_id,
+                lambda manifest: manifest["source"].update(
+                    {
+                        "manifest_sha256": file_sha256(
+                            fixture.decode_glossary / "manifest.json"
+                        )
+                    }
+                ),
+            )
+
+            with self.assertRaisesRegex(ValueError, r"did not apply.*glossary"):
+                score_corrected_run(
+                    fixture.decode_glossary,
+                    fixture.reference,
+                    fixture.terms,
+                    derived_id=fixture.decode_glossary_derived_id,
                 )
 
-            verdict = fixture.compare()
+    def test_rejects_nonfinite_source_derived_and_segment_numbers(self) -> None:
+        mutations = ("source_nan", "derived_nan", "source_infinity", "derived_infinity")
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                with tempfile.TemporaryDirectory() as temporary:
+                    fixture = FourStateFixture(Path(temporary))
+                    if mutation == "source_nan":
+                        rewrite_manifest(
+                            fixture.decode_glossary,
+                            lambda manifest: manifest["coverage"].update(
+                                {"input_duration_s": float("nan")}
+                            ),
+                        )
+                    elif mutation == "derived_nan":
+                        rewrite_derived_manifest(
+                            fixture.decode_glossary,
+                            fixture.decode_glossary_derived_id,
+                            lambda manifest: manifest["timing"].update(
+                                {"wall_time_s": float("nan")}
+                            ),
+                        )
+                    elif mutation == "source_infinity":
+                        path = fixture.decode_glossary / "merged/segments.json"
+                        document = load_json(path)
+                        document["segments"][0]["end_s"] = float("inf")
+                        write_json(path, document)
+                        rewrite_manifest(
+                            fixture.decode_glossary,
+                            lambda manifest: next(
+                                artifact for artifact in manifest["artifacts"]
+                                if artifact["path"] == "merged/segments.json"
+                            ).update({"sha256": file_sha256(path)}),
+                        )
+                    else:
+                        rewrite_derived_artifact(
+                            fixture.decode_glossary,
+                            fixture.decode_glossary_derived_id,
+                            "postprocess/segments.json",
+                            lambda document: document["segments"][0].update(
+                                {"start_s": float("-inf")}
+                            ),
+                        )
 
-            self.assertEqual(verdict["status"], "not_configured")
-            self.assertIsNone(verdict["passed"])
+                    with self.assertRaisesRegex(
+                        ValueError, r"non-finite|cannot read"
+                    ):
+                        fixture.compare()
+
+    def test_current_derived_manifest_requires_explicit_correction_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = FourStateFixture(Path(temporary))
+            rewrite_derived_manifest(
+                fixture.decode_glossary,
+                fixture.decode_glossary_derived_id,
+                lambda manifest: manifest["postprocess"].pop("mode"),
+            )
+            with self.assertRaisesRegex(ValueError, r"schema|mode"):
+                fixture.compare()
 
     def test_safety_guardrail_fails_closed_when_an_applied_change_is_unscorable(
         self,
