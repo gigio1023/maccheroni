@@ -21,7 +21,7 @@
 
 ---
 
-**Maccheroni** (from *macaronic speech* — utterances that mix languages) transcribes the conversations that are hardest to get right: Korean meetings with English product names in every sentence, language classes, multilingual calls. Everything runs on-device with pinned MLX/CoreML models.
+**Maccheroni** (from *macaronic speech* — utterances that mix languages) transcribes the conversations that are hardest to get right: Korean meetings with English product names in every sentence, language classes, multilingual calls. Transcription and diarization run on-device with pinned MLX/Core ML models; optional text-only post-processing can use Codex.
 
 What an export looks like (illustrative sample, not model output):
 
@@ -67,7 +67,7 @@ Failed leaves are re-split within typed bounds (30 s minimum, depth 3) and only 
 
 ## Models
 
-Everything is pinned by Hugging Face ID + revision + quantization and recorded in every run manifest.
+Product model and service identities are recorded in every run manifest. Downloadable models are pinned by Hugging Face ID, revision, and quantization.
 
 | Role | Model | Revision | Quantization |
 |---|---|---|---|
@@ -77,6 +77,8 @@ Everything is pinned by Hugging Face ID + revision + quantization and recorded i
 | Diarization | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | Post-processing (local) | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
 | Post-processing (remote, text-only) | `gpt-5.6-sol` via Codex app server | service-managed | n/a |
+
+Qwen3-ASR, Qwen3 ForcedAligner, and DiCoW remain research candidates. Apple-runtime compatibility, conversion parity, and product-quality gains have not been established for them.
 
 ## Measured results
 
@@ -93,7 +95,7 @@ All from public or synthetic fixtures; evaluation IDs and artifact hashes are re
 | Italian 2-speaker synthetic (10 min), 9-term glossary | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverse sample (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-Korean and Italian are the first two language profiles. A pinned Korean-English acceptance pack — HiKE code-switching excerpts and a four-speaker AMI meeting — is prepared as the next fixture set, and new measurements join this table as they land.
+Korean and Italian are the first two language profiles. HiKE, FLEURS, and AMI are research fixtures for transport, scoring, and conversion-parity work. They cannot promote a model until training-data exclusion and overlap-specific measurements are established.
 
 Chunk-boundary speaker stability on the 78-minute sample: 1.0 for both reference speakers. A fixed 600-second matrix showed that MOSS leaves above 120 s lose timestamp structure entirely, which is why the production leaf cap is 120 s — details in [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 
@@ -102,9 +104,7 @@ Chunk-boundary speaker stability on the 78-minute sample: 1.0 for both reference
   <img src="docs/assets/leaf-cap-light.svg" alt="Bar chart: on the same 600-second input, 120-second leaves yield 5 canonical end-of-sequence leaves (pass), 240- and 300-second leaves yield 0 valid leaves (typed invalid_eos_output failures), and forced recovery from 240-second parents yields 5 valid 120-second children" width="100%">
 </picture>
 
-Correction gains are measured, not assumed. A four-state comparison harness scores a completed run's raw and corrected output against one reference — with and without decode-time glossary injection — and counts every applied correction that moved a segment away from the reference, so a confidently wrong repair can never hide inside an average.
-
-A completed run is not frozen. `maccheroni postprocess` and the app derive new correction or translation sets from the sealed segments without re-running ASR, and every glossary save is kept as a content-addressed revision, so a later derivation can reuse exactly the glossary bytes the original run recorded.
+Correction gains are measured with a four-state comparison of raw and corrected output, with and without decode-time glossary injection. Harmful edits are counted explicitly. `maccheroni postprocess` and the app can derive new correction or translation sets from sealed segments without rerunning ASR; saved glossary revisions remain content-addressed and reusable.
 
 ## Install
 
@@ -115,11 +115,11 @@ Requirements: Apple Silicon Mac, macOS 26, Xcode 26, [uv](https://docs.astral.sh
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 315 tests
+swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-The app prints its bundle path when the build, resource-allowlist inventory, and strict codesign checks all pass. Model weights download on first use. The executable does not bundle model weights or Python environments; `maccheroni doctor` verifies runtimes, pinned snapshots, and storage readiness per configured volume.
+The app prints its bundle path when the build, resource-allowlist inventory, and strict codesign checks all pass. The executable bundles neither model weights nor Python environments. Profile definitions for `ko-meeting` and `it-dialogue` are included, and `maccheroni doctor` reports their observed dependencies and storage state. Empty-cache provisioning for `ko-meeting` is not complete yet: its indirect Qwen tokenizer and Hugging Face metadata must already be present.
 
 The executable provides five product commands:
 
@@ -133,7 +133,7 @@ The executable provides five product commands:
 
 Use `maccheroni help`, `maccheroni doctor --json`, and `maccheroni capabilities --json` for discoverable help and structured output. See the concise [CLI guide](docs/cli-guide.md) for command and output contracts. Transcription and diarization run on this Mac, so audio remains local.
 
-Profiles ship for Korean meetings (`ko-meeting`, VibeVoice) and Italian dialogue (`it-dialogue`, MOSS). For the optional local post-processing model, run `zsh scripts/setup-postprocess-runtime.zsh`.
+For the optional local post-processing model, run `zsh scripts/setup-postprocess-runtime.zsh`.
 
 ## Privacy
 
@@ -162,7 +162,7 @@ Issues and focused pull requests are welcome. Build and test commands, the verif
 | Path | What it is |
 |---|---|
 | `Sources/` | Swift package: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 315 fixture-based tests across 24 suites |
+| `Tests/` | Fixture-based Swift tests |
 | `benchmarks/scripts/` | Runners, scorers, and the correction-path comparison harness, with derived verdicts and negative tests |
 | `docs/` | Research digest, source audits, constraint policy, contracts (JSON schemas), UI design |
 | `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |

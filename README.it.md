@@ -5,8 +5,8 @@
 <h1 align="center">Maccheroni</h1>
 
 <p align="center">
-  Trascrizione locale delle conversazioni multilingue su Apple Silicon.<br>
-  Glossario inserito durante la decodifica · diarizzazione dei parlanti sull’intero file · l’audio non lascia mai il Mac.
+  Trascrizione e diarizzazione locale dell’audio di conversazioni multilingue su Apple Silicon.<br>
+  Glossario inserito durante la decodifica · l’audio non lascia mai il Mac · la post-elaborazione Codex facoltativa può inviare solo testo a un servizio remoto.
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
 
 ---
 
-**Maccheroni** (da *macaronic speech*, cioè enunciati che mescolano più lingue) trascrive le conversazioni più difficili da trascrivere correttamente: riunioni in coreano con nomi di prodotti inglesi in ogni frase, lezioni di lingua, chiamate multilingue. Tutto viene eseguito sul dispositivo con modelli MLX/CoreML fissati a versioni precise.
+**Maccheroni** (da *macaronic speech*, cioè enunciati che mescolano più lingue) trascrive le conversazioni più difficili da trascrivere correttamente: riunioni in coreano con nomi di prodotti inglesi in ogni frase, lezioni di lingua, chiamate multilingue. La trascrizione e la diarizzazione dell’audio vengono eseguite sul dispositivo con modelli MLX/CoreML fissati a versioni precise; la post-elaborazione Codex facoltativa può usare un servizio remoto, ma invia solo testo.
 
 Esempio di esportazione (puramente illustrativo, non è l’output del modello):
 
@@ -67,7 +67,7 @@ I segmenti non riusciti vengono suddivisi di nuovo entro limiti tipizzati (minim
 
 ## Modelli
 
-Ogni modello è fissato tramite ID Hugging Face + revisione + quantizzazione e viene registrato nel manifest di ogni esecuzione.
+Le identità dei modelli e dei servizi usati dal prodotto vengono registrate nel manifest di ogni esecuzione. I modelli scaricabili sono fissati tramite ID Hugging Face, revisione e quantizzazione.
 
 | Ruolo | Modello | Revisione | Quantizzazione |
 |---|---|---|---|
@@ -77,6 +77,8 @@ Ogni modello è fissato tramite ID Hugging Face + revisione + quantizzazione e v
 | Diarizzazione | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | Post-elaborazione (locale) | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
 | Post-elaborazione (remota, solo testo) | `gpt-5.6-sol` tramite il server applicativo Codex | gestita dal servizio | n/a |
+
+Qwen3-ASR, Qwen3 ForcedAligner e DiCoW restano candidati per la ricerca. La compatibilità con i runtime Apple, la parità dopo la conversione e i miglioramenti della qualità del prodotto non sono ancora stati dimostrati.
 
 ## Risultati misurati
 
@@ -93,7 +95,7 @@ Tutti i risultati provengono da fixture pubbliche o sintetiche. Gli ID delle val
 | Conversazione sintetica in italiano con 2 parlanti (10 min), glossario di 9 termini | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | Campione VoxConverse (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-Coreano e italiano sono i primi due profili di lingua. Come prossimo insieme di fixture è pronto un acceptance pack coreano-inglese fissato — estratti HiKE con commutazione di codice e una riunione AMI a quattro parlanti — e le nuove misurazioni entrano in questa tabella man mano che arrivano.
+Coreano e italiano sono i primi due profili di lingua. HiKE, FLEURS e AMI sono fixture di ricerca destinate al trasporto, al calcolo dei punteggi e alla verifica della parità di conversione. Non possono promuovere un modello senza dimostrare l’esclusione dai dati di addestramento e misurare in modo specifico il parlato sovrapposto.
 
 Nel campione di 78 minuti, la stabilità dei parlanti ai confini dei segmenti è 1.0 per entrambi i parlanti di riferimento. Una matrice fissa di 600 secondi ha mostrato che i segmenti MOSS oltre 120 s perdono completamente la struttura dei timestamp. Per questo il limite di produzione è 120 s; i dettagli sono in [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 
@@ -102,9 +104,7 @@ Nel campione di 78 minuti, la stabilità dei parlanti ai confini dei segmenti è
   <img src="docs/assets/leaf-cap-light.svg" alt="Grafico a barre: sullo stesso input di 600 secondi, i segmenti da 120 s producono 5 foglie canoniche con fine sequenza (superato), quelli da 240 e 300 s producono 0 foglie valide (errori tipizzati invalid_eos_output), e il recupero forzato da genitori di 240 s produce 5 figli validi da 120 s" width="100%">
 </picture>
 
-I guadagni della correzione si misurano, non si presumono. Un banco di confronto a quattro stati valuta l’output grezzo e quello corretto di un’esecuzione completata contro lo stesso riferimento, con e senza iniezione del glossario in decodifica, e conta ogni correzione applicata che ha allontanato un segmento dal riferimento. Una riparazione sbagliata ma sicura di sé non può nascondersi in una media.
-
-Un’esecuzione completata non è congelata. `maccheroni postprocess` e l’app derivano nuovi insiemi di correzione o traduzione dai segmenti sigillati senza rieseguire l’ASR, e ogni salvataggio del glossario viene conservato come revisione indirizzata dal contenuto, così una derivazione successiva può riutilizzare esattamente i byte del glossario registrati dall’esecuzione originale.
+I guadagni della correzione vengono misurati con un confronto a quattro stati tra output grezzo e corretto, con e senza iniezione del glossario durante la decodifica. Le modifiche dannose vengono conteggiate esplicitamente. `maccheroni postprocess` e l’app possono derivare nuovi insiemi di correzione o traduzione dai segmenti sigillati senza rieseguire l’ASR; le revisioni salvate del glossario rimangono indirizzate dal contenuto e riutilizzabili.
 
 ## Installazione
 
@@ -115,11 +115,11 @@ Requisiti: Mac con Apple Silicon, macOS 26, Xcode 26, [uv](https://docs.astral.s
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 315 tests
+swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-L’app stampa il percorso del bundle quando la compilazione, l’inventario della lista delle risorse consentite e i controlli rigorosi della firma del codice hanno esito positivo. I pesi dei modelli vengono scaricati al primo utilizzo. L’eseguibile non include i pesi dei modelli né gli ambienti Python; `maccheroni doctor` verifica i runtime, gli snapshot fissati e la prontezza dell’archiviazione per ciascun volume configurato.
+L’app stampa il percorso del bundle quando la compilazione, l’inventario della lista delle risorse consentite e i controlli rigorosi della firma del codice hanno esito positivo. L’eseguibile non include i pesi dei modelli né gli ambienti Python. Sono incluse le definizioni dei profili `ko-meeting` e `it-dialogue`; `maccheroni doctor` riporta le dipendenze osservate e lo stato dell’archiviazione. Il provisioning di `ko-meeting` da una cache vuota e la relativa verifica completa con `maccheroni doctor` non sono ancora disponibili: il tokenizer Qwen indiretto e i metadati Hugging Face devono essere preparati manualmente in anticipo.
 
 L’eseguibile offre cinque comandi del prodotto:
 
@@ -133,7 +133,7 @@ L’eseguibile offre cinque comandi del prodotto:
 
 Usa `maccheroni help`, `maccheroni doctor --json` e `maccheroni capabilities --json` per consultare la guida e ottenere output strutturato. La breve [guida alla CLI](docs/cli-guide.md) descrive i contratti dei comandi e dell'output. La trascrizione e la diarizzazione vengono eseguite su questo Mac, quindi l’audio rimane in locale.
 
-Sono inclusi profili per riunioni in coreano (`ko-meeting`, VibeVoice) e dialoghi in italiano (`it-dialogue`, MOSS). Per il modello locale facoltativo di post-elaborazione, esegui `zsh scripts/setup-postprocess-runtime.zsh`.
+Per il modello locale facoltativo di post-elaborazione, esegui `zsh scripts/setup-postprocess-runtime.zsh`.
 
 ## Privacy
 
@@ -162,7 +162,7 @@ Issue e pull request mirate sono benvenute. I comandi di build e test, lo standa
 | Percorso | Contenuto |
 |---|---|
 | `Sources/` | Pacchetto Swift: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 315 test basati su fixture in 24 suite |
+| `Tests/` | Test Swift basati su fixture |
 | `benchmarks/scripts/` | Runner, script di valutazione e il banco di confronto dei percorsi di correzione, con verdetti derivati e test negativi |
 | `docs/` | Sintesi della ricerca, analisi del codice sorgente, regole sui vincoli, contratti (schemi JSON), progettazione dell’interfaccia |
 | `scripts/` | Compilazione del bundle dell’app, compilazione dell’harness MOSS, configurazione del runtime di post-elaborazione |

@@ -1,0 +1,18 @@
+[project]
+name = "maccheroni-dicow-reference"
+version = "0.0.0"
+requires-python = "==3.12.*"
+dependencies = [
+  "huggingface-hub==0.36.0",
+  "jsonschema==4.25.1",
+  "numpy==1.26.4",
+  "pandas==2.3.2",
+  "pyarrow==21.0.0",
+  "safetensors==0.6.2",
+  "soundfile==0.13.1",
+  "torch==2.8.0",
+  "transformers==4.42.0",
+]
+
+[tool.uv]
+package = false

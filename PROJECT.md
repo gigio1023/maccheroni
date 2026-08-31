@@ -144,10 +144,16 @@ not block v1 completion.
   each readiness probe or text transformation. It accepts only a ChatGPT subscription
   account, creates one ephemeral read-only thread, disables tools, declines approval
   requests, and records new manifests as `codex-app-server`.
-- **next**: If the maintainer chooses, validate correction time and translation quality
-  on a real meeting. If the model revision, backend output format, or long-form output
-  expansion changes, recalibrate the budget coefficient with the fixture and an actual
-  synthetic round trip.
+- **next**: Restore a truthful, reproducible shipped `ko-meeting` baseline from a new
+  empty model cache. Provision the pinned VibeVoice model, its indirect pinned
+  `Qwen/Qwen2.5-7B` tokenizer, and required Hugging Face metadata without manual copying;
+  make doctor reject every incomplete state; preserve bounded path-redacted subprocess
+  diagnostics; and repeat the 7.2-second HiKE smoke with full coverage, glossary, model,
+  and terminal evidence. Then continue the cache-independent test and unpublished HiKE
+  and AMI baseline work. Model-reference experiments and any MLX/Core ML conversions run
+  as a separate lane against that baseline. If the model revision, backend output format,
+  or long-form output expansion changes, recalibrate the budget coefficient with the
+  fixture and an actual synthetic round trip.
 - **under review**: Generalization to real-meeting accents, overlapping speech, and
   noise; reducing the backend CLI's OS-level read scope; the output coefficient for new
   models; and VibeVoice memory use.
@@ -427,6 +433,39 @@ not deleted.
   unavailable-bookmark states instead of substituting another volume. A measured zero
   bytes is still observable. Do not infer a minimum, headroom, quota, retention
   formula, or sufficiency verdict until a maintainer adopts that execution policy.
+- D42 [maintainer] Do not prefilter open model discovery by the availability of an MLX
+  or Core ML artifact (decided 2026-08-30). Rank product-aligned ASR,
+  target-speaker/overlap recovery, audio preprocessing, alignment, and dense
+  post-processing candidates by material user value and upstream reference evidence
+  first. Treat Apple-runtime availability as delivery cost and risk, not eligibility.
+  When a winning reference lacks a suitable Apple-native artifact, permit a
+  project-owned MLX or Core ML conversion and the bounded serving code needed to run
+  it. An experimental port that lacks end-to-end parity or drops the product evidence
+  contract is not suitable merely because it loads. Portability alone is not a
+  promotion reason. Before implementation, verify that the model license permits the
+  intended derivative and redistribution. Pin the upstream model ID and revision,
+  converter source revision, calibration-data provenance, quantization recipe, runtime
+  version, and artifact hashes. Compare the converted artifact with the upstream
+  reference on the same public or synthetic fixtures and apply the supported-range and
+  boundary policy in `docs/engineering-constraint-policy.md`. Prefer a bounded library,
+  runner, or conversion over a persistent server. D2 continues to govern all product
+  execution and all private audio. A non-product upstream reference may run in an
+  isolated research environment only on public or synthetic fixtures to establish
+  conversion parity; it cannot become a shipped backend or receive private recordings.
+  This decision does not relax D17's dense-model rule, D37's Qwen evidence gate, or the
+  Section 3 non-goal against building a diarization model; a neural diarization inference
+  port still requires an explicit replacement of that non-goal.
+- D43 [maintainer] Start an experimental project-owned Apple conversion lane for
+  `BUT-FIT/DiCoW_v3_MLC@99c64e8dc409a158816e808a1ee556cdfd0af51c` after a fresh
+  Claude Code Fable Max review of product value, the smallest useful conversion
+  boundary, and stop conditions (decided 2026-08-30). This authorizes inspection of the
+  pinned upstream model and source, reference execution on public or synthetic audio,
+  converter development, a BF16 MLX parity prototype, and the bounded research runner
+  needed to verify it. Record evidence that changes the target or stops the port rather
+  than forcing completion. This decision does not promote DiCoW into a product profile,
+  permit private audio in a non-Apple reference runtime, replace the shipped-baseline
+  repair in the Current Position, or relax D42's license, parity, evidence, and
+  constraint gates.
 
 ## Project-wide Done Criteria
 

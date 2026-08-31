@@ -21,7 +21,7 @@
 
 ---
 
-**Maccheroni** 得名于 *macaronic speech*，即在一句话中混用多种语言。它能转写最难准确转写的对话，例如每句话都夹有英文产品名的韩语会议、语言课和多语言通话。固定版本的 MLX/CoreML 模型在设备上完成全部处理。
+**Maccheroni** 得名于 *macaronic speech*，即在一句话中混用多种语言。它能转写最难准确转写的对话，例如每句话都夹有英文产品名的韩语会议、语言课和多语言通话。转写和说话人分离由固定版本的 MLX/Core ML 模型在设备上完成。可选的纯文本后处理可使用远程 Codex。
 
 下面是导出效果示例，仅供说明，并非模型输出：
 
@@ -66,7 +66,7 @@ Maccheroni 是一款个人工具：一个可配置的工作台，用一台 Mac �
 
 ## 模型
 
-所有模型均以 Hugging Face ID + revision + quantization 固定，并记录在每次运行的 run manifest 中。
+每次运行的 run manifest 都会记录产品所用模型和服务的标识。可下载模型以 Hugging Face ID + revision + quantization 固定。
 
 | 用途 | 模型 | 修订版本 | 量化方式 |
 |---|---|---|---|
@@ -76,6 +76,8 @@ Maccheroni 是一款个人工具：一个可配置的工作台，用一台 Mac �
 | 说话人分离 | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | 后处理（本地） | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
 | 后处理（远程，仅文本） | 通过 Codex 应用服务器使用 `gpt-5.6-sol` | 由服务管理 | 不适用 |
+
+Qwen3 ASR、Qwen3 ForcedAligner 和 DiCoW 仍是研究候选方案。它们与 Apple runtime 的兼容性、转换一致性和产品质量提升均未确立。
 
 ## 实测结果
 
@@ -92,7 +94,7 @@ Maccheroni 是一款个人工具：一个可配置的工作台，用一台 Mac �
 | 意大利语双人合成音频（10分钟），9个术语 | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverse 样本（78分钟） | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-韩语和意大利语是最早的两个语言配置。作为下一组测试样本，已准备好固定的韩英验收包（HiKE 语码转换片段和四人 AMI 会议），新的测量结果一经得出即加入此表。
+韩语和意大利语是最早的两个语言配置。HiKE、FLEURS 和 AMI 仅作为传输、评分和转换一致性研究用 fixture。确认它们未用于训练并完成重叠语音专项测量前，不能用它们晋级模型。
 
 在78分钟样本中，两位参考说话人的 chunk 边界稳定性都是1.0。固定的600秒 matrix 显示，超过120秒的 MOSS leaf 会完全丢失 timestamp 结构，因此生产环境的 leaf 上限设为120秒。详情见 [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md)。
 
@@ -101,9 +103,7 @@ Maccheroni 是一款个人工具：一个可配置的工作台，用一台 Mac �
   <img src="docs/assets/leaf-cap-light.svg" alt="柱状图：在同一段600秒输入上，120秒 leaf 产生5个规范的 EOS leaf（通过），240秒和300秒 leaf 产生0个有效 leaf（类型化的 invalid_eos_output 失败），从240秒父节点强制恢复产生5个有效的120秒子节点" width="100%">
 </picture>
 
-Correction 的收益靠测量而不是假设。四状态对比 harness 用同一份参照转写评估已完成 run 的原始输出和修正输出，并对比 decode 时是否注入术语表，逐条统计让 segment 偏离参照的修正。一次自信却错误的修正无法藏进平均值。
-
-完成的运行并未被冻结。`maccheroni postprocess` 和应用可以在不重新运行 ASR 的情况下，从封存的分段派生新的修正集或翻译集；每次保存词汇表都会作为内容寻址的修订保留，因此之后的派生可以精确复用原始运行记录的词汇表字节。
+Correction 的收益通过四状态对比测量，包括 raw 和 corrected 输出、decode 时是否注入术语表，并明确统计有害修正。`maccheroni postprocess` 和应用无需重新运行 ASR，即可从封存的分段派生新的修正集或翻译集。保存的 glossary revision 按内容寻址，并复用原始运行记录的字节。
 
 ## 安装
 
@@ -114,11 +114,11 @@ Correction 的收益靠测量而不是假设。四状态对比 harness 用同一
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 315 tests
+swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-build、resource allowlist inventory 和 strict codesign 检查全部通过后，应用会输出 bundle path。模型 weight 会在首次使用时下载。可执行文件不包含模型 weight 或 Python 环境；`maccheroni doctor` 用于验证 runtime、固定的 snapshot，以及每个已配置卷的存储就绪状态。
+build、resource allowlist inventory 和 strict codesign 检查全部通过后，应用会输出 bundle path。可执行文件不内置模型 weight 或 Python 环境。项目包含 `ko-meeting` 和 `it-dialogue` 的 profile 定义，`maccheroni doctor` 会报告实际检测到的依赖项和存储状态。全新 cache 下的 `ko-meeting` provisioning 和完整 `doctor` 验证尚未完成；它间接依赖的 Qwen tokenizer 和 Hugging Face metadata 必须手动准备。
 
 可执行文件提供五个产品命令：
 
@@ -132,7 +132,7 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 
 使用 `maccheroni help`、`maccheroni doctor --json` 和 `maccheroni capabilities --json` 可查看帮助并获取结构化输出。简明的 [CLI 指南](docs/cli-guide.md)说明了命令和输出约定。转写和说话人分离在这台 Mac 上运行，因此音频始终留在本地。
 
-内置韩语会议 profile（`ko-meeting`，VibeVoice）和意大利语对话 profile（`it-dialogue`，MOSS）。若要使用可选的本地后处理模型，请运行 `zsh scripts/setup-postprocess-runtime.zsh`。
+若要使用可选的本地后处理模型，请运行 `zsh scripts/setup-postprocess-runtime.zsh`。
 
 ## 隐私
 
@@ -161,7 +161,7 @@ build、resource allowlist inventory 和 strict codesign 检查全部通过后�
 | 路径 | 内容 |
 |---|---|
 | `Sources/` | Swift 包：Core、Preprocess、ASR、Diarize、Merge、Postprocess、CLI、App |
-| `Tests/` | 分布于24个 suite 的315项 fixture test |
+| `Tests/` | 基于 fixture 的 Swift test |
 | `benchmarks/scripts/` | 带有 derived verdict 和 negative test 的 runner、scorer 与 correction 路径对比 harness |
 | `docs/` | 调研 digest、source audit、constraint policy、契约（JSON schema）、UI design |
 | `scripts/` | App bundle build、MOSS harness build、post-processing runtime setup |

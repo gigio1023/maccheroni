@@ -1,0 +1,2467 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maccheroni.local/schemas/dicow-experiment.schema.json",
+  "title": "Maccheroni DiCoW experiment evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "experiment_id",
+    "run_id",
+    "task",
+    "evidence_id",
+    "availability",
+    "failure",
+    "fixture",
+    "bootstrap",
+    "thresholds",
+    "utility_contract",
+    "activity_providers",
+    "community1",
+    "execution_basis",
+    "execution_provenance",
+    "mappings",
+    "arms",
+    "metrics",
+    "resources"
+  ],
+  "properties": {
+    "schema_version": { "const": "dicow-experiment-v1" },
+    "experiment_id": { "$ref": "#/$defs/id" },
+    "run_id": { "$ref": "#/$defs/id" },
+    "task": { "type": "string", "pattern": "^T(?:[0-9]|[12][0-9]|30)$" },
+    "evidence_id": { "$ref": "#/$defs/id" },
+    "created_at_utc": { "$ref": "#/$defs/date_time" },
+    "availability": { "$ref": "#/$defs/availability" },
+    "failure": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/failure" }
+      ]
+    },
+    "fixture": { "$ref": "#/$defs/fixture" },
+    "bootstrap": { "$ref": "#/$defs/bootstrap" },
+    "thresholds": { "$ref": "#/$defs/thresholds" },
+    "utility_contract": { "$ref": "#/$defs/utility_contract" },
+    "activity_providers": { "$ref": "#/$defs/activity_providers" },
+    "community1": { "$ref": "#/$defs/community1" },
+    "execution_basis": { "$ref": "#/$defs/execution_basis" },
+    "execution_provenance": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/execution_provenance" }
+    },
+    "mappings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/mapping" }
+    },
+    "arms": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/arm" }
+    },
+    "metrics": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/metric" }
+    },
+    "resources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/resource" }
+    },
+    "correction_burden": { "$ref": "#/$defs/correction_burden" },
+    "source_hashes": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$" },
+      "additionalProperties": { "$ref": "#/$defs/sha256" }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "availability": {
+            "properties": { "status": { "const": "available" } },
+            "required": ["status"]
+          }
+        },
+        "required": ["availability"]
+      },
+      "then": { "properties": { "failure": { "type": "null" } } },
+      "else": { "properties": { "failure": { "$ref": "#/$defs/failure" } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "availability": {
+            "properties": { "status": { "const": "available" } },
+            "required": ["status"]
+          }
+        },
+        "required": ["availability"]
+      },
+      "then": { "properties": { "metrics": { "minItems": 1 } } }
+    }
+  ],
+  "$defs": {
+    "r2_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "dependencies", "dependency_closures", "candidate_matrix", "absolute_failures", "qwen_lane", "rights", "resource_ledger", "ctc", "dicow_conversion", "fable_packet"],
+      "properties": {
+        "schema_version": { "const": "dicow-r2-contract-v1" },
+        "dependencies": { "type": "object" },
+        "dependency_closures": { "type": "object" },
+        "candidate_matrix": { "type": "object" },
+        "absolute_failures": { "type": "array" },
+        "qwen_lane": { "type": "object" },
+        "rights": { "type": "object" },
+        "resource_ledger": { "type": "object" },
+        "ctc": { "type": "object" },
+        "dicow_conversion": { "type": "object" },
+        "fable_packet": { "type": "object" }
+      }
+    },
+    "r2_experiment_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "experiment_id", "run_id", "task", "candidate_id", "candidate_source", "execution_basis", "r2_contract", "evidence"],
+      "properties": {
+        "schema_version": { "const": "dicow-r2-experiment-envelope-v1" },
+        "experiment_id": { "$ref": "#/$defs/id" },
+        "run_id": { "$ref": "#/$defs/id" },
+        "task": { "enum": ["R7", "R8", "R9"] },
+        "candidate_id": { "enum": ["turbo", "dicow_mlc", "dicow_v3_3"] },
+        "candidate_source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model_id", "revision", "weights_sha256", "weights_bytes", "source_task", "source_artifact_format", "source_artifact_id", "source_artifact_path", "source_artifact_sha256", "source_artifact_bytes"],
+          "properties": {
+            "model_id": { "type": "string", "minLength": 1 },
+            "revision": { "type": "string", "minLength": 1 },
+            "weights_sha256": { "$ref": "#/$defs/sha256" },
+            "weights_bytes": { "type": "integer", "minimum": 1 },
+            "source_task": { "const": "R3" },
+            "source_artifact_format": { "const": "dicow-r2-model-identities-v1" },
+            "source_artifact_id": { "const": "model-identities" },
+            "source_artifact_path": { "type": "string", "minLength": 1 },
+            "source_artifact_sha256": { "$ref": "#/$defs/sha256" },
+            "source_artifact_bytes": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "execution_basis": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["R3", "R5", "R6"],
+          "properties": {
+            "R3": { "$ref": "#/$defs/sha256" },
+            "R5": { "$ref": "#/$defs/sha256" },
+            "R6": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "r2_contract": { "$ref": "#/$defs/r2_contract" },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["format", "candidate_model", "evidence_id", "path", "sha256", "bytes"],
+          "properties": {
+            "format": { "const": "dicow-experiment-v1" },
+            "candidate_model": { "enum": ["turbo", "dicow"] },
+            "evidence_id": { "$ref": "#/$defs/id" },
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "$ref": "#/$defs/sha256" },
+            "bytes": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:+-]{0,191}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "date_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "repo_artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo_path", "sha256", "bytes"],
+      "properties": {
+        "repo_path": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._+@:-]+(?:/[A-Za-z0-9._+@:-]+)*$"
+        },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "run_artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_path", "sha256", "bytes"],
+      "properties": {
+        "run_path": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._+@:-]+(?:/[A-Za-z0-9._+@:-]+)*$"
+        },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "execution_basis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t9_state", "t13_state"],
+      "properties": {
+        "t9_state": { "$ref": "#/$defs/run_artifact_ref" },
+        "t13_state": { "$ref": "#/$defs/run_artifact_ref" }
+      }
+    },
+    "model_asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "record", "t9_sealed_path_key"],
+      "properties": {
+        "kind": { "enum": ["file", "tree"] },
+        "path": { "type": "string", "minLength": 1 },
+        "record": { "type": "object", "minProperties": 1 },
+        "t9_sealed_path_key": { "$ref": "#/$defs/id" }
+      }
+    },
+    "execution_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provenance_id", "model_role", "model_id", "model_revision", "runner", "runner_artifact_key", "lock", "lock_artifact_key", "model_manifest", "model_asset", "runner_interface", "parser_id"],
+      "properties": {
+        "provenance_id": { "$ref": "#/$defs/id" },
+        "model_role": { "enum": ["turbo", "dicow", "shipped_ko", "shipped_it"] },
+        "model_id": { "type": "string", "minLength": 1 },
+        "model_revision": { "type": "string", "minLength": 1 },
+        "runner": { "$ref": "#/$defs/run_artifact_ref" },
+        "runner_artifact_key": { "$ref": "#/$defs/id" },
+        "lock": { "$ref": "#/$defs/repo_artifact_ref" },
+        "lock_artifact_key": { "$ref": "#/$defs/id" },
+        "model_manifest": { "$ref": "#/$defs/run_artifact_ref" },
+        "model_asset": { "$ref": "#/$defs/model_asset" },
+        "runner_interface": { "const": "dicow-runner-receipt-v1" },
+        "parser_id": { "$ref": "#/$defs/id" }
+      }
+    },
+    "evaluation_role": {
+      "enum": [
+        "corrected_prompt_on",
+        "prompt_off_control",
+        "automatic_language_control",
+        "explicit_language_control",
+        "shipped_comparator",
+        "warm_order_a_then_b",
+        "warm_order_b_then_a",
+        "diagnostic",
+        "parity"
+      ]
+    },
+    "fixture_family_id": {
+      "enum": [
+        "hike-pair-v1",
+        "hike-single-v1",
+        "fleurs-it-pair-v1",
+        "fleurs-it-single-v1",
+        "fleurs-en-pair-v1",
+        "fleurs-ko-clean-v1",
+        "ami-in1009-replay-v1"
+      ]
+    },
+    "availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason"],
+      "properties": {
+        "status": { "enum": ["available", "unavailable", "uncertain"] },
+        "reason": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.d_turbo_o" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S4" }, "estimand": { "const": "D_turbo^O" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.g_oracle_o" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S4" }, "estimand": { "const": "G_oracle^O" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.p_oracle_n" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S4" }, "estimand": { "const": "P_oracle^N" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.p_community1_n" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S4" }, "estimand": { "const": "P_community1^N" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.swap_margin" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S5" }, "estimand": { "const": "swap_margin" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.g_community1_o" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S5" }, "estimand": { "const": "G_community1^O" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.half_oracle_margin" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S5" }, "estimand": { "const": "half_oracle_margin" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.spurious_empty_proportion" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S5" }, "estimand": { "const": "spurious_empty_proportion" } } }
+        },
+        {
+          "if": {
+            "properties": { "status": { "const": "available" } },
+            "required": ["status"]
+          },
+          "then": { "properties": { "reason": { "type": "null" } } },
+          "else": { "properties": { "reason": { "type": "string", "minLength": 1 } } }
+        }
+      ]
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "evidence_outcome"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "message": { "type": "string", "minLength": 1 },
+        "evidence_outcome": {
+          "enum": ["not_supported", "evidence_blocker", "unresolved"]
+        }
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pack_id",
+        "manifest_sha256",
+        "sample_rate_hz",
+        "window_samples",
+        "mask_frames",
+        "mask_rate_hz",
+        "decoder_context_tokens",
+        "target_count",
+        "strata",
+        "inventory"
+      ],
+      "properties": {
+        "pack_id": { "const": "overlap-pack-v1" },
+        "manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "sample_rate_hz": { "const": 16000 },
+        "window_samples": { "const": 480000 },
+        "mask_frames": { "const": 1500 },
+        "mask_rate_hz": { "const": 50 },
+        "decoder_context_tokens": { "const": 448 },
+        "target_count": { "const": 20 },
+        "strata": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": { "enum": ["ko", "it", "en"] },
+          "allOf": [
+            { "contains": { "const": "ko" } },
+            { "contains": { "const": "it" } },
+            { "contains": { "const": "en" } }
+          ]
+        },
+        "inventory": {
+          "type": "array",
+          "minItems": 20,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/fixture_inventory_item" }
+        }
+      }
+    },
+    "fixture_inventory_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arm_id", "window_id", "target_id", "reference_id", "fixture_family", "language", "audio_sha256", "score_reference", "score_reference_sha256"],
+      "properties": {
+        "arm_id": { "$ref": "#/$defs/id" },
+        "window_id": { "$ref": "#/$defs/id" },
+        "target_id": { "$ref": "#/$defs/id" },
+        "reference_id": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }] },
+        "fixture_family": { "$ref": "#/$defs/fixture_family_id" },
+        "language": { "enum": ["ko", "en", "it"] },
+        "audio_sha256": { "$ref": "#/$defs/sha256" },
+        "score_reference": { "$ref": "#/$defs/score_reference" },
+        "score_reference_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "score_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "expected_terms", "absent_terms", "other_target_terms", "reference_regions"],
+      "properties": {
+        "reference": { "type": "string" },
+        "expected_terms": { "type": "array", "items": { "$ref": "#/$defs/term_annotation" } },
+        "absent_terms": { "type": "array", "items": { "$ref": "#/$defs/term_annotation" } },
+        "other_target_terms": { "type": "array", "items": { "$ref": "#/$defs/term_annotation" } },
+        "reference_regions": { "type": ["array", "null"], "items": { "enum": ["O", "N", "boundary"] } }
+      }
+    },
+    "bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seed", "resamples", "confidence", "method", "cluster_unit", "stratify_by"],
+      "properties": {
+        "seed": { "const": 20260830 },
+        "resamples": { "const": 10000 },
+        "confidence": { "const": 0.95 },
+        "method": { "const": "deterministic_percentile" },
+        "cluster_unit": { "const": "constructed_window" },
+        "single_control_cluster_unit": { "const": "source_item" },
+        "stratify_by": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "enum": ["fixture_family", "language"] },
+          "allOf": [
+            { "contains": { "const": "fixture_family" } },
+            { "contains": { "const": "language" } }
+          ]
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase_a", "phase_b"],
+      "properties": {
+        "phase_a": { "$ref": "#/$defs/phase_a_thresholds" },
+        "phase_b": { "$ref": "#/$defs/phase_b_thresholds" }
+      }
+    },
+    "phase_a_thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["S0", "S3", "S4", "S5", "S6", "S7", "S7b", "S8", "S9"],
+      "properties": {
+        "S0": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reference_repetitions", "bitwise_identical"],
+          "properties": {
+            "reference_repetitions": { "const": 2 },
+            "bitwise_identical": { "const": true }
+          }
+        },
+        "S3": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["shipped_mean_korean_overlap_penalty_max", "role"],
+          "properties": {
+            "shipped_mean_korean_overlap_penalty_max": { "const": 0.05 },
+            "role": { "const": "informational_without_restored_absolute_single_speech_envelope" }
+          }
+        },
+        "S4": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "d_turbo_o_point_min_exclusive",
+            "d_turbo_o_lower_min_exclusive",
+            "g_oracle_o_point_min",
+            "g_oracle_o_lower_min_exclusive",
+            "g_oracle_o_positive_target_proportion_min",
+            "p_q_n_point_max",
+            "p_q_n_upper_max",
+            "target_character_preservation_oracle_point_min",
+            "target_character_preservation_oracle_lower_min"
+          ],
+          "properties": {
+            "d_turbo_o_point_min_exclusive": { "const": 0 },
+            "d_turbo_o_lower_min_exclusive": { "const": 0 },
+            "g_oracle_o_point_min": { "const": 0.1 },
+            "g_oracle_o_lower_min_exclusive": { "const": 0 },
+            "g_oracle_o_positive_target_proportion_min": { "const": 0.7 },
+            "p_q_n_point_max": { "const": 0.02 },
+            "p_q_n_upper_max": { "const": 0.02 },
+            "target_character_preservation_oracle_point_min": { "const": 0.75 },
+            "target_character_preservation_oracle_lower_min": { "const": 0.75 }
+          }
+        },
+        "S5": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "swapped_minus_correct_cer_min",
+            "swapped_target_proportion_min",
+            "g_community1_o_point_min_exclusive",
+            "g_community1_o_lower_min_exclusive",
+            "half_oracle_margin_point_min",
+            "half_oracle_margin_lower_min_exclusive",
+            "spurious_empty_window_proportion_min",
+            "target_character_preservation_community1_point_min",
+            "target_character_preservation_community1_lower_min"
+          ],
+          "properties": {
+            "swapped_minus_correct_cer_min": { "const": 0.2 },
+            "swapped_target_proportion_min": { "const": 0.9 },
+            "g_community1_o_point_min_exclusive": { "const": 0 },
+            "g_community1_o_lower_min_exclusive": { "const": 0 },
+            "half_oracle_margin_point_min": { "const": 0 },
+            "half_oracle_margin_lower_min_exclusive": { "const": 0 },
+            "spurious_empty_window_proportion_min": { "const": 0.8 },
+            "target_character_preservation_community1_point_min": { "const": 0.75 },
+            "target_character_preservation_community1_lower_min": { "const": 0.75 }
+          }
+        },
+        "S6": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dicow_cer_over_turbo_max"],
+          "properties": { "dicow_cer_over_turbo_max": { "const": 0.02 } }
+        },
+        "S7": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["prompt_on_minus_off_term_recall_min", "clean_absent_term_insertions_max"],
+          "properties": {
+            "prompt_on_minus_off_term_recall_min": { "const": 0.1 },
+            "clean_absent_term_insertions_max": { "const": 0 }
+          }
+        },
+        "S7b": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["prompt_on_minus_off_point_min", "bootstrap_lower_min_exclusive", "cross_speaker_insertions_max"],
+          "properties": {
+            "prompt_on_minus_off_point_min": { "const": 0 },
+            "bootstrap_lower_min_exclusive": { "const": -0.02 },
+            "cross_speaker_insertions_max": { "const": 0 }
+          }
+        },
+        "S8": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["warm_order_token_ids_identical"],
+          "properties": { "warm_order_token_ids_identical": { "const": true } }
+        },
+        "S9": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dicow_cer_improvement_per_claimed_language_min", "degraded_cache_delta"],
+          "properties": {
+            "dicow_cer_improvement_per_claimed_language_min": { "const": 0.05 },
+            "degraded_cache_delta": { "const": 0.1 }
+          }
+        }
+      }
+    },
+    "phase_b_thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10", "G11", "G12", "G13", "G14"],
+      "properties": {
+        "G1": { "const": { "reference_repeat_bitwise_identical": true } },
+        "G2": { "const": { "conversion_contract_count": 12, "failure_finalizes_artifact": false } },
+        "G3": { "const": { "fp32_control_envelope_multiplier": 2, "bounded_repair_limit": 1, "negative_outcome": "evidence_blocker" } },
+        "G4": { "const": { "bf16_precision_envelope_multiplier": 2, "negative_outcome": "unresolved" } },
+        "G5": { "const": { "mask_sensitivity_ratio_min": 0.5, "mask_sensitivity_ratio_max": 2, "mask_distance_over_parity_noise_min": 10, "bounded_repair_limit": 1, "negative_outcome": "evidence_blocker" } },
+        "G6": { "const": { "semantic_parity_required": true, "bounded_repair_limit": 1, "negative_outcome": "evidence_blocker" } },
+        "G7": { "const": { "dicow_peak_over_vanilla_max": 2, "negative_outcome": "not_supported" } },
+        "G8": { "const": { "dicow_window_rtf_over_control_max": 1.5, "negative_outcome": "not_supported" } },
+        "G9": { "const": { "forbid_cpu_fallback": true, "forbid_python_per_frame_hot_loop": true, "forbid_ctc_prefix_scoring": true, "forbid_new_handwritten_kernel": true, "negative_outcome": "not_supported_retarget" } },
+        "G10": { "$ref": "#/$defs/evidence_blocker_gate" },
+        "G11": { "$ref": "#/$defs/evidence_blocker_gate" },
+        "G12": { "$ref": "#/$defs/evidence_blocker_gate" },
+        "G13": { "$ref": "#/$defs/evidence_blocker_gate" },
+        "G14": { "$ref": "#/$defs/evidence_blocker_gate" }
+      }
+    },
+    "evidence_blocker_gate": {
+      "const": { "negative_outcome": "evidence_blocker", "bounded_repair_limit": 1 }
+    },
+    "utility_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "mode",
+        "explicit_language",
+        "prompt_on_every_window",
+        "greedy_decode",
+        "seed",
+        "previous_token_conditioning",
+        "prompt_budget_pass_order",
+        "effective_token_cap",
+        "termination_policy"
+      ],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "mode": { "const": "corrected" },
+        "explicit_language": { "enum": ["ko", "en", "it"] },
+        "prompt_on_every_window": { "const": true },
+        "greedy_decode": { "const": true },
+        "seed": { "const": 0 },
+        "previous_token_conditioning": { "const": false },
+        "prompt_budget_pass_order": {
+          "const": ["prompt_off_complete", "freeze_budget", "preflight_prompts", "prompt_on"]
+        },
+        "effective_token_cap": { "type": "integer", "minimum": 1, "maximum": 448 },
+        "termination_policy": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "community1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_id", "revision", "binary_sha256", "model_tree_sha256", "sandbox_profile_sha256", "t9_canonical", "pack_manifest", "raw_evidence_sha256", "raw_evidence_index_sha256", "activity_provider_sha256", "network_denied"],
+      "properties": {
+        "model_id": { "const": "aufklarer/Pyannote-Community-1-CoreML" },
+        "revision": { "const": "a14e6c420d56e8472850649b016a486fd0acbe81" },
+        "binary_sha256": { "$ref": "#/$defs/sha256" },
+        "model_tree_sha256": { "$ref": "#/$defs/sha256" },
+        "sandbox_profile_sha256": { "$ref": "#/$defs/sha256" },
+        "t9_canonical": { "$ref": "#/$defs/run_artifact_ref" },
+        "pack_manifest": { "$ref": "#/$defs/run_artifact_ref" },
+        "raw_evidence_sha256": { "$ref": "#/$defs/sha256" },
+        "raw_evidence_index_sha256": { "$ref": "#/$defs/sha256" },
+        "activity_provider_sha256": { "$ref": "#/$defs/sha256" },
+        "network_denied": { "const": true }
+      }
+    },
+    "activity_providers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["oracle", "community1", "community1_spurious", "clean_target"],
+      "properties": {
+        "oracle": { "$ref": "#/$defs/sha256" },
+        "community1": { "$ref": "#/$defs/sha256" },
+        "community1_spurious": { "$ref": "#/$defs/sha256" },
+        "clean_target": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["window_id", "mapping_sha256", "activity_matrix", "activity_matrix_sha256", "objective_values", "tie_chain", "transcript_conditioned", "real_label_count", "slots", "surplus_labels", "spurious_target_id", "diarizer_undercount", "diarizer_overcount"],
+      "properties": {
+        "window_id": { "$ref": "#/$defs/id" },
+        "mapping_sha256": { "$ref": "#/$defs/sha256" },
+        "activity_matrix": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "minProperties": 2,
+            "additionalProperties": { "type": "number", "minimum": 0 }
+          }
+        },
+        "activity_matrix_sha256": { "$ref": "#/$defs/sha256" },
+        "objective_values": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number", "minimum": 0 }
+        },
+        "tie_chain": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "transcript_conditioned": { "const": false },
+        "real_label_count": { "type": "integer", "minimum": 0 },
+        "slots": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/mapping_slot" },
+          "allOf": [
+            {
+              "contains": {
+                "properties": { "slot": { "const": "A" } },
+                "required": ["slot"]
+              },
+              "minContains": 1,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "properties": { "slot": { "const": "B" } },
+                "required": ["slot"]
+              },
+              "minContains": 1,
+              "maxContains": 1
+            }
+          ]
+        },
+        "surplus_labels": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "spurious_target_id": { "$ref": "#/$defs/id" },
+        "diarizer_undercount": { "type": "boolean" },
+        "diarizer_overcount": { "type": "boolean" }
+      }
+    },
+    "mapping_slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slot", "reference_id", "provider_kind", "provider_label", "absent_id", "asr_invoked", "terminal_reason"],
+      "properties": {
+        "slot": { "enum": ["A", "B"] },
+        "reference_id": { "$ref": "#/$defs/id" },
+        "provider_kind": { "enum": ["real_label", "ABSENT"] },
+        "provider_label": { "type": ["string", "null"] },
+        "absent_id": { "type": ["string", "null"] },
+        "asr_invoked": { "type": "boolean" },
+        "terminal_reason": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "provider_kind": { "const": "ABSENT" } },
+            "required": ["provider_kind"]
+          },
+          "then": {
+            "properties": {
+              "provider_label": { "type": "null" },
+              "absent_id": { "type": "string", "pattern": "^ABSENT:[AB]$" },
+              "asr_invoked": { "const": false },
+              "terminal_reason": { "const": "diarizer_target_absent" }
+            }
+          },
+          "else": {
+            "properties": {
+              "provider_label": { "type": "string", "minLength": 1 },
+              "absent_id": { "type": "null" },
+              "asr_invoked": { "const": true },
+              "terminal_reason": { "type": ["string", "null"] }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider_kind": { "const": "ABSENT" },
+              "slot": { "const": "A" }
+            },
+            "required": ["provider_kind", "slot"]
+          },
+          "then": { "properties": { "absent_id": { "const": "ABSENT:A" } } }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider_kind": { "const": "ABSENT" },
+              "slot": { "const": "B" }
+            },
+            "required": ["provider_kind", "slot"]
+          },
+          "then": { "properties": { "absent_id": { "const": "ABSENT:B" } } }
+        }
+      ]
+    },
+    "arm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arm_id",
+        "fixture_family",
+        "window_id",
+        "target_id",
+        "reference_id",
+        "repetition",
+        "model",
+        "condition",
+        "evaluation_role",
+        "provider_assignment",
+        "arm_kind",
+        "language",
+        "mapping_sha256",
+        "utility_contract_sha256",
+        "availability",
+        "alignment_sha256",
+        "region_labels_sha256",
+        "geometry",
+        "activity_provider_sha256",
+        "stno",
+        "audio_sha256",
+        "token_bounds",
+        "termination",
+        "output",
+        "execution_input"
+      ],
+      "properties": {
+        "arm_id": { "$ref": "#/$defs/id" },
+        "fixture_family": { "$ref": "#/$defs/fixture_family_id" },
+        "window_id": { "$ref": "#/$defs/id" },
+        "target_id": { "$ref": "#/$defs/id" },
+        "reference_id": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }] },
+        "repetition": { "enum": [1, 2] },
+        "model": { "enum": ["turbo", "dicow", "shipped"] },
+        "condition": {
+          "enum": [
+            "turbo-clean-O",
+            "turbo-mix-O",
+            "dicow-clean-O",
+            "dicow-mix-O-oracle",
+            "dicow-mix-O-community1",
+            "dicow-full-mix-oracle",
+            "dicow-full-mix-community1",
+            "dicow-clean-single-utility",
+            "dicow-full-spurious",
+            "surplus-diagnostic",
+            "single-control",
+            "shipped-ko-meeting-mix",
+            "shipped-ko-meeting-single",
+            "shipped-it-dialogue-single",
+            "dicow-it-dialogue-single",
+            "turbo-hike-single",
+            "dicow-hike-single",
+            "dicow-fleurs-ko-clean",
+            "shipped-full-mix-community1",
+            "parity"
+          ]
+        },
+        "evaluation_role": { "$ref": "#/$defs/evaluation_role" },
+        "provider_assignment": { "enum": ["correct", "swapped", "not_applicable"] },
+        "arm_kind": { "enum": ["crop", "full_window", "single"] },
+        "language": { "enum": ["ko", "en", "it"] },
+        "execution_input": { "$ref": "#/$defs/execution_input" },
+        "mapping_sha256": { "$ref": "#/$defs/sha256" },
+        "utility_contract_sha256": { "$ref": "#/$defs/sha256" },
+        "availability": { "$ref": "#/$defs/availability" },
+        "alignment_sha256": { "$ref": "#/$defs/sha256" },
+        "region_labels_sha256": { "$ref": "#/$defs/sha256" },
+        "geometry": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/crop_geometry" }
+          ]
+        },
+        "activity_provider_sha256": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/sha256" }
+          ]
+        },
+        "stno": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/stno" }
+          ]
+        },
+        "audio_sha256": { "$ref": "#/$defs/sha256" },
+        "token_bounds": { "$ref": "#/$defs/token_bounds" },
+        "termination": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/termination" }
+          ]
+        },
+        "output": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/output" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "availability": {
+                "properties": { "status": { "const": "available" } },
+                "required": ["status"]
+              }
+            },
+            "required": ["availability"]
+          },
+          "then": {
+            "properties": {
+              "termination": { "$ref": "#/$defs/termination" },
+              "output": { "$ref": "#/$defs/output" },
+              "execution_input": {
+                "properties": { "execution_kind": { "enum": ["process", "virtual_absent"] } },
+                "required": ["execution_kind"]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "termination": { "type": "null" },
+              "output": { "type": "null" },
+              "execution_input": {
+                "properties": { "execution_kind": { "const": "typed_failure" } },
+                "required": ["execution_kind"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "execution_input": {
+                "properties": { "execution_kind": { "const": "virtual_absent" } },
+                "required": ["execution_kind"]
+              }
+            },
+            "required": ["execution_input"]
+          },
+          "then": {
+            "properties": {
+              "model": { "const": "dicow" },
+              "condition": { "enum": ["dicow-mix-O-community1", "dicow-full-mix-community1"] },
+              "availability": {
+                "properties": { "status": { "const": "available" } },
+                "required": ["status"]
+              },
+              "token_bounds": {
+                "properties": { "generated_tokens": { "const": 0 } },
+                "required": ["generated_tokens"]
+              },
+              "termination": {
+                "properties": {
+                  "terminal_reason": { "const": "diarizer_target_absent" },
+                  "complete": { "const": true },
+                  "typed": { "const": true }
+                },
+                "required": ["terminal_reason", "complete", "typed"]
+              },
+              "output": {
+                "properties": {
+                  "normalized_text_empty": { "const": true },
+                  "cer": { "const": 1 },
+                  "wer": { "const": 1 },
+                  "term_recall": { "const": 0 },
+                  "character_insertions": { "const": 0 },
+                  "word_insertions": { "const": 0 },
+                  "absent_term_insertions": { "const": 0 }
+                },
+                "required": ["normalized_text_empty", "cer", "wer", "term_recall", "character_insertions", "word_insertions", "absent_term_insertions"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "arm_kind": { "const": "crop" } },
+            "required": ["arm_kind"]
+          },
+          "then": {
+            "properties": {
+              "geometry": { "$ref": "#/$defs/crop_geometry" },
+              "stno": {
+                "properties": { "kind": { "const": "crop" } },
+                "required": ["kind"]
+              }
+            }
+          },
+          "else": { "properties": { "geometry": { "type": "null" } } }
+        },
+        {
+          "if": {
+            "properties": { "model": { "enum": ["turbo", "shipped"] } },
+            "required": ["model"]
+          },
+          "then": {
+            "properties": {
+              "activity_provider_sha256": { "type": "null" },
+              "stno": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "model": { "const": "dicow" },
+              "availability": {
+                "properties": { "status": { "const": "available" } },
+                "required": ["status"]
+              }
+            },
+            "required": ["model", "availability"]
+          },
+          "then": {
+            "properties": {
+              "activity_provider_sha256": { "$ref": "#/$defs/sha256" },
+              "stno": { "$ref": "#/$defs/stno" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "condition": { "const": "dicow-clean-O" } },
+            "required": ["condition"]
+          },
+          "then": {
+            "properties": {
+              "model": { "const": "dicow" },
+              "activity_provider_sha256": { "$ref": "#/$defs/sha256" },
+              "stno": {
+                "properties": {
+                  "provider": { "const": "clean_target" },
+                  "non_target_or_overlap_frames": { "const": 0 }
+                },
+                "required": ["provider", "non_target_or_overlap_frames"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "condition": { "const": "dicow-clean-single-utility" } },
+            "required": ["condition"]
+          },
+          "then": {
+            "properties": {
+              "model": { "const": "dicow" },
+              "activity_provider_sha256": { "$ref": "#/$defs/sha256" },
+              "stno": {
+                "properties": { "provider": { "const": "clean_target" } },
+                "required": ["provider"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "condition": { "enum": ["dicow-mix-O-oracle", "dicow-full-mix-oracle"] } },
+            "required": ["condition"]
+          },
+          "then": {
+            "properties": {
+              "model": { "const": "dicow" },
+              "activity_provider_sha256": { "$ref": "#/$defs/sha256" },
+              "stno": {
+                "properties": { "provider": { "const": "oracle" } },
+                "required": ["provider"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "condition": { "enum": ["dicow-mix-O-community1", "dicow-full-mix-community1", "surplus-diagnostic"] } },
+            "required": ["condition"]
+          },
+          "then": {
+            "properties": {
+              "model": { "const": "dicow" },
+              "activity_provider_sha256": { "$ref": "#/$defs/sha256" },
+              "stno": {
+                "properties": { "provider": { "const": "community1" } },
+                "required": ["provider"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "condition": { "const": "dicow-full-spurious" } },
+            "required": ["condition"]
+          },
+          "then": {
+            "properties": {
+              "model": { "const": "dicow" },
+              "activity_provider_sha256": { "$ref": "#/$defs/sha256" },
+              "stno": {
+                "properties": { "provider": { "const": "community1+spurious" } },
+                "required": ["provider"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "condition": { "enum": ["turbo-clean-O", "turbo-mix-O"] } },
+            "required": ["condition"]
+          },
+          "then": {
+            "properties": {
+              "model": { "const": "turbo" },
+              "activity_provider_sha256": { "type": "null" },
+              "stno": { "type": "null" },
+              "evaluation_role": { "const": "corrected_prompt_on" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "condition": { "enum": ["dicow-clean-O", "dicow-mix-O-oracle", "dicow-mix-O-community1", "dicow-full-mix-oracle", "dicow-clean-single-utility"] } }, "required": ["condition"] },
+          "then": { "properties": { "evaluation_role": { "const": "corrected_prompt_on" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "dicow-full-mix-community1" } }, "required": ["condition"] },
+          "then": { "properties": { "evaluation_role": { "enum": ["corrected_prompt_on", "prompt_off_control", "warm_order_a_then_b", "warm_order_b_then_a"] } } }
+        },
+        {
+          "if": {
+            "properties": { "condition": { "enum": ["dicow-mix-O-oracle", "dicow-mix-O-community1"] } },
+            "required": ["condition"]
+          },
+          "then": {
+            "properties": { "provider_assignment": { "enum": ["correct", "swapped"] } }
+          },
+          "else": {
+            "if": {
+              "properties": { "condition": { "enum": ["dicow-full-mix-oracle", "dicow-full-mix-community1"] } },
+              "required": ["condition"]
+            },
+            "then": {
+              "properties": { "provider_assignment": { "const": "correct" } }
+            },
+            "else": {
+              "properties": { "provider_assignment": { "const": "not_applicable" } }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "condition": { "enum": ["surplus-diagnostic", "dicow-full-spurious"] } },
+            "required": ["condition"]
+          },
+          "then": {
+            "properties": {
+              "arm_kind": { "const": "full_window" },
+              "reference_id": { "type": "null" },
+              "evaluation_role": { "const": "diagnostic" },
+              "output": {
+                "properties": {
+                  "cer": { "type": "null" },
+                  "wer": { "type": "null" },
+                  "term_recall": { "type": "null" },
+                  "stable_o_counts": { "type": "null" }
+                },
+                "required": ["cer", "wer", "term_recall", "character_insertions", "word_insertions", "stable_o_counts"]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reference_id": { "$ref": "#/$defs/id" },
+              "output": {
+                "properties": {
+                  "cer": { "type": "number", "minimum": 0 },
+                  "wer": { "type": "number", "minimum": 0 },
+                  "term_recall": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "stable_o_counts": { "$ref": "#/$defs/stable_o_counts" }
+                },
+                "required": ["cer", "wer", "term_recall", "stable_o_counts"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "condition": { "const": "surplus-diagnostic" } },
+            "required": ["condition"]
+          },
+          "then": { "properties": { "repetition": { "const": 1 } } }
+        },
+        {
+          "if": {
+            "properties": { "condition": { "enum": ["shipped-ko-meeting-mix", "shipped-ko-meeting-single", "shipped-full-mix-community1"] } },
+            "required": ["condition"]
+          },
+          "then": {
+            "properties": {
+              "model": { "const": "shipped" },
+              "evaluation_role": { "const": "shipped_comparator" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "shipped-ko-meeting-mix" } }, "required": ["condition"] },
+          "then": { "properties": { "arm_kind": { "const": "full_window" }, "language": { "const": "ko" }, "fixture_family": { "const": "hike-pair-v1" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "enum": ["shipped-ko-meeting-single", "turbo-hike-single", "dicow-hike-single", "dicow-fleurs-ko-clean"] } }, "required": ["condition"] },
+          "then": { "properties": { "arm_kind": { "const": "single" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "shipped-ko-meeting-single" } }, "required": ["condition"] },
+          "then": { "properties": { "language": { "const": "ko" }, "fixture_family": { "const": "hike-single-v1" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "shipped-it-dialogue-single" } }, "required": ["condition"] },
+          "then": { "properties": { "model": { "const": "shipped" }, "language": { "const": "it" }, "fixture_family": { "const": "fleurs-it-single-v1" }, "arm_kind": { "const": "single" }, "evaluation_role": { "const": "shipped_comparator" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "dicow-it-dialogue-single" } }, "required": ["condition"] },
+          "then": { "properties": { "model": { "const": "dicow" }, "language": { "const": "it" }, "fixture_family": { "const": "fleurs-it-single-v1" }, "arm_kind": { "const": "single" }, "evaluation_role": { "const": "corrected_prompt_on" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "shipped-full-mix-community1" } }, "required": ["condition"] },
+          "then": { "properties": { "arm_kind": { "const": "full_window" }, "fixture_family": { "enum": ["hike-pair-v1", "fleurs-it-pair-v1", "fleurs-en-pair-v1"] } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "turbo-hike-single" } }, "required": ["condition"] },
+          "then": { "properties": { "model": { "const": "turbo" }, "fixture_family": { "const": "hike-single-v1" }, "evaluation_role": { "enum": ["automatic_language_control", "explicit_language_control"] } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "dicow-hike-single" } }, "required": ["condition"] },
+          "then": {
+            "properties": {
+              "model": { "const": "dicow" },
+              "fixture_family": { "const": "hike-single-v1" },
+              "evaluation_role": { "enum": ["corrected_prompt_on", "prompt_off_control", "automatic_language_control", "explicit_language_control"] },
+              "stno": { "properties": { "kind": { "const": "full_window" }, "provider": { "const": "clean_target" } }, "required": ["kind", "provider"] }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "dicow-fleurs-ko-clean" } }, "required": ["condition"] },
+          "then": {
+            "properties": {
+              "model": { "const": "dicow" },
+              "language": { "const": "ko" },
+              "fixture_family": { "const": "fleurs-ko-clean-v1" },
+              "evaluation_role": { "const": "corrected_prompt_on" },
+              "stno": { "properties": { "kind": { "const": "full_window" }, "provider": { "const": "clean_target" } }, "required": ["kind", "provider"] }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "evaluation_role": { "const": "prompt_off_control" } }, "required": ["evaluation_role"] },
+          "then": { "properties": { "model": { "const": "dicow" }, "condition": { "enum": ["dicow-hike-single", "dicow-full-mix-community1"] } } }
+        },
+        {
+          "if": { "properties": { "evaluation_role": { "enum": ["automatic_language_control", "explicit_language_control"] } }, "required": ["evaluation_role"] },
+          "then": { "properties": { "condition": { "enum": ["turbo-hike-single", "dicow-hike-single"] }, "arm_kind": { "const": "single" } } }
+        },
+        {
+          "if": { "properties": { "evaluation_role": { "enum": ["warm_order_a_then_b", "warm_order_b_then_a"] } }, "required": ["evaluation_role"] },
+          "then": { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-full-mix-community1" }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "full_window" } } }
+        },
+        {
+          "if": { "properties": { "evaluation_role": { "const": "shipped_comparator" } }, "required": ["evaluation_role"] },
+          "then": { "properties": { "model": { "const": "shipped" }, "condition": { "enum": ["shipped-ko-meeting-mix", "shipped-ko-meeting-single", "shipped-it-dialogue-single", "shipped-full-mix-community1", "single-control"] } } }
+        },
+        {
+          "if": { "properties": { "evaluation_role": { "const": "diagnostic" } }, "required": ["evaluation_role"] },
+          "then": { "properties": { "condition": { "enum": ["surplus-diagnostic", "dicow-full-spurious"] } } }
+        },
+        {
+          "if": { "properties": { "evaluation_role": { "const": "parity" } }, "required": ["evaluation_role"] },
+          "then": { "properties": { "condition": { "const": "parity" } }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": { "model": { "const": "shipped" } },
+                "required": ["model"]
+              },
+              {
+                "properties": { "condition": { "const": "parity" } },
+                "required": ["condition"]
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "token_bounds": {
+                "properties": { "prompt_budget_status": { "const": "not_applicable" } },
+                "required": ["prompt_budget_status"]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "token_bounds": {
+                "properties": { "prompt_budget_status": { "const": "frozen" } },
+                "required": ["prompt_budget_status"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "termination": {
+                "type": "object",
+                "properties": { "terminal_reason": { "const": "diarizer_target_absent" } },
+                "required": ["terminal_reason"]
+              }
+            },
+            "required": ["termination"]
+          },
+          "then": {
+            "properties": {
+              "token_bounds": {
+                "properties": { "generated_tokens": { "const": 0 } },
+                "required": ["generated_tokens"]
+              },
+              "termination": {
+                "properties": {
+                  "terminal_reason": { "const": "diarizer_target_absent" },
+                  "complete": { "const": true },
+                  "typed": { "const": true }
+                },
+                "required": ["terminal_reason", "complete", "typed"]
+              },
+              "output": {
+                "properties": {
+                  "normalized_text_empty": { "const": true },
+                  "cer": { "const": 1 },
+                  "wer": { "const": 1 },
+                  "term_recall": { "const": 0 },
+                  "character_insertions": { "const": 0 },
+                  "word_insertions": { "const": 0 },
+                  "absent_term_insertions": { "const": 0 }
+                },
+                "required": ["normalized_text_empty", "cer", "wer", "term_recall", "character_insertions", "word_insertions", "absent_term_insertions"]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "crop_geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["k_start_sample", "k_end_sample", "k_sha256", "k_frames_sha256", "audio_crop_sha256", "audio_crop_gain", "post_crop_gain", "zero_outside_k", "outside_k_class"],
+      "properties": {
+        "k_start_sample": { "type": "integer", "minimum": 0, "maximum": 479999 },
+        "k_end_sample": { "type": "integer", "minimum": 1, "maximum": 480000 },
+        "k_sha256": { "$ref": "#/$defs/sha256" },
+        "k_frames_sha256": { "$ref": "#/$defs/sha256" },
+        "audio_crop_sha256": { "$ref": "#/$defs/sha256" },
+        "audio_crop_gain": { "type": "number", "exclusiveMinimum": 0 },
+        "post_crop_gain": { "const": 1 },
+        "zero_outside_k": { "const": true },
+        "outside_k_class": { "const": "silence" }
+      }
+    },
+    "stno": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "provider", "sha256", "logical_shape", "runtime_shape", "class_order", "non_target_or_overlap_frames"],
+      "properties": {
+        "kind": { "enum": ["crop", "full_window"] },
+        "provider": { "enum": ["oracle", "community1", "community1+spurious", "clean_target"] },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "logical_shape": { "const": [4, 1500] },
+        "runtime_shape": {
+          "oneOf": [
+            { "const": [1, 4, 1500] },
+            { "const": [1, 1500, 4] }
+          ]
+        },
+        "class_order": { "const": ["silence", "target", "non_target", "overlap"] },
+        "non_target_or_overlap_frames": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "token_bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decoder_context", "upstream_prompt_cutoff", "init_tokens", "effective_output_cap", "generated_tokens", "prompt_budget_status", "prompt_token_count", "prompt_off_generated_p99", "prompt_budget", "prompt_truncated"],
+      "properties": {
+        "decoder_context": { "const": 448 },
+        "upstream_prompt_cutoff": { "const": 223 },
+        "init_tokens": { "type": "integer", "minimum": 1, "maximum": 447 },
+        "effective_output_cap": { "type": "integer", "minimum": 1, "maximum": 448 },
+        "generated_tokens": { "type": ["integer", "null"], "minimum": 0 },
+        "prompt_budget_status": { "enum": ["frozen", "not_applicable"] },
+        "prompt_token_count": { "type": ["integer", "null"], "minimum": 0, "maximum": 223 },
+        "prompt_off_generated_p99": { "type": ["integer", "null"], "minimum": 0, "maximum": 297 },
+        "prompt_budget": { "type": ["integer", "null"], "minimum": 0, "maximum": 446 },
+        "prompt_truncated": { "const": false },
+        "unavailable_reason": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "prompt_budget_status": { "const": "frozen" } },
+            "required": ["prompt_budget_status"]
+          },
+          "then": {
+            "properties": {
+              "prompt_token_count": { "type": "integer", "minimum": 0, "maximum": 223 },
+              "prompt_off_generated_p99": { "type": "integer", "minimum": 0, "maximum": 297 },
+              "prompt_budget": { "type": "integer", "minimum": 0, "maximum": 446 }
+            }
+          },
+          "else": {
+            "properties": {
+              "prompt_token_count": { "type": "null" },
+              "prompt_off_generated_p99": { "type": "null" },
+              "prompt_budget": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "generated_tokens": { "type": "null" } },
+            "required": ["generated_tokens"]
+          },
+          "then": { "properties": { "unavailable_reason": { "type": "string", "minLength": 1 } }, "required": ["unavailable_reason"] }
+        }
+      ]
+    },
+    "termination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["terminal_reason", "complete", "typed"],
+      "properties": {
+        "terminal_reason": { "enum": ["eos", "eos_token", "scored", "scoring_complete", "completed", "diarizer_target_absent"] },
+        "complete": { "type": "boolean" },
+        "typed": { "const": true }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["token_ids_sha256", "normalized_text_sha256", "normalized_text", "normalized_text_empty", "cer", "wer", "cer_counts", "wer_counts", "term_recall", "term_details", "character_insertions", "word_insertions", "absent_term_insertions", "cross_speaker_insertions", "stable_o_counts", "regional", "ambiguous", "ambiguity_reason", "termination", "score_replay", "score_replay_sha256"],
+      "properties": {
+        "token_ids_sha256": { "$ref": "#/$defs/sha256" },
+        "normalized_text_sha256": { "$ref": "#/$defs/sha256" },
+        "normalized_text": { "type": "string" },
+        "normalized_text_empty": { "type": "boolean" },
+        "cer": { "type": ["number", "null"], "minimum": 0 },
+        "wer": { "type": ["number", "null"], "minimum": 0 },
+        "term_recall": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "character_insertions": { "type": "integer", "minimum": 0 },
+        "word_insertions": { "type": "integer", "minimum": 0 },
+        "absent_term_insertions": { "type": "integer", "minimum": 0 },
+        "cross_speaker_insertions": { "type": "integer", "minimum": 0 },
+        "cer_counts": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/edit_count_record" }] },
+        "wer_counts": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/edit_count_record" }] },
+        "term_details": { "type": "array", "items": { "type": "object" } },
+        "regional": { "type": ["object", "null"] },
+        "ambiguous": { "type": "boolean" },
+        "ambiguity_reason": { "type": ["string", "null"] },
+        "termination": { "$ref": "#/$defs/termination" },
+        "score_replay": { "$ref": "#/$defs/score_replay" },
+        "score_replay_sha256": { "$ref": "#/$defs/sha256" },
+        "stable_overlap_target_recall": { "type": "number", "minimum": 0, "maximum": 1 },
+        "kind": { "enum": ["surplus", "spurious"] },
+        "reference": { "type": "string" },
+        "hypothesis": { "type": "string" },
+        "gate_eligible": { "type": "boolean" },
+        "stable_o_counts": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/stable_o_counts" }
+          ]
+        }
+      }
+    },
+    "term_annotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["term", "reference_count"],
+      "properties": {
+        "term": { "type": "string", "minLength": 1 },
+        "reference_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "score_replay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "hypothesis", "expected_terms", "absent_terms", "other_target_terms", "reference_regions"],
+      "properties": {
+        "reference": { "type": "string" },
+        "hypothesis": { "type": "string" },
+        "expected_terms": { "type": "array", "items": { "$ref": "#/$defs/term_annotation" } },
+        "absent_terms": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["term"], "properties": { "term": { "type": "string", "minLength": 1 } } } },
+        "other_target_terms": { "type": "array", "items": { "$ref": "#/$defs/term_annotation" } },
+        "reference_regions": { "type": ["array", "null"], "items": { "enum": ["O", "N", "boundary"] } }
+      }
+    },
+    "edit_count_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["substitutions", "deletions", "insertions", "reference_units", "errors", "error_rate"],
+      "properties": {
+        "substitutions": { "type": "integer", "minimum": 0 },
+        "deletions": { "type": "integer", "minimum": 0 },
+        "insertions": { "type": "integer", "minimum": 0 },
+        "reference_units": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 },
+        "error_rate": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "edit_path_operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "reference_index", "hypothesis_index", "reference_unit", "hypothesis_unit", "region", "equal_cost_operations"],
+      "properties": {
+        "operation": { "enum": ["match", "substitution", "deletion", "insertion"] },
+        "reference_index": { "type": ["integer", "null"], "minimum": 0 },
+        "hypothesis_index": { "type": ["integer", "null"], "minimum": 0 },
+        "reference_unit": { "type": ["string", "null"] },
+        "hypothesis_unit": { "type": ["string", "null"] },
+        "region": { "enum": ["O", "N", "boundary", null] },
+        "equal_cost_operations": { "type": "array", "items": { "enum": ["match", "substitution", "deletion", "insertion"] } }
+      }
+    },
+    "scorer_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference_text", "hypothesis_text", "expected_terms", "absent_terms", "other_target_terms", "reference_regions", "cer_counts", "wer_counts", "term_details", "regional_edit_path", "regional_edit_path_sha256"],
+      "properties": {
+        "reference_text": { "type": "string" },
+        "hypothesis_text": { "type": "string" },
+        "expected_terms": { "type": "array", "items": { "$ref": "#/$defs/term_annotation" } },
+        "absent_terms": { "type": "array", "items": { "$ref": "#/$defs/term_annotation" } },
+        "other_target_terms": { "type": "array", "items": { "$ref": "#/$defs/term_annotation" } },
+        "reference_regions": { "type": ["array", "null"], "items": { "enum": ["O", "N", "boundary"] } },
+        "cer_counts": { "$ref": "#/$defs/edit_count_record" },
+        "wer_counts": { "$ref": "#/$defs/edit_count_record" },
+        "term_details": { "type": "array", "items": { "type": "object" } },
+        "regional_edit_path": { "type": ["array", "null"], "items": { "$ref": "#/$defs/edit_path_operation" } },
+        "regional_edit_path_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] }
+      }
+    },
+    "execution_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "execution_kind", "provenance_id", "argv", "exit_status", "receipt", "raw_stdout", "raw_stderr", "parsed_result_sha256", "fixture_manifest_sha256", "fixture_family", "window_id", "target_id", "reference_id", "language", "audio_sha256", "language_mode", "forced_language", "prompt_payload", "prompt_sha256", "provider_assignment", "provider_slot", "provider_label", "stno_sha256", "attempt_id", "process_id", "session_id", "order_index", "result", "raw_output_sha256", "repetition"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "execution_kind": { "enum": ["process", "virtual_absent", "typed_failure"] },
+        "provenance_id": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }] },
+        "argv": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "exit_status": { "type": ["integer", "null"] },
+        "receipt": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/run_artifact_ref" }
+          ]
+        },
+        "raw_stdout": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/run_artifact_ref" }
+          ]
+        },
+        "raw_stderr": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/run_artifact_ref" }
+          ]
+        },
+        "parsed_result_sha256": { "$ref": "#/$defs/sha256" },
+        "fixture_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "fixture_family": { "$ref": "#/$defs/fixture_family_id" },
+        "window_id": { "$ref": "#/$defs/id" },
+        "target_id": { "$ref": "#/$defs/id" },
+        "reference_id": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }] },
+        "language": { "enum": ["ko", "en", "it"] },
+        "audio_sha256": { "$ref": "#/$defs/sha256" },
+        "language_mode": { "enum": ["explicit", "automatic", "not_applicable"] },
+        "forced_language": { "enum": ["ko", "en", "it", null] },
+        "prompt_payload": { "type": "string" },
+        "prompt_sha256": { "$ref": "#/$defs/sha256" },
+        "provider_assignment": { "enum": ["correct", "swapped", "not_applicable"] },
+        "provider_slot": { "enum": ["A", "B", null] },
+        "provider_label": { "type": ["string", "null"] },
+        "stno_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] },
+        "attempt_id": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }] },
+        "process_id": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }] },
+        "session_id": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }] },
+        "order_index": { "type": "integer", "minimum": 0 },
+        "result": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["text", "token_ids"],
+              "properties": {
+                "text": { "type": "string" },
+                "token_ids": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
+              }
+            }
+          ]
+        },
+        "raw_output_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] },
+        "repetition": { "enum": [1, 2] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "execution_kind": { "const": "process" } },
+            "required": ["execution_kind"]
+          },
+          "then": {
+            "properties": {
+              "argv": { "minItems": 1 },
+              "provenance_id": { "$ref": "#/$defs/id" },
+              "exit_status": { "const": 0 },
+              "receipt": { "$ref": "#/$defs/run_artifact_ref" },
+              "raw_stdout": { "$ref": "#/$defs/run_artifact_ref" },
+              "raw_stderr": { "$ref": "#/$defs/run_artifact_ref" },
+              "raw_output_sha256": { "$ref": "#/$defs/sha256" },
+              "attempt_id": { "$ref": "#/$defs/id" },
+              "process_id": { "$ref": "#/$defs/id" },
+              "session_id": { "$ref": "#/$defs/id" },
+              "result": { "type": "object" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "execution_kind": { "const": "virtual_absent" } },
+            "required": ["execution_kind"]
+          },
+          "then": {
+            "properties": {
+              "argv": { "maxItems": 0 },
+              "provenance_id": { "type": "null" },
+              "exit_status": { "type": "null" },
+              "receipt": { "type": "null" },
+              "raw_stdout": { "type": "null" },
+              "raw_stderr": { "type": "null" },
+              "raw_output_sha256": { "type": "null" },
+              "attempt_id": { "type": "null" },
+              "process_id": { "type": "null" },
+              "session_id": { "type": "null" },
+              "result": { "const": { "text": "", "token_ids": [] } }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "execution_kind": { "const": "typed_failure" } },
+            "required": ["execution_kind"]
+          },
+          "then": {
+            "properties": {
+              "argv": { "minItems": 1 },
+              "provenance_id": { "$ref": "#/$defs/id" },
+              "exit_status": { "type": "integer" },
+              "receipt": { "$ref": "#/$defs/run_artifact_ref" },
+              "raw_stdout": { "$ref": "#/$defs/run_artifact_ref" },
+              "raw_stderr": { "$ref": "#/$defs/run_artifact_ref" },
+              "raw_output_sha256": { "$ref": "#/$defs/sha256" },
+              "attempt_id": { "$ref": "#/$defs/id" },
+              "process_id": { "$ref": "#/$defs/id" },
+              "session_id": { "$ref": "#/$defs/id" },
+              "result": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+    "stable_o_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["regional_edit_path_sha256", "reference_chars", "substitutions", "deletions", "insertions", "hits"],
+      "properties": {
+        "regional_edit_path_sha256": { "$ref": "#/$defs/sha256" },
+        "reference_chars": { "type": "integer", "minimum": 0 },
+        "substitutions": { "type": "integer", "minimum": 0 },
+        "deletions": { "type": "integer", "minimum": 0 },
+        "insertions": { "type": "integer", "minimum": 0 },
+        "hits": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "criterion_id": {
+      "enum": [
+        "S0.repeat_identity",
+        "S3.shipped_korean_overlap_penalty",
+        "S4.d_turbo_o",
+        "S4.g_oracle_o",
+        "S4.p_oracle_n",
+        "S4.p_community1_n",
+        "S4.target_character_preservation_oracle",
+        "S5.swap_margin",
+        "S5.g_community1_o",
+        "S5.half_oracle_margin",
+        "S5.spurious_empty_proportion",
+        "S5.target_character_preservation_community1",
+        "S6.dicow_over_turbo_cer",
+        "S7.prompt_recall_delta",
+        "S7.absent_term_insertions",
+        "S7b.prompt_recall_delta",
+        "S7b.cross_speaker_insertions",
+        "S8.warm_order_identity",
+        "S9.dicow_cer_improvement",
+        "S9.cache_degradation",
+        "G1.repeat_identity",
+        "G2.conversion_contract",
+        "G3.fp32_parity",
+        "G4.bf16_parity",
+        "G5.mask_sensitivity",
+        "G6.semantic_parity",
+        "G7.peak_memory_ratio",
+        "G8.window_rtf_ratio",
+        "G9.runtime_topology",
+        "G10.pin_provenance",
+        "G11.lock_provenance",
+        "G12.source_provenance",
+        "G13.fixture_sidecar_provenance",
+        "G14.parity_mode_provenance"
+      ]
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric_id", "criterion_id", "gate", "estimand", "availability", "point", "interval", "target_proportion", "stratum", "cluster_count", "arm_citations", "utility_contract_sha256"],
+      "properties": {
+        "metric_id": { "$ref": "#/$defs/id" },
+        "criterion_id": { "$ref": "#/$defs/criterion_id" },
+        "gate": { "enum": ["S0", "S3", "S4", "S5", "S6", "S7", "S7b", "S8", "S9", "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10", "G11", "G12", "G13", "G14"] },
+        "estimand": { "enum": ["D_turbo^O", "D_dicow,q^O", "G_q^O", "G_oracle^O", "G_community1^O", "P_q^N", "P_oracle^N", "P_community1^N", "target_character_preservation_oracle", "target_character_preservation_community1", "swap_margin", "half_oracle_margin", "spurious_empty_proportion", "prompt_recall_delta", "absent_term_insertions", "cross_speaker_insertions", "cer_delta", "cache_degradation", "resource_ratio", "parity", "mask_sensitivity", "purity", "repeat_identity", "conversion_contract", "runtime_contract", "provenance"] },
+        "availability": { "$ref": "#/$defs/availability" },
+        "point": { "type": ["number", "null"] },
+        "interval": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/interval" }
+          ]
+        },
+        "target_proportion": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "stratum": { "enum": ["overall", "ko", "it", "en"] },
+        "cluster_count": { "type": "integer", "minimum": 0 },
+        "arm_citations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/arm_citation" }
+        },
+        "utility_contract_sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "availability": {
+                "properties": { "status": { "const": "available" } },
+                "required": ["status"]
+              },
+              "gate": { "enum": ["S0", "S3", "S4", "S5", "S6", "S7", "S7b", "S8", "S9"] }
+            },
+            "required": ["availability", "gate"]
+          },
+          "then": {
+            "properties": {
+              "arm_citations": {
+                "minItems": 2,
+                "allOf": [
+                  { "contains": { "properties": { "repetition": { "const": 1 } }, "required": ["repetition"] }, "minContains": 1 },
+                  { "contains": { "properties": { "repetition": { "const": 2 } }, "required": ["repetition"] }, "minContains": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "availability": {
+                "properties": { "status": { "const": "available" } },
+                "required": ["status"]
+              },
+              "gate": { "enum": ["S4", "S5", "S6", "S7", "S7b", "S9"] }
+            },
+            "required": ["availability", "gate"]
+          },
+          "then": {
+            "properties": {
+              "point": { "type": "number" },
+              "cluster_count": { "minimum": 2 }
+            }
+          },
+          "else": true
+        },
+        {
+          "if": {
+            "properties": {
+              "availability": {
+                "properties": { "status": { "enum": ["unavailable", "uncertain"] } },
+                "required": ["status"]
+              }
+            },
+            "required": ["availability"]
+          },
+          "then": {
+            "properties": {
+              "point": { "type": "null" },
+              "interval": { "type": "null" },
+              "target_proportion": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "estimand": { "enum": ["D_turbo^O", "D_dicow,q^O", "G_q^O", "swap_margin", "half_oracle_margin"] } },
+            "required": ["estimand"]
+          },
+          "then": {
+            "properties": {
+              "arm_citations": {
+                "minItems": 2,
+                "items": {
+                  "properties": { "arm_kind": { "const": "crop" } },
+                  "required": ["arm_kind"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "estimand": { "const": "P_q^N" } },
+            "required": ["estimand"]
+          },
+          "then": {
+            "properties": {
+              "arm_citations": {
+                "items": {
+                  "properties": { "arm_kind": { "enum": ["full_window", "single"] } },
+                  "required": ["arm_kind"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S3.shipped_korean_overlap_penalty" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "gate": { "const": "S3" },
+              "estimand": { "const": "cer_delta" },
+              "arm_citations": {
+                "items": {
+                  "properties": {
+                    "model": { "const": "shipped" },
+                    "condition": { "enum": ["shipped-ko-meeting-mix", "shipped-ko-meeting-single"] },
+                    "evaluation_role": { "const": "shipped_comparator" },
+                    "fixture_family": { "enum": ["hike-pair-v1", "hike-single-v1"] }
+                  },
+                  "required": ["model", "condition", "evaluation_role", "fixture_family"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.d_turbo_o" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "arm_citations": {
+                "items": {
+                  "properties": { "model": { "const": "turbo" }, "condition": { "enum": ["turbo-clean-O", "turbo-mix-O"] }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "not_applicable" }, "arm_kind": { "const": "crop" } },
+                  "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.g_oracle_o" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "arm_citations": {
+                "items": {
+                  "anyOf": [
+                    { "properties": { "model": { "const": "turbo" }, "condition": { "enum": ["turbo-clean-O", "turbo-mix-O"] }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "not_applicable" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] },
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-clean-O" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "not_applicable" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] },
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-mix-O-oracle" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] }
+                  ]
+                },
+                "allOf": [
+                  { "contains": { "properties": { "condition": { "const": "dicow-clean-O" } }, "required": ["condition"] }, "minContains": 1 },
+                  { "contains": { "properties": { "condition": { "const": "dicow-mix-O-oracle" } }, "required": ["condition"] }, "minContains": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.p_oracle_n" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "arm_citations": {
+                "minItems": 2,
+                "items": {
+                  "anyOf": [
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-clean-single-utility" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "not_applicable" }, "arm_kind": { "const": "full_window" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] },
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-full-mix-oracle" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "full_window" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.p_community1_n" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "arm_citations": {
+                "items": {
+                  "anyOf": [
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-clean-single-utility" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "not_applicable" }, "arm_kind": { "const": "full_window" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] },
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-full-mix-community1" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "full_window" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.swap_margin" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "arm_citations": {
+                "items": {
+                  "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-mix-O-community1" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "enum": ["correct", "swapped"] }, "arm_kind": { "const": "crop" } },
+                  "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.g_community1_o" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "arm_citations": {
+                "items": {
+                  "anyOf": [
+                    { "properties": { "model": { "const": "turbo" }, "condition": { "enum": ["turbo-clean-O", "turbo-mix-O"] }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "not_applicable" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] },
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-clean-O" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "not_applicable" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] },
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-mix-O-community1" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.half_oracle_margin" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "arm_citations": {
+                "items": {
+                  "anyOf": [
+                    { "properties": { "model": { "const": "turbo" }, "condition": { "enum": ["turbo-clean-O", "turbo-mix-O"] }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "not_applicable" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] },
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-clean-O" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "not_applicable" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] },
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "enum": ["dicow-mix-O-oracle", "dicow-mix-O-community1"] }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.target_character_preservation_oracle" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "gate": { "const": "S4" },
+              "estimand": { "const": "target_character_preservation_oracle" },
+              "point": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+              "target_proportion": { "type": "null" },
+              "interval": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["kind", "lower", "upper"],
+                    "properties": {
+                      "kind": { "const": "two_sided_95_percentile" },
+                      "lower": { "type": "number", "minimum": 0, "maximum": 1 },
+                      "upper": { "type": "number", "minimum": 0, "maximum": 1 }
+                    }
+                  }
+                ]
+              },
+              "arm_citations": {
+                "minItems": 4,
+                "items": {
+                  "anyOf": [
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-clean-O" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "not_applicable" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] },
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-mix-O-oracle" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] }
+                  ]
+                },
+                "allOf": [
+                  { "contains": { "properties": { "condition": { "const": "dicow-clean-O" } }, "required": ["condition"] }, "minContains": 1 },
+                  { "contains": { "properties": { "condition": { "const": "dicow-mix-O-oracle" } }, "required": ["condition"] }, "minContains": 1 },
+                  { "contains": { "properties": { "repetition": { "const": 1 } }, "required": ["repetition"] }, "minContains": 1 },
+                  { "contains": { "properties": { "repetition": { "const": 2 } }, "required": ["repetition"] }, "minContains": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.target_character_preservation_community1" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "gate": { "const": "S5" },
+              "estimand": { "const": "target_character_preservation_community1" },
+              "point": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+              "target_proportion": { "type": "null" },
+              "interval": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["kind", "lower", "upper"],
+                    "properties": {
+                      "kind": { "const": "two_sided_95_percentile" },
+                      "lower": { "type": "number", "minimum": 0, "maximum": 1 },
+                      "upper": { "type": "number", "minimum": 0, "maximum": 1 }
+                    }
+                  }
+                ]
+              },
+              "arm_citations": {
+                "minItems": 4,
+                "items": {
+                  "anyOf": [
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-clean-O" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "not_applicable" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] },
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-mix-O-community1" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "crop" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] }
+                  ]
+                },
+                "allOf": [
+                  { "contains": { "properties": { "condition": { "const": "dicow-clean-O" } }, "required": ["condition"] }, "minContains": 1 },
+                  { "contains": { "properties": { "condition": { "const": "dicow-mix-O-community1" } }, "required": ["condition"] }, "minContains": 1 },
+                  { "contains": { "properties": { "repetition": { "const": 1 } }, "required": ["repetition"] }, "minContains": 1 },
+                  { "contains": { "properties": { "repetition": { "const": 2 } }, "required": ["repetition"] }, "minContains": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "criterion_id": { "enum": ["S4.target_character_preservation_oracle", "S5.target_character_preservation_community1"] },
+              "availability": { "properties": { "status": { "const": "available" } }, "required": ["status"] }
+            },
+            "required": ["criterion_id", "availability"]
+          },
+          "then": {
+            "properties": {
+              "interval": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "lower", "upper"],
+                "properties": {
+                  "kind": { "const": "two_sided_95_percentile" },
+                  "lower": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "upper": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S6.dicow_over_turbo_cer" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "gate": { "const": "S6" },
+              "estimand": { "const": "cer_delta" },
+              "arm_citations": {
+                "items": {
+                  "properties": {
+                    "condition": { "enum": ["turbo-hike-single", "dicow-hike-single"] },
+                    "evaluation_role": { "enum": ["automatic_language_control", "explicit_language_control"] },
+                    "arm_kind": { "const": "single" },
+                    "fixture_family": { "const": "hike-single-v1" }
+                  },
+                  "required": ["condition", "evaluation_role", "arm_kind", "fixture_family"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S7.prompt_recall_delta" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "gate": { "const": "S7" },
+              "estimand": { "const": "prompt_recall_delta" },
+              "arm_citations": {
+                "items": {
+                  "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-hike-single" }, "evaluation_role": { "enum": ["corrected_prompt_on", "prompt_off_control"] }, "arm_kind": { "const": "single" }, "fixture_family": { "const": "hike-single-v1" } },
+                  "required": ["model", "condition", "evaluation_role", "arm_kind", "fixture_family"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S7.absent_term_insertions" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "gate": { "const": "S7" },
+              "estimand": { "const": "absent_term_insertions" },
+              "arm_citations": {
+                "items": {
+                  "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-fleurs-ko-clean" }, "evaluation_role": { "const": "corrected_prompt_on" }, "arm_kind": { "const": "single" }, "fixture_family": { "const": "fleurs-ko-clean-v1" } },
+                  "required": ["model", "condition", "evaluation_role", "arm_kind", "fixture_family"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S7b.prompt_recall_delta" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "gate": { "const": "S7b" },
+              "arm_citations": {
+                "items": {
+                  "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-full-mix-community1" }, "evaluation_role": { "enum": ["corrected_prompt_on", "prompt_off_control"] }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "full_window" }, "fixture_family": { "const": "hike-pair-v1" } },
+                  "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind", "fixture_family"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S7b.prompt_recall_delta" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "estimand": { "const": "prompt_recall_delta" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S7b.cross_speaker_insertions" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "gate": { "const": "S7b" },
+              "estimand": { "const": "cross_speaker_insertions" },
+              "arm_citations": {
+                "items": {
+                  "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-full-mix-community1" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "full_window" }, "fixture_family": { "const": "hike-pair-v1" } },
+                  "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind", "fixture_family"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S8.warm_order_identity" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "gate": { "const": "S8" },
+              "estimand": { "const": "repeat_identity" },
+              "arm_citations": {
+                "items": {
+                  "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-full-mix-community1" }, "evaluation_role": { "enum": ["warm_order_a_then_b", "warm_order_b_then_a"] }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "full_window" } },
+                  "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S9.dicow_cer_improvement" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "gate": { "const": "S9" },
+              "estimand": { "const": "cer_delta" },
+              "arm_citations": {
+                "items": {
+                  "anyOf": [
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-full-mix-community1" }, "evaluation_role": { "const": "corrected_prompt_on" }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "full_window" } }, "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind"] },
+                    { "properties": { "model": { "const": "shipped" }, "condition": { "const": "shipped-full-mix-community1" }, "evaluation_role": { "const": "shipped_comparator" }, "arm_kind": { "const": "full_window" } }, "required": ["model", "condition", "evaluation_role", "arm_kind"] }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S9.cache_degradation" } }, "required": ["criterion_id"] },
+          "then": {
+            "properties": {
+              "gate": { "const": "S9" },
+              "estimand": { "const": "cache_degradation" },
+              "arm_citations": {
+                "items": {
+                  "anyOf": [
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-hike-single" }, "evaluation_role": { "enum": ["automatic_language_control", "explicit_language_control"] }, "arm_kind": { "const": "single" }, "fixture_family": { "const": "hike-single-v1" } }, "required": ["model", "condition", "evaluation_role", "arm_kind", "fixture_family"] },
+                    { "properties": { "model": { "const": "shipped" }, "condition": { "const": "shipped-ko-meeting-single" }, "evaluation_role": { "const": "shipped_comparator" }, "arm_kind": { "const": "single" }, "fixture_family": { "const": "hike-single-v1" } }, "required": ["model", "condition", "evaluation_role", "arm_kind", "fixture_family"] },
+                    { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-it-dialogue-single" }, "evaluation_role": { "const": "corrected_prompt_on" }, "arm_kind": { "const": "single" }, "fixture_family": { "const": "fleurs-it-single-v1" } }, "required": ["model", "condition", "evaluation_role", "arm_kind", "fixture_family"] },
+                    { "properties": { "model": { "const": "shipped" }, "condition": { "const": "shipped-it-dialogue-single" }, "evaluation_role": { "const": "shipped_comparator" }, "arm_kind": { "const": "single" }, "fixture_family": { "const": "fleurs-it-single-v1" } }, "required": ["model", "condition", "evaluation_role", "arm_kind", "fixture_family"] }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "criterion_id": { "const": "S5.spurious_empty_proportion" } },
+            "required": ["criterion_id"]
+          },
+          "then": {
+            "properties": {
+              "arm_citations": {
+                "items": {
+                  "properties": {
+                    "model": { "const": "dicow" },
+                    "condition": { "const": "dicow-full-spurious" },
+                    "evaluation_role": { "const": "diagnostic" },
+                    "provider_assignment": { "const": "not_applicable" },
+                    "arm_kind": { "const": "full_window" },
+                    "reference_id": { "type": "null" }
+                  },
+                  "required": ["model", "condition", "evaluation_role", "provider_assignment", "arm_kind", "reference_id"]
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "arm_citations": {
+                "items": {
+                  "properties": {
+                    "condition": {
+                      "not": { "enum": ["surplus-diagnostic", "dicow-full-spurious"] }
+                    }
+                  },
+                  "required": ["condition"]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "interval": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "lower", "upper"],
+          "properties": {
+            "kind": { "const": "two_sided_95_percentile" },
+            "lower": { "type": "number" },
+            "upper": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "upper"],
+          "properties": {
+            "kind": { "const": "one_sided_upper_95_percentile" },
+            "upper": { "type": "number" }
+          }
+        }
+      ]
+    },
+    "arm_citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arm_id", "fixture_family", "window_id", "target_id", "reference_id", "repetition", "model", "condition", "evaluation_role", "provider_assignment", "arm_kind", "audio_sha256", "activity_provider_sha256", "stno_sha256", "k_sha256", "k_frames_sha256", "regional_edit_path_sha256"],
+      "properties": {
+        "arm_id": { "$ref": "#/$defs/id" },
+        "fixture_family": { "$ref": "#/$defs/fixture_family_id" },
+        "window_id": { "$ref": "#/$defs/id" },
+        "target_id": { "$ref": "#/$defs/id" },
+        "reference_id": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/id" }] },
+        "repetition": { "enum": [1, 2] },
+        "model": { "enum": ["turbo", "dicow", "shipped"] },
+        "condition": {
+          "enum": [
+            "turbo-clean-O",
+            "turbo-mix-O",
+            "dicow-clean-O",
+            "dicow-mix-O-oracle",
+            "dicow-mix-O-community1",
+            "dicow-full-mix-oracle",
+            "dicow-full-mix-community1",
+            "dicow-clean-single-utility",
+            "dicow-full-spurious",
+            "surplus-diagnostic",
+            "single-control",
+            "shipped-ko-meeting-mix",
+            "shipped-ko-meeting-single",
+            "shipped-it-dialogue-single",
+            "dicow-it-dialogue-single",
+            "turbo-hike-single",
+            "dicow-hike-single",
+            "dicow-fleurs-ko-clean",
+            "shipped-full-mix-community1",
+            "parity"
+          ]
+        },
+        "evaluation_role": { "$ref": "#/$defs/evaluation_role" },
+        "provider_assignment": { "enum": ["correct", "swapped", "not_applicable"] },
+        "arm_kind": { "enum": ["crop", "full_window", "single"] },
+        "audio_sha256": { "$ref": "#/$defs/sha256" },
+        "activity_provider_sha256": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/sha256" }
+          ]
+        },
+        "stno_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] },
+        "k_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] },
+        "k_frames_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] },
+        "regional_edit_path_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "arm_kind": { "const": "crop" } },
+            "required": ["arm_kind"]
+          },
+          "then": {
+            "properties": {
+              "k_sha256": { "$ref": "#/$defs/sha256" },
+              "k_frames_sha256": { "$ref": "#/$defs/sha256" }
+            }
+          },
+          "else": {
+            "properties": {
+              "k_sha256": { "type": "null" },
+              "k_frames_sha256": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "condition": { "enum": ["surplus-diagnostic", "dicow-full-spurious"] } }, "required": ["condition"] },
+          "then": { "properties": { "reference_id": { "type": "null" }, "evaluation_role": { "const": "diagnostic" }, "regional_edit_path_sha256": { "type": "null" } } },
+          "else": { "properties": { "reference_id": { "$ref": "#/$defs/id" }, "regional_edit_path_sha256": { "$ref": "#/$defs/sha256" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "surplus-diagnostic" } }, "required": ["condition"] },
+          "then": { "properties": { "repetition": { "const": 1 } } }
+        },
+        {
+          "if": { "properties": { "condition": { "enum": ["shipped-ko-meeting-mix", "shipped-ko-meeting-single", "shipped-it-dialogue-single", "shipped-full-mix-community1"] } }, "required": ["condition"] },
+          "then": { "properties": { "model": { "const": "shipped" }, "evaluation_role": { "const": "shipped_comparator" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "shipped-ko-meeting-mix" } }, "required": ["condition"] },
+          "then": { "properties": { "arm_kind": { "const": "full_window" }, "fixture_family": { "const": "hike-pair-v1" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "shipped-ko-meeting-single" } }, "required": ["condition"] },
+          "then": { "properties": { "fixture_family": { "const": "hike-single-v1" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "shipped-it-dialogue-single" } }, "required": ["condition"] },
+          "then": { "properties": { "model": { "const": "shipped" }, "fixture_family": { "const": "fleurs-it-single-v1" }, "arm_kind": { "const": "single" }, "evaluation_role": { "const": "shipped_comparator" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "dicow-it-dialogue-single" } }, "required": ["condition"] },
+          "then": { "properties": { "model": { "const": "dicow" }, "fixture_family": { "const": "fleurs-it-single-v1" }, "arm_kind": { "const": "single" }, "evaluation_role": { "const": "corrected_prompt_on" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "shipped-full-mix-community1" } }, "required": ["condition"] },
+          "then": { "properties": { "arm_kind": { "const": "full_window" }, "fixture_family": { "enum": ["hike-pair-v1", "fleurs-it-pair-v1", "fleurs-en-pair-v1"] } } }
+        },
+        {
+          "if": { "properties": { "condition": { "enum": ["turbo-hike-single", "dicow-hike-single", "dicow-fleurs-ko-clean", "shipped-ko-meeting-single", "shipped-it-dialogue-single", "dicow-it-dialogue-single"] } }, "required": ["condition"] },
+          "then": { "properties": { "arm_kind": { "const": "single" } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "turbo-hike-single" } }, "required": ["condition"] },
+          "then": { "properties": { "model": { "const": "turbo" }, "fixture_family": { "const": "hike-single-v1" }, "evaluation_role": { "enum": ["automatic_language_control", "explicit_language_control"] } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "dicow-hike-single" } }, "required": ["condition"] },
+          "then": { "properties": { "model": { "const": "dicow" }, "fixture_family": { "const": "hike-single-v1" }, "evaluation_role": { "enum": ["corrected_prompt_on", "prompt_off_control", "automatic_language_control", "explicit_language_control"] } } }
+        },
+        {
+          "if": { "properties": { "condition": { "const": "dicow-fleurs-ko-clean" } }, "required": ["condition"] },
+          "then": { "properties": { "model": { "const": "dicow" }, "fixture_family": { "const": "fleurs-ko-clean-v1" }, "evaluation_role": { "const": "corrected_prompt_on" } } }
+        },
+        {
+          "if": { "properties": { "evaluation_role": { "enum": ["warm_order_a_then_b", "warm_order_b_then_a"] } }, "required": ["evaluation_role"] },
+          "then": { "properties": { "model": { "const": "dicow" }, "condition": { "const": "dicow-full-mix-community1" }, "provider_assignment": { "const": "correct" }, "arm_kind": { "const": "full_window" } } }
+        }
+      ]
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "availability", "observed", "estimate", "unit", "source", "limit_kind"],
+      "properties": {
+        "name": {
+          "enum": ["peak_memory_bytes", "window_rtf", "disk_bytes", "load_seconds", "warm_window_seconds", "cancellation_latency_seconds", "rss_bytes", "mlx_active_bytes", "mlx_cache_bytes"]
+        },
+        "availability": { "$ref": "#/$defs/availability" },
+        "observed": { "type": ["number", "null"], "minimum": 0 },
+        "estimate": { "type": ["number", "null"], "minimum": 0 },
+        "unit": { "enum": ["bytes", "ratio", "seconds"] },
+        "source": { "type": "string", "minLength": 1 },
+        "limit_kind": { "enum": ["experiment_falsification", "observation", "follow_on_screen"] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "availability": { "properties": { "status": { "const": "available" } }, "required": ["status"] } },
+            "required": ["availability"]
+          },
+          "then": { "properties": { "observed": { "type": "number" } } },
+          "else": { "properties": { "observed": { "type": "null" } } }
+        }
+      ]
+    },
+    "correction_burden": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["availability", "unit", "allowed_causes", "overlap_caused_seconds", "total_seconds", "ratio", "percentage", "uncertain_seconds", "meeting_sha256"],
+      "properties": {
+        "availability": { "$ref": "#/$defs/availability" },
+        "unit": { "const": "seconds" },
+        "allowed_causes": {
+          "const": [
+            "missed_target_in_overlap",
+            "other_speaker_intrusion",
+            "duplicate_overlap"
+          ]
+        },
+        "overlap_caused_seconds": { "type": ["number", "null"], "minimum": 0 },
+        "total_seconds": { "type": ["number", "null"], "minimum": 0 },
+        "ratio": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "percentage": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "uncertain_seconds": { "type": ["number", "null"], "minimum": 0 },
+        "meeting_sha256": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/sha256" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "availability": {
+                "properties": { "status": { "const": "available" } },
+                "required": ["status"]
+              }
+            },
+            "required": ["availability"]
+          },
+          "then": {
+            "properties": {
+              "overlap_caused_seconds": { "type": "number" },
+              "total_seconds": { "type": "number", "exclusiveMinimum": 0 },
+              "ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+              "percentage": { "type": "number", "minimum": 0, "maximum": 100 },
+              "uncertain_seconds": { "type": "number" },
+              "meeting_sha256": { "$ref": "#/$defs/sha256" }
+            }
+          },
+          "else": {
+            "properties": {
+              "overlap_caused_seconds": { "type": "null" },
+              "total_seconds": { "type": "null" },
+              "ratio": { "type": "null" },
+              "percentage": { "type": "null" },
+              "uncertain_seconds": { "type": "null" },
+              "meeting_sha256": { "type": "null" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

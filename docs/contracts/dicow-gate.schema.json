@@ -1,0 +1,1296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maccheroni.local/schemas/dicow-gate.schema.json",
+  "title": "Maccheroni DiCoW branch gate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "gate_id",
+    "task",
+    "branch_verdict",
+    "evidence_outcome",
+    "evidence_ids",
+    "evidence_hashes",
+    "assumptions",
+    "allowed_scope",
+    "next_task_ids",
+    "skip_tasks",
+    "reversal_condition",
+    "fable",
+    "issued_at_utc"
+  ],
+  "properties": {
+    "schema_version": { "const": "dicow-gate-v1" },
+    "gate_id": {
+      "enum": [
+        "J0", "J1", "J2", "J3", "J4", "J5",
+        "PA-T9", "PA-T11", "PA-T12", "PA-T14", "PA-T15",
+        "CONTROL-T23"
+      ]
+    },
+    "gate_kind": {
+      "enum": [
+        "fable_checkpoint",
+        "partial_phase_a_stop",
+        "control_envelope_closeout"
+      ]
+    },
+    "task": { "$ref": "#/$defs/task_id" },
+    "branch_verdict": { "enum": ["proceed", "closeout", "revise", "retarget", "stop"] },
+    "evidence_outcome": { "enum": ["supported", "not_supported", "evidence_blocker", "unresolved"] },
+    "evidence_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "evidence_hashes": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+      "additionalProperties": { "$ref": "#/$defs/sha256" }
+    },
+    "evidence_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/evidence_artifact" },
+      "contains": {
+        "properties": { "key": { "const": "thresholds" } },
+        "required": ["key"]
+      },
+      "minContains": 1,
+      "maxContains": 1
+    },
+    "assumptions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "allowed_scope": { "$ref": "#/$defs/allowed_scope" },
+    "next_task_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/task_id" }
+    },
+    "skip_tasks": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/task_id" }
+    },
+    "reversal_condition": { "type": "string", "minLength": 1 },
+    "fable": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/fable" }
+      ]
+    },
+    "frontier_refresh": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/frontier_refresh" }
+      ]
+    },
+    "metrics": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/gate_metric" }
+    },
+    "thresholds_sha256": { "$ref": "#/$defs/sha256" },
+    "skipped_descendants": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/task_id" }
+    },
+    "plan_compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current_plan_executable_unchanged", "v33_required_before_T17", "why"],
+      "properties": {
+        "current_plan_executable_unchanged": { "type": "boolean" },
+        "v33_required_before_T17": { "type": "boolean" },
+        "why": { "type": "string", "minLength": 1 }
+      }
+    },
+    "issued_at_utc": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "gate_id": { "pattern": "^J[0-5]$" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "fable": { "$ref": "#/$defs/fable" },
+          "gate_kind": { "const": "fable_checkpoint" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "not": { "const": "J0" } } },
+        "required": ["gate_id"]
+      },
+      "then": { "required": ["gate_kind"] }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "J0" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "task": { "const": "T0" },
+          "branch_verdict": { "enum": ["proceed", "stop", "retarget", "revise"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "J1" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "task": { "const": "T8" },
+          "branch_verdict": { "enum": ["proceed", "stop", "retarget", "revise"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "J2" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "task": { "const": "T16" },
+          "branch_verdict": { "enum": ["proceed", "stop", "retarget", "revise"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gate_id": { "const": "J2" },
+          "branch_verdict": { "const": "proceed" }
+        },
+        "required": ["gate_id", "branch_verdict"]
+      },
+      "then": {
+        "properties": {
+          "metrics": {
+            "minItems": 40,
+            "items": {
+              "properties": {
+                "availability": {
+                  "properties": { "status": { "const": "available" } },
+                  "required": ["status"]
+                }
+              }
+            },
+            "allOf": [
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_d_turbo_o_cell" }, { "properties": { "stratum": { "const": "overall" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_d_turbo_o_cell" }, { "properties": { "stratum": { "const": "ko" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_d_turbo_o_cell" }, { "properties": { "stratum": { "const": "it" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_d_turbo_o_cell" }, { "properties": { "stratum": { "const": "en" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_g_oracle_o_cell" }, { "properties": { "stratum": { "const": "overall" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_g_oracle_o_cell" }, { "properties": { "stratum": { "const": "ko" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_g_oracle_o_cell" }, { "properties": { "stratum": { "const": "it" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_g_oracle_o_cell" }, { "properties": { "stratum": { "const": "en" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_p_oracle_n_cell" }, { "properties": { "stratum": { "const": "overall" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_p_oracle_n_cell" }, { "properties": { "stratum": { "const": "ko" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_p_oracle_n_cell" }, { "properties": { "stratum": { "const": "it" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_p_oracle_n_cell" }, { "properties": { "stratum": { "const": "en" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_p_community1_n_cell" }, { "properties": { "stratum": { "const": "overall" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_p_community1_n_cell" }, { "properties": { "stratum": { "const": "ko" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_p_community1_n_cell" }, { "properties": { "stratum": { "const": "it" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_p_community1_n_cell" }, { "properties": { "stratum": { "const": "en" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_swap_margin_cell" }, { "properties": { "stratum": { "const": "overall" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_swap_margin_cell" }, { "properties": { "stratum": { "const": "ko" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_swap_margin_cell" }, { "properties": { "stratum": { "const": "it" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_swap_margin_cell" }, { "properties": { "stratum": { "const": "en" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_g_community1_o_cell" }, { "properties": { "stratum": { "const": "overall" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_g_community1_o_cell" }, { "properties": { "stratum": { "const": "ko" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_g_community1_o_cell" }, { "properties": { "stratum": { "const": "it" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_g_community1_o_cell" }, { "properties": { "stratum": { "const": "en" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_half_oracle_margin_cell" }, { "properties": { "stratum": { "const": "overall" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_half_oracle_margin_cell" }, { "properties": { "stratum": { "const": "ko" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_half_oracle_margin_cell" }, { "properties": { "stratum": { "const": "it" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_half_oracle_margin_cell" }, { "properties": { "stratum": { "const": "en" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_spurious_empty_cell" }, { "properties": { "stratum": { "const": "overall" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_spurious_empty_cell" }, { "properties": { "stratum": { "const": "ko" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_spurious_empty_cell" }, { "properties": { "stratum": { "const": "it" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_spurious_empty_cell" }, { "properties": { "stratum": { "const": "en" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_target_character_preservation_oracle_cell" }, { "properties": { "stratum": { "const": "overall" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_target_character_preservation_oracle_cell" }, { "properties": { "stratum": { "const": "ko" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_target_character_preservation_oracle_cell" }, { "properties": { "stratum": { "const": "it" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s4_target_character_preservation_oracle_cell" }, { "properties": { "stratum": { "const": "en" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_target_character_preservation_community1_cell" }, { "properties": { "stratum": { "const": "overall" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_target_character_preservation_community1_cell" }, { "properties": { "stratum": { "const": "ko" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_target_character_preservation_community1_cell" }, { "properties": { "stratum": { "const": "it" } } }] }, "minContains": 1 },
+              { "contains": { "allOf": [{ "$ref": "#/$defs/j2_s5_target_character_preservation_community1_cell" }, { "properties": { "stratum": { "const": "en" } } }] }, "minContains": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "J3" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "task": { "const": "T25" },
+          "branch_verdict": { "enum": ["proceed", "stop", "retarget", "closeout"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "J4" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "task": { "const": "T26" },
+          "branch_verdict": { "enum": ["proceed", "stop", "retarget", "closeout"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "J5" } },
+        "required": ["gate_id"]
+      },
+      "then": { "properties": { "task": { "const": "T29" } } }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "pattern": "^PA-T(?:9|11|12|14|15)$" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "gate_kind": { "const": "partial_phase_a_stop" },
+          "branch_verdict": { "const": "stop" },
+          "evidence_outcome": { "const": "not_supported" },
+          "allowed_scope": {
+            "properties": { "execute": { "const": ["T16"] } }
+          },
+          "next_task_ids": { "const": ["T16"] },
+          "fable": { "type": "null" },
+          "frontier_refresh": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "PA-T9" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "task": { "const": "T9" },
+          "skip_tasks": { "const": ["T10", "T11", "T12", "T13", "T14", "T15"] },
+          "skipped_descendants": { "const": ["T10", "T11", "T12", "T13", "T14", "T15"] },
+          "metrics": { "contains": { "properties": { "criterion_id": { "const": "PA-T9.preflight_stop" }, "availability": { "properties": { "status": { "const": "available" } }, "required": ["status"] }, "passed": { "const": false } }, "required": ["criterion_id", "availability", "passed"] }, "minContains": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "PA-T11" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "task": { "const": "T11" },
+          "skip_tasks": { "const": ["T13", "T14", "T15"] },
+          "skipped_descendants": { "const": ["T13", "T14", "T15"] },
+          "metrics": { "contains": { "properties": { "criterion_id": { "const": "PA-T11.correction_burden" }, "availability": { "properties": { "status": { "const": "available" } }, "required": ["status"] }, "passed": { "const": false } }, "required": ["criterion_id", "availability", "passed"] }, "minContains": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "PA-T12" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "task": { "const": "T12" },
+          "skip_tasks": { "const": ["T13", "T14", "T15"] },
+          "skipped_descendants": { "const": ["T13", "T14", "T15"] },
+          "metrics": { "contains": { "properties": { "criterion_id": { "const": "PA-T12.local_derivative_permission" }, "availability": { "properties": { "status": { "const": "available" } }, "required": ["status"] }, "passed": { "const": false } }, "required": ["criterion_id", "availability", "passed"] }, "minContains": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "PA-T14" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "task": { "const": "T14" },
+          "skip_tasks": { "const": ["T15"] },
+          "skipped_descendants": { "const": ["T15"] },
+          "metrics": { "contains": { "properties": { "criterion_id": { "const": "PA-T14.upstream_utility" }, "availability": { "properties": { "status": { "const": "available" } }, "required": ["status"] }, "passed": { "const": false } }, "required": ["criterion_id", "availability", "passed"] }, "minContains": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "PA-T15" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "task": { "const": "T15" },
+          "skip_tasks": { "maxItems": 0 },
+          "skipped_descendants": { "maxItems": 0 },
+          "metrics": { "contains": { "properties": { "criterion_id": { "const": "PA-T15.shipped_stop" }, "availability": { "properties": { "status": { "const": "available" } }, "required": ["status"] }, "passed": { "const": false } }, "required": ["criterion_id", "availability", "passed"] }, "minContains": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "CONTROL-T23" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "gate_kind": { "const": "control_envelope_closeout" },
+          "task": { "const": "T23" },
+          "branch_verdict": { "const": "closeout" },
+          "evidence_outcome": { "const": "evidence_blocker" },
+          "allowed_scope": { "properties": { "execute": { "const": ["T25"] } } },
+          "next_task_ids": { "const": ["T25"] },
+          "skip_tasks": { "const": ["T24"] },
+          "skipped_descendants": { "const": ["T24"] },
+          "fable": { "type": "null" },
+          "frontier_refresh": { "type": "null" },
+          "metrics": { "contains": { "properties": { "criterion_id": { "const": "CONTROL-T23.control_envelope" } }, "required": ["criterion_id"] }, "minContains": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "not": { "const": "J0" } } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "required": [
+          "evidence_artifacts",
+          "metrics",
+          "thresholds_sha256",
+          "skipped_descendants"
+        ],
+        "properties": {
+          "evidence_artifacts": { "minItems": 1 },
+          "metrics": { "minItems": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "pattern": "^J[1-5]$" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "required": ["frontier_refresh"],
+        "properties": {
+          "frontier_refresh": { "$ref": "#/$defs/frontier_refresh" },
+          "evidence_artifacts": {
+            "contains": {
+              "properties": {
+                "key": { "const": "fable_decision" },
+                "path": { "const": "fable-decision.json" }
+              },
+              "required": ["key", "path"]
+            },
+            "minContains": 1,
+            "maxContains": 1
+          },
+          "fable": {
+            "allOf": [
+              { "$ref": "#/$defs/fable" },
+              {
+                "required": [
+                  "decision_path",
+                  "decision_sha256",
+                  "decision_authenticated"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "branch_verdict": { "const": "proceed" } },
+        "required": ["branch_verdict"]
+      },
+      "then": {
+        "properties": {
+          "next_task_ids": { "minItems": 1 },
+          "skip_tasks": { "maxItems": 0 },
+          "skipped_descendants": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "branch_verdict": { "enum": ["retarget", "stop", "closeout"] },
+          "gate_id": { "enum": ["J0", "J1", "J2", "J3", "J4", "CONTROL-T23"] }
+        },
+        "required": ["branch_verdict", "gate_id"]
+      },
+      "then": {
+        "properties": {
+          "skip_tasks": { "minItems": 1 },
+          "skipped_descendants": { "minItems": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gate_id": { "const": "J1" },
+          "branch_verdict": { "enum": ["retarget", "stop", "closeout"] }
+        },
+        "required": ["gate_id", "branch_verdict"]
+      },
+      "then": {
+        "properties": {
+          "skip_tasks": {
+            "const": ["T9", "T10", "T11", "T12", "T13", "T14", "T15", "T16", "T17", "T18", "T19", "T20", "T21", "T22", "T23", "T24", "T25", "T26", "T27", "T28"]
+          },
+          "skipped_descendants": {
+            "const": ["T9", "T10", "T11", "T12", "T13", "T14", "T15", "T16", "T17", "T18", "T19", "T20", "T21", "T22", "T23", "T24", "T25", "T26", "T27", "T28"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gate_id": { "const": "J2" },
+          "branch_verdict": { "enum": ["retarget", "stop", "closeout"] }
+        },
+        "required": ["gate_id", "branch_verdict"]
+      },
+      "then": {
+        "properties": {
+          "skip_tasks": {
+            "const": ["T17", "T18", "T19", "T20", "T21", "T22", "T23", "T24", "T25", "T26", "T27", "T28"]
+          },
+          "skipped_descendants": {
+            "const": ["T17", "T18", "T19", "T20", "T21", "T22", "T23", "T24", "T25", "T26", "T27", "T28"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gate_id": { "const": "J3" },
+          "branch_verdict": { "enum": ["retarget", "stop", "closeout"] }
+        },
+        "required": ["gate_id", "branch_verdict"]
+      },
+      "then": {
+        "properties": {
+          "skip_tasks": { "const": ["T26", "T27"] },
+          "skipped_descendants": { "const": ["T26", "T27"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gate_id": { "const": "J4" },
+          "branch_verdict": { "enum": ["retarget", "stop", "closeout"] }
+        },
+        "required": ["gate_id", "branch_verdict"]
+      },
+      "then": {
+        "properties": {
+          "skip_tasks": { "const": ["T27"] },
+          "skipped_descendants": { "const": ["T27"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gate_id": { "enum": ["J1", "J2", "J3", "J4"] },
+          "branch_verdict": { "not": { "const": "revise" } }
+        },
+        "required": ["gate_id", "branch_verdict"]
+      },
+      "then": {
+        "properties": {
+          "next_task_ids": {
+            "oneOf": [
+              { "const": ["T9"] },
+              { "const": ["T17"] },
+              { "const": ["T26"] },
+              { "const": ["T27"] }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "J1" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "next_task_ids": {
+            "if": { "minItems": 1 },
+            "then": { "const": ["T9"] }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "J2" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "next_task_ids": {
+            "if": { "minItems": 1 },
+            "then": { "const": ["T17"] }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "J3" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "next_task_ids": {
+            "if": { "minItems": 1 },
+            "then": { "const": ["T26"] }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "J4" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "next_task_ids": {
+            "if": { "minItems": 1 },
+            "then": { "const": ["T27"] }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate_id": { "const": "J5" } },
+        "required": ["gate_id"]
+      },
+      "then": {
+        "properties": {
+          "next_task_ids": { "const": ["T30"] },
+          "skip_tasks": { "maxItems": 0 },
+          "skipped_descendants": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "branch_verdict": { "const": "revise" },
+          "gate_id": { "not": { "const": "J5" } }
+        },
+        "required": ["branch_verdict", "gate_id"]
+      },
+      "then": {
+        "properties": {
+          "next_task_ids": { "maxItems": 0 },
+          "skip_tasks": { "maxItems": 0 },
+          "skipped_descendants": { "maxItems": 0 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "r2_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "dependencies", "dependency_closures", "candidate_matrix", "absolute_failures", "qwen_lane", "rights", "resource_ledger", "ctc", "dicow_conversion", "fable_packet"],
+      "properties": {
+        "schema_version": { "const": "dicow-r2-contract-v1" },
+        "dependencies": { "type": "object" },
+        "dependency_closures": { "type": "object" },
+        "candidate_matrix": { "type": "object" },
+        "absolute_failures": { "type": "array" },
+        "qwen_lane": { "type": "object" },
+        "rights": { "type": "object" },
+        "resource_ledger": { "type": "object" },
+        "ctc": { "type": "object" },
+        "dicow_conversion": { "type": "object" },
+        "fable_packet": { "type": "object" }
+      }
+    },
+    "r2_j1_decision": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["checkpoint", "scope", "evidence_outcome", "next_task_ids", "skip_task_ids", "reversal_condition"],
+          "properties": {
+            "checkpoint": { "const": "J1-r2" },
+            "scope": { "const": "proceed_dicow_and_qwen" },
+            "evidence_outcome": { "const": "supported" },
+            "next_task_ids": { "const": ["R5", "Q1", "R6"] },
+            "skip_task_ids": { "const": [] },
+            "reversal_condition": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["checkpoint", "scope", "evidence_outcome", "next_task_ids", "skip_task_ids", "reversal_condition"],
+          "properties": {
+            "checkpoint": { "const": "J1-r2" },
+            "scope": { "const": "proceed_qwen_only" },
+            "evidence_outcome": { "const": "evidence_blocker" },
+            "next_task_ids": { "const": ["Q1"] },
+            "skip_task_ids": { "const": ["R5", "R6", "R7", "R8", "R9", "R10", "R11", "R12"] },
+            "reversal_condition": { "const": "Reopen the DiCoW branch only in a successor plan after a public natural Korean evaluation stratum is proven leakage-safe for both BUT-FIT/DiCoW_v3_MLC@99c64e8dc409a158816e808a1ee556cdfd0af51c and BUT-FIT/DiCoW_v3_3@c34b64d9a9c5148c65fd355bb188d60343a6b44f under the frozen corpus-and-alias exclusion rule; then run the predeclared cheap upstream-only MLC-versus-c34 probe before any DiCoW MLX conversion." }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["checkpoint", "scope", "evidence_outcome", "next_task_ids", "skip_task_ids", "reversal_condition"],
+          "properties": {
+            "checkpoint": { "const": "J1-r2" },
+            "scope": { "const": "revise_or_stop_all" },
+            "evidence_outcome": { "enum": ["not_supported", "evidence_blocker", "unresolved"] },
+            "next_task_ids": { "const": ["R13"] },
+            "skip_task_ids": { "const": ["R5", "Q1", "R6", "R7", "R8", "R9", "R10", "Q2", "R11", "R12"] },
+            "reversal_condition": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "r2_gate_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "gate_id": { "const": "J1-r2" } }, "required": ["gate_id"] },
+          "then": {
+            "properties": {
+              "task": { "const": "R4" },
+              "scope": { "enum": ["proceed_dicow_and_qwen", "proceed_qwen_only", "revise_or_stop_all"] },
+              "evidence_outcome": { "enum": ["supported", "not_supported", "evidence_blocker", "unresolved"] },
+              "decision": { "$ref": "#/$defs/r2_j1_decision" }
+            }
+          }
+        }
+      ],
+      "required": ["schema_version", "gate_id", "task", "scope", "evidence_outcome", "machine_evidence_graph", "judgment_packet", "estimator_artifact", "decision", "fable_result", "r2_contract"],
+      "properties": {
+        "schema_version": { "const": "dicow-r2-gate-envelope-v1" },
+        "gate_id": { "enum": ["J1-r2", "J2-r2", "FINAL-r2"] },
+        "task": { "enum": ["R4", "R10", "R13"] },
+        "scope": { "enum": ["proceed_dicow_and_qwen", "proceed_qwen_only", "revise_or_stop_all", "select_none", "select_dicow_mlc", "select_dicow_v3_3", "retarget", "underpowered_keep_mlc", "final_review"] },
+        "evidence_outcome": { "enum": ["supported", "not_supported", "evidence_blocker", "unresolved"] },
+        "machine_evidence_graph": { "$ref": "#/$defs/evidence_artifact" },
+        "judgment_packet": { "$ref": "#/$defs/evidence_artifact" },
+        "estimator_artifact": { "$ref": "#/$defs/evidence_artifact" },
+        "decision": { "type": "object" },
+        "fable_result": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["terminal_reason", "is_error", "requested_model", "actual_model", "effort", "fallback", "context_tokens", "usable_input_tokens", "estimated_input_tokens", "cli_path", "cli_version", "session_id", "session_started_at_utc", "fresh_session", "resumed", "argv", "tool_allowlist", "estimator_version", "estimator_source_sha256", "prompt_sha256", "raw_path", "raw_sha256", "decision_path", "decision_sha256", "input_hashes"],
+          "properties": {
+            "terminal_reason": { "const": "completed" },
+            "is_error": { "const": false },
+            "requested_model": { "const": "fable" },
+            "actual_model": { "const": "claude-fable-5" },
+            "effort": { "const": "max" },
+            "fallback": { "const": false },
+            "context_tokens": { "const": 1000000 },
+            "usable_input_tokens": { "const": 996678 },
+            "estimated_input_tokens": { "type": "integer", "minimum": 0, "maximum": 996677 },
+            "cli_path": { "const": "claude" },
+            "cli_version": { "type": "string", "minLength": 1 },
+            "session_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+            "session_started_at_utc": { "type": "string", "format": "date-time", "pattern": "Z$" },
+            "fresh_session": { "const": true },
+            "resumed": { "const": false },
+            "argv": {
+              "type": "array",
+              "minItems": 22,
+              "maxItems": 22,
+              "prefixItems": [
+                { "const": "claude" },
+                { "const": "-p" },
+                { "const": "--no-session-persistence" },
+                { "const": "--model" },
+                { "const": "fable" },
+                { "const": "--effort" },
+                { "const": "max" },
+                { "const": "--output-format" },
+                { "const": "json" },
+                { "const": "--restricted" },
+                { "const": "--tools" },
+                { "const": "Read" },
+                { "const": "--add-dir" },
+                { "type": "string", "minLength": 1 },
+                { "const": "--permission-mode" },
+                { "const": "dontAsk" },
+                { "const": "--no-chrome" },
+                { "const": "--disable-slash-commands" },
+                { "const": "--strict-mcp-config" },
+                { "const": "--safe-mode" },
+                { "const": "--session-id" },
+                { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" }
+              ],
+              "items": false
+            },
+            "tool_allowlist": { "const": ["Read"] },
+            "estimator_version": { "type": "string", "minLength": 1 },
+            "estimator_source_sha256": { "$ref": "#/$defs/sha256" },
+            "prompt_sha256": { "$ref": "#/$defs/sha256" },
+            "raw_path": { "type": "string", "minLength": 1 },
+            "raw_sha256": { "$ref": "#/$defs/sha256" },
+            "decision_path": { "type": "string", "minLength": 1 },
+            "decision_sha256": { "$ref": "#/$defs/sha256" },
+            "input_hashes": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+              "additionalProperties": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        "r2_contract": { "$ref": "#/$defs/r2_contract" }
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:+-]{0,191}$"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^T(?:[0-9]|[12][0-9]|30)$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "j2_s4_d_turbo_o_cell": {
+      "properties": {
+        "criterion_id": { "const": "S4.d_turbo_o" },
+        "gate": { "const": "S4" },
+        "estimand": { "const": "D_turbo^O" },
+        "stratum": { "enum": ["overall", "ko", "it", "en"] },
+        "passed": { "const": true }
+      },
+      "required": ["criterion_id", "gate", "estimand", "stratum"]
+    },
+    "j2_s4_g_oracle_o_cell": {
+      "properties": {
+        "criterion_id": { "const": "S4.g_oracle_o" },
+        "gate": { "const": "S4" },
+        "estimand": { "const": "G_oracle^O" },
+        "stratum": { "enum": ["overall", "ko", "it", "en"] },
+        "passed": { "const": true }
+      },
+      "required": ["criterion_id", "gate", "estimand", "stratum"]
+    },
+    "j2_s4_p_oracle_n_cell": {
+      "properties": {
+        "criterion_id": { "const": "S4.p_oracle_n" },
+        "gate": { "const": "S4" },
+        "estimand": { "const": "P_oracle^N" },
+        "stratum": { "enum": ["overall", "ko", "it", "en"] },
+        "passed": { "const": true }
+      },
+      "required": ["criterion_id", "gate", "estimand", "stratum"]
+    },
+    "j2_s4_p_community1_n_cell": {
+      "properties": {
+        "criterion_id": { "const": "S4.p_community1_n" },
+        "gate": { "const": "S4" },
+        "estimand": { "const": "P_community1^N" },
+        "stratum": { "enum": ["overall", "ko", "it", "en"] },
+        "passed": { "const": true }
+      },
+      "required": ["criterion_id", "gate", "estimand", "stratum"]
+    },
+    "j2_s5_swap_margin_cell": {
+      "properties": {
+        "criterion_id": { "const": "S5.swap_margin" },
+        "gate": { "const": "S5" },
+        "estimand": { "const": "swap_margin" },
+        "stratum": { "enum": ["overall", "ko", "it", "en"] },
+        "passed": { "const": true }
+      },
+      "required": ["criterion_id", "gate", "estimand", "stratum"]
+    },
+    "j2_s5_g_community1_o_cell": {
+      "properties": {
+        "criterion_id": { "const": "S5.g_community1_o" },
+        "gate": { "const": "S5" },
+        "estimand": { "const": "G_community1^O" },
+        "stratum": { "enum": ["overall", "ko", "it", "en"] },
+        "passed": { "const": true }
+      },
+      "required": ["criterion_id", "gate", "estimand", "stratum"]
+    },
+    "j2_s5_half_oracle_margin_cell": {
+      "properties": {
+        "criterion_id": { "const": "S5.half_oracle_margin" },
+        "gate": { "const": "S5" },
+        "estimand": { "const": "half_oracle_margin" },
+        "stratum": { "enum": ["overall", "ko", "it", "en"] },
+        "passed": { "const": true }
+      },
+      "required": ["criterion_id", "gate", "estimand", "stratum"]
+    },
+    "j2_s5_spurious_empty_cell": {
+      "properties": {
+        "criterion_id": { "const": "S5.spurious_empty_proportion" },
+        "gate": { "const": "S5" },
+        "estimand": { "const": "spurious_empty_proportion" },
+        "stratum": { "enum": ["overall", "ko", "it", "en"] },
+        "passed": { "const": true }
+      },
+      "required": ["criterion_id", "gate", "estimand", "stratum"]
+    },
+    "j2_s4_target_character_preservation_oracle_cell": {
+      "properties": {
+        "criterion_id": { "const": "S4.target_character_preservation_oracle" },
+        "gate": { "const": "S4" },
+        "estimand": { "const": "target_character_preservation_oracle" },
+        "stratum": { "enum": ["overall", "ko", "it", "en"] },
+        "passed": { "const": true }
+      },
+      "required": ["criterion_id", "gate", "estimand", "stratum"]
+    },
+    "j2_s5_target_character_preservation_community1_cell": {
+      "properties": {
+        "criterion_id": { "const": "S5.target_character_preservation_community1" },
+        "gate": { "const": "S5" },
+        "estimand": { "const": "target_character_preservation_community1" },
+        "stratum": { "enum": ["overall", "ko", "it", "en"] },
+        "passed": { "const": true }
+      },
+      "required": ["criterion_id", "gate", "estimand", "stratum"]
+    },
+    "evidence_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "path", "sha256", "bytes"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._/-]*$"
+        },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "allowed_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execute", "constraints"],
+      "properties": {
+        "execute": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/task_id" }
+        },
+        "constraints": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "fable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested_model",
+        "actual_model",
+        "effort",
+        "fallback",
+        "cli_version",
+        "session_id",
+        "prompt_sha256",
+        "input_hashes",
+        "raw_result_sha256"
+      ],
+      "properties": {
+        "requested_model": { "const": "fable" },
+        "actual_model": { "const": "claude-fable-5" },
+        "effort": { "const": "max" },
+        "fallback": { "const": false },
+        "cli_version": { "type": "string", "minLength": 1 },
+        "session_id": { "type": "string", "minLength": 1 },
+        "prompt_sha256": { "$ref": "#/$defs/sha256" },
+        "input_hashes": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+          "additionalProperties": { "$ref": "#/$defs/sha256" }
+        },
+        "raw_result_sha256": { "$ref": "#/$defs/sha256" },
+        "decision_path": { "const": "fable-decision.json" },
+        "decision_sha256": { "$ref": "#/$defs/sha256" },
+        "decision_authenticated": { "const": true },
+        "provenance_path": { "type": "string", "minLength": 1 },
+        "provenance_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "frontier_refresh": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query_manifest_sha256", "ledger_sha256", "source_capture_manifest_sha256", "search_cutoff_utc", "fable_session_start_utc", "maximum_capture_age_hours", "required_families", "qwen_branches", "qwen_seed_queries"],
+      "properties": {
+        "query_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "ledger_sha256": { "$ref": "#/$defs/sha256" },
+        "source_capture_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "search_cutoff_utc": { "type": "string", "format": "date-time" },
+        "fable_session_start_utc": { "type": "string", "format": "date-time" },
+        "maximum_capture_age_hours": { "const": 6 },
+        "required_families": {
+          "type": "array",
+          "minItems": 16,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 },
+          "allOf": [
+            { "contains": { "const": "qwen" } },
+            { "contains": { "const": "vibevoice" } },
+            { "contains": { "const": "voxtral" } },
+            { "contains": { "const": "omnilingual_asr" } },
+            { "contains": { "const": "sam_audio" } },
+            { "contains": { "const": "nemotron" } },
+            { "contains": { "const": "dicow" } },
+            { "contains": { "const": "se_dicow" } },
+            { "contains": { "const": "ps4" } },
+            { "contains": { "const": "dave_tiger_m" } },
+            { "contains": { "const": "mossformer2" } },
+            { "contains": { "const": "cohere_transcribe" } },
+            { "contains": { "const": "glm_asr" } },
+            { "contains": { "const": "mimo" } },
+            { "contains": { "const": "kimi_audio" } },
+            { "contains": { "const": "step_audio" } }
+          ]
+        },
+        "qwen_branches": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": { "enum": ["asr", "audio", "omni"] },
+          "allOf": [
+            { "contains": { "const": "asr" } },
+            { "contains": { "const": "audio" } },
+            { "contains": { "const": "omni" } }
+          ]
+        },
+        "qwen_seed_queries": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "Qwen3-ASR-0.6B",
+              "Qwen3-ASR-1.7B",
+              "Qwen3-ForcedAligner-0.6B",
+              "Qwen3-Omni-30B-A3B-Instruct",
+              "Qwen-Audio-3.0-ASR-Flash",
+              "Qwen3.5-Omni"
+            ]
+          }
+        }
+      }
+    },
+    "availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason"],
+      "properties": {
+        "status": { "enum": ["available", "unavailable", "uncertain"] },
+        "reason": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "available" } }, "required": ["status"] },
+          "then": { "properties": { "reason": { "type": "null" } } },
+          "else": { "properties": { "reason": { "type": "string", "minLength": 1 } } }
+        }
+      ]
+    },
+    "criterion_id": {
+      "enum": [
+        "J1.contract_readiness",
+        "S0.repeat_identity",
+        "S3.shipped_korean_overlap_penalty",
+        "S4.d_turbo_o",
+        "S4.g_oracle_o",
+        "S4.p_oracle_n",
+        "S4.p_community1_n",
+        "S4.target_character_preservation_oracle",
+        "S5.swap_margin",
+        "S5.g_community1_o",
+        "S5.half_oracle_margin",
+        "S5.spurious_empty_proportion",
+        "S5.target_character_preservation_community1",
+        "S6.dicow_over_turbo_cer",
+        "S7.prompt_recall_delta",
+        "S7.absent_term_insertions",
+        "S7b.prompt_recall_delta",
+        "S7b.cross_speaker_insertions",
+        "S8.warm_order_identity",
+        "S9.dicow_cer_improvement",
+        "S9.cache_degradation",
+        "G1.repeat_identity",
+        "G2.conversion_contract",
+        "G3.fp32_parity",
+        "G4.bf16_parity",
+        "G5.mask_sensitivity",
+        "G6.semantic_parity",
+        "G7.peak_memory_ratio",
+        "G8.window_rtf_ratio",
+        "G9.runtime_topology",
+        "G10.pin_provenance",
+        "G11.lock_provenance",
+        "G12.source_provenance",
+        "G13.fixture_sidecar_provenance",
+        "G14.parity_mode_provenance",
+        "J4.explicit_language",
+        "J4.prompt_every_window",
+        "J4.fixed_window",
+        "J5.final_value",
+        "PA-T9.preflight_stop",
+        "PA-T11.correction_burden",
+        "PA-T12.local_derivative_permission",
+        "PA-T14.upstream_utility",
+        "PA-T15.shipped_stop",
+        "CONTROL-T23.control_envelope"
+      ]
+    },
+    "gate_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric_id",
+        "criterion_id",
+        "gate",
+        "estimand",
+        "stratum",
+        "availability",
+        "point",
+        "interval",
+        "target_proportion",
+        "cluster_count",
+        "passed",
+        "evidence_key",
+        "evidence_sha256",
+        "thresholds_sha256"
+      ],
+      "properties": {
+        "metric_id": { "$ref": "#/$defs/id" },
+        "criterion_id": { "$ref": "#/$defs/criterion_id" },
+        "gate": { "enum": ["J1", "J4", "J5", "S0", "S3", "S4", "S5", "S6", "S7", "S7b", "S8", "S9", "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10", "G11", "G12", "G13", "G14", "E0", "E3", "E4", "E5", "E6", "CONTROL"] },
+        "estimand": { "enum": ["D_turbo^O", "D_dicow,q^O", "G_q^O", "G_oracle^O", "G_community1^O", "P_q^N", "P_oracle^N", "P_community1^N", "target_character_preservation_oracle", "target_character_preservation_community1", "swap_margin", "half_oracle_margin", "spurious_empty_proportion", "prompt_recall_delta", "absent_term_insertions", "cross_speaker_insertions", "cer_delta", "cache_degradation", "resource_ratio", "parity", "mask_sensitivity", "purity", "repeat_identity", "conversion_contract", "runtime_contract", "provenance", "contract_readiness", "language_behavior", "prompt_behavior", "window_behavior", "frontier_dominance", "final_value", "preflight", "correction_burden", "license_permission", "upstream_utility", "shipped_comparison", "control_envelope"] },
+        "stratum": { "enum": ["overall", "ko", "it", "en", "not_applicable"] },
+        "availability": { "$ref": "#/$defs/availability" },
+        "point": { "type": ["number", "null"] },
+        "interval": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/gate_interval" }
+          ]
+        },
+        "target_proportion": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "cluster_count": { "type": "integer", "minimum": 0 },
+        "passed": { "type": ["boolean", "null"] },
+        "evidence_key": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "evidence_sha256": { "$ref": "#/$defs/sha256" },
+        "thresholds_sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "criterion_id": { "const": "J1.contract_readiness" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "J1" }, "estimand": { "const": "contract_readiness" }, "stratum": { "const": "not_applicable" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.d_turbo_o" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S4" }, "estimand": { "const": "D_turbo^O" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.g_oracle_o" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S4" }, "estimand": { "const": "G_oracle^O" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.p_oracle_n" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S4" }, "estimand": { "const": "P_oracle^N" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.p_community1_n" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S4" }, "estimand": { "const": "P_community1^N" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S4.target_character_preservation_oracle" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S4" }, "estimand": { "const": "target_character_preservation_oracle" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.swap_margin" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S5" }, "estimand": { "const": "swap_margin" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.g_community1_o" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S5" }, "estimand": { "const": "G_community1^O" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.half_oracle_margin" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S5" }, "estimand": { "const": "half_oracle_margin" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.spurious_empty_proportion" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S5" }, "estimand": { "const": "spurious_empty_proportion" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "S5.target_character_preservation_community1" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "S5" }, "estimand": { "const": "target_character_preservation_community1" } } }
+        },
+        {
+          "if": {
+            "properties": {
+              "criterion_id": { "enum": ["S4.target_character_preservation_oracle", "S5.target_character_preservation_community1"] },
+              "availability": { "properties": { "status": { "const": "available" } }, "required": ["status"] }
+            },
+            "required": ["criterion_id", "availability"]
+          },
+          "then": {
+            "properties": {
+              "point": { "type": "number", "minimum": 0, "maximum": 1 },
+              "interval": { "$ref": "#/$defs/character_preservation_interval" },
+              "target_proportion": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "J4.explicit_language" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "J4" }, "estimand": { "const": "language_behavior" }, "stratum": { "const": "not_applicable" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "J4.prompt_every_window" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "J4" }, "estimand": { "const": "prompt_behavior" }, "stratum": { "const": "not_applicable" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "J4.fixed_window" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "J4" }, "estimand": { "const": "window_behavior" }, "stratum": { "const": "not_applicable" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "J5.final_value" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "J5" }, "estimand": { "const": "final_value" }, "stratum": { "const": "not_applicable" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "PA-T9.preflight_stop" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "E0" }, "estimand": { "const": "preflight" }, "stratum": { "const": "not_applicable" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "PA-T11.correction_burden" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "E3" }, "estimand": { "const": "correction_burden" }, "stratum": { "const": "not_applicable" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "PA-T12.local_derivative_permission" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "E5" }, "estimand": { "const": "license_permission" }, "stratum": { "const": "not_applicable" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "PA-T14.upstream_utility" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "E4" }, "estimand": { "const": "upstream_utility" }, "stratum": { "const": "not_applicable" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "PA-T15.shipped_stop" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "E6" }, "estimand": { "const": "shipped_comparison" }, "stratum": { "const": "not_applicable" } } }
+        },
+        {
+          "if": { "properties": { "criterion_id": { "const": "CONTROL-T23.control_envelope" } }, "required": ["criterion_id"] },
+          "then": { "properties": { "gate": { "const": "CONTROL" }, "estimand": { "const": "control_envelope" }, "stratum": { "const": "not_applicable" } } }
+        },
+        {
+          "if": { "properties": { "availability": { "properties": { "status": { "const": "available" } }, "required": ["status"] } }, "required": ["availability"] },
+          "then": {
+            "properties": {
+              "point": { "type": "number" },
+              "passed": { "type": "boolean" }
+            }
+          },
+          "else": {
+            "properties": {
+              "point": { "type": "null" },
+              "interval": { "type": "null" },
+              "target_proportion": { "type": "null" },
+              "passed": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+    "gate_interval": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "lower", "upper"],
+          "properties": {
+            "kind": { "const": "two_sided_95_percentile" },
+            "lower": { "type": "number" },
+            "upper": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "upper"],
+          "properties": {
+            "kind": { "const": "one_sided_upper_95_percentile" },
+            "upper": { "type": "number" }
+          }
+        }
+      ]
+    },
+    "character_preservation_interval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "lower", "upper"],
+      "properties": {
+        "kind": { "const": "two_sided_95_percentile" },
+        "lower": { "type": "number", "minimum": 0, "maximum": 1 },
+        "upper": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

@@ -21,7 +21,7 @@
 
 ---
 
-**Maccheroni** (von *macaronic speech*, also Äußerungen, die Sprachen mischen) transkribiert die Gespräche, bei denen eine korrekte Transkription am schwierigsten ist: koreanische Meetings mit englischen Produktnamen in jedem Satz, Sprachunterricht und mehrsprachige Anrufe. Alles läuft mit festgeschriebenen MLX/CoreML-Modellen auf dem Gerät.
+**Maccheroni** (von *macaronic speech*, also Äußerungen, die Sprachen mischen) transkribiert die Gespräche, bei denen eine korrekte Transkription am schwierigsten ist: koreanische Meetings mit englischen Produktnamen in jedem Satz, Sprachunterricht und mehrsprachige Anrufe. Transkription und Diarisierung des Audios laufen mit festgeschriebenen MLX/CoreML-Modellen auf dem Gerät. Für die optionale Nachbearbeitung ausschließlich von Text kann Codex remote verwendet werden.
 
 So sieht ein Export aus (anschauliches Beispiel, keine Modellausgabe):
 
@@ -67,7 +67,7 @@ Fehlgeschlagene Blätter werden innerhalb typisierter Grenzen erneut aufgeteilt 
 
 ## Modelle
 
-Alle Modelle sind durch Hugging-Face-ID + Revision + Quantisierung festgeschrieben und werden in jedem Ausführungsmanifest protokolliert.
+Die Identitäten der Produktmodelle und Dienste werden in jedem Ausführungsmanifest protokolliert. Herunterladbare Modelle sind durch Hugging-Face-ID, Revision und Quantisierung festgeschrieben.
 
 | Rolle | Modell | Revision | Quantisierung |
 |---|---|---|---|
@@ -77,6 +77,8 @@ Alle Modelle sind durch Hugging-Face-ID + Revision + Quantisierung festgeschrieb
 | Diarisierung | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c42` | coreml-fp32 |
 | Nachbearbeitung (lokal) | `mlx-community/gemma-4-12B-it-qat-4bit` | `e70c6b3b` | qat-int4 (mlx-vlm 0.6.6) |
 | Nachbearbeitung (remote, nur Text) | `gpt-5.6-sol` über den Codex-App-Server | vom Dienst verwaltet | nicht zutreffend |
+
+Qwen3 ASR, Qwen3 ForcedAligner und DiCoW bleiben Forschungskandidaten. Ihre Kompatibilität mit Apple-Laufzeitumgebungen, Konvertierungsparität und Qualitätsgewinne im Produkt sind nicht belegt.
 
 ## Messergebnisse
 
@@ -93,7 +95,7 @@ Alle Ergebnisse stammen aus öffentlichen oder synthetischen Fixtures. Auswertun
 | Italienischer synthetischer Dialog mit 2 Sprechern (10 min), Glossar mit 9 Begriffen | MOSS | 0.033 | 0.085 | 0.78 | 0 | 0.048 |
 | VoxConverse-Beispiel (78 min) | VibeVoice + Pyannote | — | — | — | — | 0.152 |
 
-Koreanisch und Italienisch sind die ersten beiden Sprachprofile. Als nächstes Fixture-Set ist ein festgeschriebenes koreanisch-englisches Acceptance-Pack vorbereitet — HiKE-Codeswitching-Ausschnitte und ein AMI-Meeting mit vier Sprechern — und neue Messungen erscheinen in dieser Tabelle, sobald sie vorliegen.
+Koreanisch und Italienisch sind die ersten beiden Sprachprofile. HiKE, FLEURS und AMI sind Forschungs-Fixtures ausschließlich für Transport, Auswertung und Konvertierungsparität. Sie können kein Modell für den Produktbetrieb freigeben, solange der Ausschluss aus den Trainingsdaten und überlappungsspezifische Messungen nicht belegt sind.
 
 Stabilität der Sprecher an Abschnittsgrenzen im 78-Minuten-Beispiel: 1.0 für beide Referenzsprecher. Eine feste Matrix von 600 Sekunden zeigte, dass MOSS-Blätter über 120 s ihre Zeitstempelstruktur vollständig verlieren. Deshalb liegt die Obergrenze für produktive Blätter bei 120 s. Einzelheiten stehen unter [docs/moss-long-audio-verdict.md](docs/moss-long-audio-verdict.md).
 
@@ -102,9 +104,7 @@ Stabilität der Sprecher an Abschnittsgrenzen im 78-Minuten-Beispiel: 1.0 für b
   <img src="docs/assets/leaf-cap-light.svg" alt="Balkendiagramm: Auf demselben 600-Sekunden-Input liefern 120-Sekunden-Blätter 5 kanonische End-of-Sequence-Blätter (bestanden), 240- und 300-Sekunden-Blätter 0 gültige Blätter (typisierte invalid_eos_output-Fehler), und die erzwungene Wiederherstellung aus 240-Sekunden-Eltern liefert 5 gültige 120-Sekunden-Kinder" width="100%">
 </picture>
 
-Korrekturgewinne werden gemessen, nicht angenommen. Ein Vergleichs-Harness mit vier Zuständen bewertet die rohe und die korrigierte Ausgabe eines abgeschlossenen Laufs gegen dieselbe Referenz, mit und ohne Glossar-Injektion zur Dekodierzeit, und zählt jede angewendete Korrektur, die ein Segment von der Referenz entfernt hat. Eine selbstbewusst falsche Korrektur kann sich nicht in einem Durchschnitt verstecken.
-
-Ein abgeschlossener Lauf ist nicht eingefroren. `maccheroni postprocess` und die App leiten neue Korrektur- oder Übersetzungssätze aus den versiegelten Segmenten ab, ohne die ASR erneut auszuführen, und jede Glossar-Speicherung bleibt als inhaltsadressierte Revision erhalten, sodass eine spätere Ableitung genau die Glossar-Bytes wiederverwenden kann, die der ursprüngliche Lauf aufgezeichnet hat.
+Korrekturgewinne werden gemessen, nicht angenommen. Ein Vergleichs-Harness mit vier Zuständen bewertet die rohe und die korrigierte Ausgabe eines abgeschlossenen Laufs gegen dieselbe Referenz, mit und ohne Glossar-Injektion zur Dekodierzeit, und zählt jede angewendete Korrektur, die ein Segment von der Referenz entfernt hat. `maccheroni postprocess` und die App können aus den versiegelten Segmenten neue Korrektur- oder Übersetzungssätze ableiten, ohne die ASR erneut auszuführen. Inhaltsadressierte Glossarrevisionen bewahren dabei genau die Bytes des ursprünglichen Laufs.
 
 ## Installation
 
@@ -115,11 +115,11 @@ Voraussetzungen: Apple-Silicon-Mac, macOS 26, Xcode 26, [uv](https://docs.astral
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # 315 tests
+swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-Die App gibt ihren Bundle-Pfad aus, wenn Build, Ressourcen-Allowlist-Inventur und strenge Codesign-Prüfungen erfolgreich sind. Modellgewichte werden bei der ersten Nutzung heruntergeladen. Die ausführbare Datei enthält weder Modellgewichte noch Python-Umgebungen; `maccheroni doctor` prüft Laufzeitumgebungen, festgeschriebene Snapshots und die Speicherbereitschaft je konfiguriertem Volume.
+Die App gibt ihren Bundle-Pfad aus, wenn Build, Ressourcen-Allowlist-Inventur und strenge Codesign-Prüfungen erfolgreich sind. Das ausführbare Bundle enthält weder Modellgewichte noch Python-Umgebungen. Die Profildefinitionen `ko-meeting` und `it-dialogue` sind enthalten und `maccheroni doctor` meldet ihre beobachteten Abhängigkeiten und den Speicherzustand. Die Bereitstellung und abschließende Doctor-Prüfung von `ko-meeting` aus einem leeren Cache sind noch unvollständig: Der indirekte Qwen-Tokenizer und die Hugging-Face-Metadaten müssen manuell vorbereitet werden.
 
 Die ausführbare Datei bietet fünf Produktbefehle:
 
@@ -133,7 +133,7 @@ Die ausführbare Datei bietet fünf Produktbefehle:
 
 `maccheroni help`, `maccheroni doctor --json` und `maccheroni capabilities --json` liefern auffindbare Hilfe und strukturierte Ausgaben. Der kurze [CLI-Leitfaden](docs/cli-guide.md) beschreibt Befehls- und Ausgabeverträge. Transkription und Sprechertrennung laufen auf diesem Mac, sodass das Audio lokal bleibt.
 
-Mitgeliefert werden Profile für koreanische Meetings (`ko-meeting`, VibeVoice) und italienische Dialoge (`it-dialogue`, MOSS). Führe für das optionale lokale Nachbearbeitungsmodell `zsh scripts/setup-postprocess-runtime.zsh` aus.
+Führe für das optionale lokale Nachbearbeitungsmodell `zsh scripts/setup-postprocess-runtime.zsh` aus.
 
 ## Datenschutz
 
@@ -162,7 +162,7 @@ Issues und gezielte Pull Requests sind willkommen. Build- und Testbefehle, der V
 | Pfad | Inhalt |
 |---|---|
 | `Sources/` | Swift-Paket: Core, Preprocess, ASR, Diarize, Merge, Postprocess, CLI, App |
-| `Tests/` | 315 fixturebasierte Tests in 24 Suites |
+| `Tests/` | Fixturebasierte Tests |
 | `benchmarks/scripts/` | Runner, Scorer und der Vergleichs-Harness für Korrekturpfade, mit abgeleiteten Urteilen und Negativtests |
 | `docs/` | Forschungsübersicht, Quellcodeprüfungen, Richtlinie für Beschränkungen, Verträge (JSON-Schemas), UI-Design |
 | `scripts/` | App-Bundle-Build, MOSS-Harness-Build, Einrichtung der Nachbearbeitungslaufzeit |
