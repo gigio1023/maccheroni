@@ -120,8 +120,8 @@ predeclared calibration method with held-out or repeated observation.
 
 ## 6. Current Position
 
-- **now**: The 2026-08-31 post-v1 reliability reset has an implemented Draft PR stack
-  for fresh-cache `ko-meeting` provisioning, cache-independent tests, bounded subprocess
+- **now**: The 2026-08-31 post-v1 reliability reset is merged on the default branch with
+  fresh-cache `ko-meeting` provisioning, cache-independent tests, bounded subprocess
   fixtures, immutable evaluation envelopes, correction comparison, and reproducible
   Stage 2 fixture construction. Two consecutive empty-cache Swift runs passed 324 tests
   in 25 suites. The explicit model integration, package build, strict codesign, and
