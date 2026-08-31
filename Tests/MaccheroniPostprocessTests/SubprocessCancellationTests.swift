@@ -59,8 +59,7 @@ struct SubprocessCancellationTests {
         let pid = try await readyPID(
             for: execution,
             pidURL: pidURL,
-            readinessURL: readinessURL,
-            readinessAttempts: 300
+            readinessURL: readinessURL
         )
         defer { _ = Darwin.kill(pid, SIGKILL) }
 
@@ -90,13 +89,13 @@ struct SubprocessCancellationTests {
         for execution: Task<SubprocessOutput, Error>,
         pidURL: URL,
         readinessURL: URL,
-        readinessAttempts: Int = 1_000
+        readinessTimeout: Duration = .seconds(10)
     ) async throws -> Int32 {
         do {
             return try await waitForReadyPID(
                 at: pidURL,
                 readinessURL: readinessURL,
-                attempts: readinessAttempts
+                timeout: readinessTimeout
             )
         } catch {
             execution.cancel()
@@ -105,8 +104,10 @@ struct SubprocessCancellationTests {
         }
     }
 
-    private func waitForReadyPID(at pidURL: URL, readinessURL: URL, attempts: Int) async throws -> Int32 {
-        for _ in 0 ..< attempts {
+    private func waitForReadyPID(at pidURL: URL, readinessURL: URL, timeout: Duration) async throws -> Int32 {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while clock.now < deadline {
             let isReady = (try? String(contentsOf: readinessURL, encoding: .utf8))
                 == "sigterm-handler-and-pid-ready\n"
             if isReady,

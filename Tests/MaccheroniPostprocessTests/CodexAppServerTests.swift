@@ -152,11 +152,13 @@ struct CodexAppServerTests {
             credentialPlanType: "plus"
         )
         defer { signedIn.remove() }
-        #expect(try await signedIn.executor().accountState(
-            executableURL: signedIn.executable,
-            workspaceURL: signedIn.workspace,
-            timeoutS: 2
-        ) == .chatGPT)
+        let signedInCredentialBefore = try Data(
+            contentsOf: signedIn.sourceAuthentication
+        )
+        let signedInCredentialMetadataBefore = try readCredentialMetadata(
+            at: signedIn.sourceAuthentication
+        )
+        #expect(try await accountStateAfterLoginReadiness(in: signedIn) == .chatGPT)
         let signedInLogin = try #require(
             signedIn.rpcRecords().clientRequest(method: "account/login/start")
         )
@@ -167,11 +169,13 @@ struct CodexAppServerTests {
 
         let apiKey = try AppServerFixture(accountType: "apiKey")
         defer { apiKey.remove() }
-        #expect(try await apiKey.executor().accountState(
-            executableURL: apiKey.executable,
-            workspaceURL: apiKey.workspace,
-            timeoutS: 2
-        ) == .unsupported)
+        let apiKeyCredentialBefore = try Data(
+            contentsOf: apiKey.sourceAuthentication
+        )
+        let apiKeyCredentialMetadataBefore = try readCredentialMetadata(
+            at: apiKey.sourceAuthentication
+        )
+        #expect(try await accountStateAfterLoginReadiness(in: apiKey) == .unsupported)
         await #expect(throws: PostprocessError.authenticationRequired(accountMismatchMessage)) {
             _ = try await apiKey.executor().run(apiKey.invocation())
         }
@@ -179,15 +183,31 @@ struct CodexAppServerTests {
 
         let signedOut = try AppServerFixture(accountType: nil)
         defer { signedOut.remove() }
-        #expect(try await signedOut.executor().accountState(
-            executableURL: signedOut.executable,
-            workspaceURL: signedOut.workspace,
-            timeoutS: 2
-        ) == .signedOut)
+        let signedOutCredentialBefore = try Data(
+            contentsOf: signedOut.sourceAuthentication
+        )
+        let signedOutCredentialMetadataBefore = try readCredentialMetadata(
+            at: signedOut.sourceAuthentication
+        )
+        #expect(try await accountStateAfterLoginReadiness(in: signedOut) == .signedOut)
 
-        for fixture in [signedIn, apiKey, signedOut] {
+        for (fixture, credentialBefore, credentialMetadataBefore) in [
+            (signedIn, signedInCredentialBefore, signedInCredentialMetadataBefore),
+            (apiKey, apiKeyCredentialBefore, apiKeyCredentialMetadataBefore),
+            (signedOut, signedOutCredentialBefore, signedOutCredentialMetadataBefore),
+        ] {
             try fixture.assertScratchIsEmpty()
             try fixture.assertHostileParentHomeUnchanged()
+            #expect(
+                try Data(contentsOf: fixture.sourceAuthentication)
+                    == credentialBefore
+            )
+            #expect(
+                try readCredentialMetadata(at: fixture.sourceAuthentication)
+                    == credentialMetadataBefore
+            )
+            let transcript = try String(contentsOf: fixture.log, encoding: .utf8)
+            #expect(!transcript.contains(fixture.accessToken))
         }
     }
 
@@ -478,6 +498,10 @@ struct CodexAppServerTests {
     @Test func timeoutTerminatesTheExactAppServerDescendantTreeAndCleansScratch() async throws {
         let fixture = try AppServerFixture(accountType: "chatgpt")
         defer { fixture.remove() }
+        let credentialBefore = try Data(contentsOf: fixture.sourceAuthentication)
+        let credentialMetadataBefore = try readCredentialMetadata(
+            at: fixture.sourceAuthentication
+        )
         let rootPIDURL = fixture.root.appendingPathComponent("root.pid")
         let childPIDURL = fixture.root.appendingPathComponent("child.pid")
         let executable = fixture.root.appendingPathComponent("codex-timeout")
@@ -489,12 +513,13 @@ struct CodexAppServerTests {
             child=$!
             printf '%s' "$child" > '\(childPIDURL.path)'
             while IFS= read -r line; do :; done
+            wait "$child"
             """,
             to: executable
         )
 
-        await #expect(throws: PostprocessError.self) {
-            _ = try await fixture.executor(
+        let timeoutTask = Task {
+            try await fixture.executor(
                 terminationTiming: ProcessTerminationTiming(
                     gracePeriodS: 0.05,
                     pollIntervalS: 0.01,
@@ -503,13 +528,31 @@ struct CodexAppServerTests {
             ).accountState(
                 executableURL: executable,
                 workspaceURL: fixture.workspace,
-                timeoutS: 0.5
+                timeoutS: loadTolerantTestTimeoutS
             )
         }
-        let processIDs = try await [rootPIDURL, childPIDURL].asyncMap(waitForPID)
+        let processIDs: [Int32]
+        do {
+            processIDs = try await [rootPIDURL, childPIDURL].asyncMap(waitForPID)
+        } catch {
+            timeoutTask.cancel()
+            _ = await timeoutTask.result
+            throw error
+        }
+        await #expect(throws: PostprocessError.backendFailed(
+            "codex app server timed out after \(Int(loadTolerantTestTimeoutS)) seconds"
+        )) {
+            _ = try await timeoutTask.value
+        }
         try await waitForProcessesToExit(processIDs)
         #expect(processIDs.allSatisfy { !processExists($0) })
         try fixture.assertScratchIsEmpty()
+        try fixture.assertHostileParentHomeUnchanged()
+        #expect(try Data(contentsOf: fixture.sourceAuthentication) == credentialBefore)
+        #expect(
+            try readCredentialMetadata(at: fixture.sourceAuthentication)
+                == credentialMetadataBefore
+        )
     }
 
     @Test func cancellationTerminatesTheExactAppServerDescendantTreeAndCleansScratch() async throws {
@@ -1172,6 +1215,26 @@ private func waitForClientMethod(_ method: String, in fixture: AppServerFixture)
         try await Task.sleep(for: .milliseconds(10))
     }
     throw CocoaError(.fileReadUnknown)
+}
+
+private func accountStateAfterLoginReadiness(
+    in fixture: AppServerFixture
+) async throws -> CodexAppServerAccountState {
+    let accountState = Task {
+        try await fixture.executor().accountState(
+            executableURL: fixture.executable,
+            workspaceURL: fixture.workspace,
+            timeoutS: loadTolerantTestTimeoutS
+        )
+    }
+    do {
+        try await waitForClientMethod("account/login/start", in: fixture)
+    } catch {
+        accountState.cancel()
+        _ = await accountState.result
+        throw error
+    }
+    return try await accountState.value
 }
 
 private func waitForProcessesToExit(_ processIDs: [Int32]) async throws {
