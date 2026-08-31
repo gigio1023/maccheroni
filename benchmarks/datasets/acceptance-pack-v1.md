@@ -107,31 +107,92 @@ English/filler stoplist in the preparer. It then applies the same exact term
 matching and reference-count calculation as the scorer. Every injected term is
 therefore present in this meeting's reference.
 
-## Score an acceptance run
+## Run and score an acceptance fixture
 
-Run the ordinary scorer with the prepared reference and glossary annotation.
-For AMI, add the reference and hypothesis RTTM files.
+The acceptance runner keeps product output immutable. It creates the source run
+first, inventories every regular file, and writes scores into a separate
+create-only evaluation directory. It refuses an existing evaluation ID before
+starting a model. HiKE accepts only `acceptance-asr`; AMI accepts only
+`acceptance-full`.
 
 ```sh
-uv run --project benchmarks/scripts/scoring \
-  python benchmarks/scripts/scoring/score.py \
-  --reference benchmarks/samples/public/acceptance-pack-v1/prepared/hike-code-switch-v1/reference.segments.json \
-  --hypothesis <run>/merged/segments.json \
-  --terms benchmarks/samples/public/acceptance-pack-v1/prepared/hike-code-switch-v1/terms.json \
-  --output <new-run>/scores.json
+MACCHERONI_ACCEPTANCE_MODEL_RUN=1 \
+MACCHERONI_BENCHMARK_CACHE="$cache_root" \
+  bash benchmarks/scripts/runners/run_acceptance_pack_v1.sh \
+  hike-code-switch-v1 acceptance-asr \
+  benchmarks/runs/post-v1-reliability-reset/hike-code-switch-v1 \
+  --evaluation-id "$evaluation_id"
 
-uv run --project benchmarks/scripts/scoring \
-  python benchmarks/scripts/scoring/check_run.py \
-  --run-root <new-run> \
-  --input benchmarks/samples/public/acceptance-pack-v1/prepared/hike-code-switch-v1/input.wav \
-  --kind acceptance-asr
+MACCHERONI_ACCEPTANCE_MODEL_RUN=1 \
+MACCHERONI_BENCHMARK_CACHE="$cache_root" \
+  bash benchmarks/scripts/runners/run_acceptance_pack_v1.sh \
+  ami-in1009-ihm-mix-v1 acceptance-full \
+  benchmarks/runs/post-v1-reliability-reset/ami-in1009-ihm-mix-v1 \
+  --evaluation-id "$evaluation_id"
 ```
 
-`acceptance-asr` requires a hash-sealed score containing CER, WER, omissions,
-and fully reproducible term recall. `acceptance-full` additionally requires
-diarization. These commands do not publish numbers. Store any run under the
-ignored, create-only `benchmarks/runs/` tree; the maintainer decides whether a
-measurement campaign enters `published-results.json`.
+Set `MACCHERONI_ACCEPTANCE_MODEL_RUN=1` only after confirming that no other
+model process is active. The runner also requires at least 36 GiB of physical
+memory, the provisioned `ko-meeting` cache, a passing profile doctor, and one
+global acceptance-run lock. It never starts HiKE and AMI model runs together.
+
+The 36 GiB check is a benchmark-only model-launch stop condition inherited
+unchanged from the bounded Korean-profile smoke. It is not a product minimum
+and does not claim that physical capacity proves current availability. The
+constraint unit is bytes and the runner evaluates
+`hw.memsize >= 36 * 1024^3`; the boundary contract rejects one byte below the
+limit and admits the limit and one byte above it to the remaining doctor,
+active-process, cache, and global-lock checks. No extra headroom factor is
+applied. Revisit the stop condition only after a controlled lower-memory
+acceptance campaign establishes a new supported range. A host below it can
+still verify or score a preserved source run without launching a model.
+
+To score a preserved source run without loading a model, add
+`--source-run <run>`. To check only the fixture hashes and closed fixture-kind
+mapping, add `--dry-run`; this creates no output.
+
+Verify an envelope independently:
+
+```sh
+uv run --project benchmarks/env/dicow-reference \
+  python benchmarks/scripts/scoring/check_acceptance_evaluation.py verify \
+  --fixture-root benchmarks/samples/public/acceptance-pack-v1/prepared/hike-code-switch-v1 \
+  --input benchmarks/samples/public/acceptance-pack-v1/prepared/hike-code-switch-v1/input.wav \
+  --source-run <run> \
+  --output <evaluation>
+```
+
+Before any model launch, the runner replays fixture construction from the
+pinned public sources. This includes every HiKE transcript, glossary term,
+item WAV, and concatenated reel, plus every AMI transcript, glossary term, and
+complete RTTM row. It rejects fixture files outside the fixture check's exact
+artifact inventory.
+
+`evaluation.json` seals the fixture check, public source payloads, every
+prepared fixture artifact, the source manifest and complete source-run file
+inventory, exact `ko-meeting` model identities, the applied glossary, every
+scored input, scorer sources, and `scores.json`. The safe evaluation ID must
+equal its directory name, and verification rejects every unknown top-level or
+nested envelope field. Its runner-evidence summary
+proves that every promoted ASR leaf completed with observed terminal evidence,
+an unchanged input, the pinned VibeVoice identity, and the exact applied
+glossary. It also binds the root and leaf sample ranges to the unique sealed
+normalized WAV, requiring gap-free, overlap-free coverage and byte-identical
+PCM slices. For AMI, the evaluation derives `hypothesis.rttm` deterministically
+from the sealed whole-file timeline and seals both RTTM inputs. Verification
+recomputes the scores and the RTTM rather than trusting the recorded result.
+`Qwen/Qwen2.5-7B` remains VibeVoice's pinned tokenizer-only dependency; the
+evaluation never reports it as an inference model.
+
+Creation verifies the complete evaluation in a private sibling staging
+directory. macOS then publishes it with an atomic no-replace rename. A failed
+verification remains unpublished, while a concurrently claimed evaluation ID
+is never overwritten.
+
+The verdict is structural only. Any measured CER, WER, omission count, term
+recall, or DER can pass this integrity check. These commands do not publish
+numbers. Store runs under the ignored, create-only `benchmarks/runs/` tree; the
+maintainer decides whether a campaign enters `published-results.json`.
 
 ## Bounded Korean-profile smoke
 
