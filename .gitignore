@@ -20,3 +20,8 @@ models/
 handoff.md
 codex-goal.md
 .codex/
+
+# Docusaurus research journal
+site/node_modules/
+site/.docusaurus/
+site/build/

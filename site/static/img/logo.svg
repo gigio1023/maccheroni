@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Maccheroni waveform</title>
+  <rect width="64" height="64" rx="13" fill="#f5e9d6"/>
+  <path d="M7 32h6m4-8v16m5-23v30m6-21v12m5-27v42m6-32v22m6-16v10m6-5h6" fill="none" stroke="#3b3024" stroke-width="4" stroke-linecap="round"/>
+  <path d="M7 20c14 0 16 24 29 24 10 0 13-15 21-15" fill="none" stroke="#b76032" stroke-width="2.5" stroke-linecap="round"/>
+</svg>
