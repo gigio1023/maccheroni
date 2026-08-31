@@ -1,4 +1,5 @@
 import AVFoundation
+import CryptoKit
 import Foundation
 import Testing
 import MaccheroniCore
@@ -130,6 +131,190 @@ import MaccheroniCore
         )) {
             try await adapter.detect(audioURL: directory.appendingPathComponent("synthetic.wav"))
         }
+    }
+
+    @Test func speechSileroStandaloneDefaultsRemainPinnedToTheLegacyLocations() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let adapter = SpeechSileroVADAdapter()
+
+        #expect(adapter.executableURL.path == "/opt/homebrew/bin/speech")
+        #expect(adapter.modelCacheURL == home
+            .appendingPathComponent("Library/Caches/qwen3-speech/models/aufklarer")
+            .appendingPathComponent("Silero-VAD-v6.2.1-CoreML/silero_vad.mlmodelc"))
+        #expect(adapter.revisionMarkerURL == home
+            .appendingPathComponent(".cache/huggingface/hub/models--aufklarer--Silero-VAD-v6.2.1-CoreML")
+            .appendingPathComponent("refs/main"))
+        #expect(adapter.harnessModelRepositoryURL == nil)
+        #expect(adapter.runtime == BackendDescriptor(name: "speech", version: "0.0.23"))
+        #expect(adapter.timeoutS == 300)
+        #expect(adapter.provenance.model == ModelDescriptor(
+            role: .vad,
+            hfModelID: "aufklarer/Silero-VAD-v6.2.1-CoreML",
+            revision: "523876545a57961474fee9df913e833e130560b8",
+            quantization: "coreml-float16"
+        ))
+    }
+
+    @Test func speechSileroAdapterUsesInjectedOfflineHarnessAndExactRepositoryRoot() async throws {
+        let directory = try freshTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSineWAV(to: sourceURL, amplitude: 0.2)
+        let executableURL = directory.appendingPathComponent("speech")
+        let argumentsURL = directory.appendingPathComponent("arguments.txt")
+        let script = """
+        #!/bin/sh
+        printf '%s\\n' "$@" > "\(argumentsURL.path)"
+        printf '[\\n]\\n'
+        """
+        try Data(script.utf8).write(to: executableURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executableURL.path
+        )
+        let repositoryURL = directory.appendingPathComponent("Silero-VAD-v6.2.1-CoreML", isDirectory: true)
+        let modelURL = repositoryURL.appendingPathComponent("silero_vad.mlmodelc", isDirectory: true)
+        let runtimePayload = try writeRuntimePayload(
+            at: repositoryURL,
+            relativePaths: sileroRuntimeRelativePaths
+        )
+        let revisionURL = directory.appendingPathComponent(
+            "cache/models/huggingface/hub/models--aufklarer--Silero-VAD-v6.2.1-CoreML/refs/main"
+        )
+        try FileManager.default.createDirectory(
+            at: revisionURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("523876545a57961474fee9df913e833e130560b8\n".utf8)
+            .write(to: revisionURL)
+        let configuredAdapter = SpeechSileroVADAdapter(
+            executableURL: executableURL,
+            modelCacheURL: modelURL,
+            revisionMarkerURL: revisionURL,
+            harnessModelRepositoryURL: repositoryURL
+        )
+        let adapter = SpeechSileroVADAdapter(
+            testing: configuredAdapter,
+            harnessRuntimePayload: runtimePayload
+        )
+
+        let map = try await adapter.detect(audioURL: sourceURL)
+
+        #expect(map.regions.count == 1)
+        #expect(map.regions[0].kind == .silence)
+        #expect(adapter.runtime == BackendDescriptor(name: "speech", version: "0.0.23"))
+        #expect(adapter.timeoutS == 300)
+        let arguments = try String(contentsOf: argumentsURL, encoding: .utf8)
+            .split(separator: "\n")
+            .map(String.init)
+        #expect(arguments == [
+            "vad-stream",
+            sourceURL.path,
+            "--cache-dir",
+            repositoryURL.path,
+            "--json",
+        ])
+    }
+
+    @Test func speechSileroHarnessRejectsSameSizePayloadCorruptionBeforeLaunch() async throws {
+        let directory = try freshTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executableURL = directory.appendingPathComponent("speech")
+        let launchMarkerURL = directory.appendingPathComponent("launched")
+        let script = "#!/bin/sh\nprintf launched > '\(launchMarkerURL.path)'\nprintf '[\\n]\\n'\n"
+        try Data(script.utf8).write(to: executableURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executableURL.path
+        )
+
+        let repositoryURL = directory.appendingPathComponent("Silero-VAD-v6.2.1-CoreML", isDirectory: true)
+        let modelURL = repositoryURL.appendingPathComponent("silero_vad.mlmodelc", isDirectory: true)
+        let runtimePayload = try writeRuntimePayload(
+            at: repositoryURL,
+            relativePaths: sileroRuntimeRelativePaths
+        )
+        let revisionURL = directory.appendingPathComponent("refs/main")
+        try FileManager.default.createDirectory(
+            at: revisionURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("523876545a57961474fee9df913e833e130560b8\n".utf8)
+            .write(to: revisionURL)
+
+        let corruptedURL = repositoryURL.appendingPathComponent(
+            "silero_vad.mlmodelc/weights/weight.bin"
+        )
+        var corrupted = try Data(contentsOf: corruptedURL)
+        let originalSize = corrupted.count
+        corrupted[corrupted.startIndex] ^= 0x01
+        try corrupted.write(to: corruptedURL)
+        #expect(try Data(contentsOf: corruptedURL).count == originalSize)
+
+        let configuredAdapter = SpeechSileroVADAdapter(
+            executableURL: executableURL,
+            modelCacheURL: modelURL,
+            revisionMarkerURL: revisionURL,
+            harnessModelRepositoryURL: repositoryURL
+        )
+        let adapter = SpeechSileroVADAdapter(
+            testing: configuredAdapter,
+            harnessRuntimePayload: runtimePayload
+        )
+
+        await #expect(throws: VoiceActivityError.speechSileroUnavailable(
+            executableURL: executableURL,
+            modelCacheURL: modelURL
+        )) {
+            try await adapter.detect(
+                audioURL: directory.appendingPathComponent("synthetic.wav")
+            )
+        }
+        #expect(!FileManager.default.fileExists(atPath: launchMarkerURL.path))
+    }
+
+    @Test func speechSileroAdapterDoesNotPromoteArbitraryStandardError() async throws {
+        let directory = try freshTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceURL = directory.appendingPathComponent("private-input.wav")
+        try writeSineWAV(to: sourceURL, amplitude: 0.2)
+        let secret = "Bearer synthetic-secret sensitive-transcript-payload \(sourceURL.path)"
+        let adapter = try fixtureAdapter(
+            in: directory,
+            script: "#!/bin/sh\nprintf '%s' '\(secret)' >&2\nexit 19\n",
+            timeoutS: 5
+        )
+
+        do {
+            _ = try await adapter.detect(audioURL: sourceURL)
+            Issue.record("expected process failure")
+        } catch let error as VoiceActivityError {
+            guard case let .executionFailed(exitCode, message) = error else {
+                Issue.record("expected executionFailed, got \(error)")
+                return
+            }
+            #expect(exitCode == 19)
+            #expect(message == "diagnostic unavailable")
+            #expect(!message.contains(secret))
+            #expect(!message.contains(sourceURL.path))
+        }
+    }
+
+    @Test func stockSpeechSileroAdapterForcesHuggingFaceOfflineMode() async throws {
+        let directory = try freshTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceURL = directory.appendingPathComponent("synthetic.wav")
+        let environmentURL = directory.appendingPathComponent("environment.txt")
+        try writeSineWAV(to: sourceURL, amplitude: 0.2)
+        let adapter = try fixtureAdapter(
+            in: directory,
+            script: "#!/bin/sh\nprintf '%s' \"$HF_HUB_OFFLINE\" > '\(environmentURL.path)'\nprintf '[\\n]\\n'\n",
+            timeoutS: 5
+        )
+
+        _ = try await adapter.detect(audioURL: sourceURL)
+
+        #expect(try String(contentsOf: environmentURL, encoding: .utf8) == "1")
     }
 
     @Test func speechSileroAdapterRunsOnSyntheticWAVAndReturnsCompleteMap() async throws {
@@ -515,6 +700,53 @@ import MaccheroniCore
             revisionMarkerURL: revisionURL,
             timeoutS: timeoutS
         )
+    }
+
+    private var sileroRuntimeRelativePaths: [String] {
+        [
+            "config.json",
+            "silero_vad.mlmodelc/analytics/coremldata.bin",
+            "silero_vad.mlmodelc/coremldata.bin",
+            "silero_vad.mlmodelc/metadata.json",
+            "silero_vad.mlmodelc/model.mil",
+            "silero_vad.mlmodelc/weights/weight.bin",
+        ]
+    }
+
+    private func writeRuntimePayload(
+        at root: URL,
+        relativePaths: [String]
+    ) throws -> RuntimePayloadPin {
+        var files: [RuntimePayloadFile] = []
+        var treeHasher = SHA256()
+        for (index, relativePath) in relativePaths.enumerated() {
+            let file = root.appendingPathComponent(relativePath)
+            try FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = Data("fixture-payload-\(index)".utf8)
+            try data.write(to: file)
+            let digest = SHA256.hash(data: data).map {
+                String(format: "%02x", $0)
+            }.joined()
+            files.append(RuntimePayloadFile(
+                relativePath: relativePath,
+                sha256: digest
+            ))
+
+            let name = Data(relativePath.utf8)
+            var nameLength = UInt32(name.count).bigEndian
+            withUnsafeBytes(of: &nameLength) {
+                treeHasher.update(data: Data($0))
+            }
+            treeHasher.update(data: name)
+            treeHasher.update(data: data)
+        }
+        let treeSHA256 = treeHasher.finalize().map {
+            String(format: "%02x", $0)
+        }.joined()
+        return RuntimePayloadPin(files: files, treeSHA256: treeSHA256)
     }
 }
 

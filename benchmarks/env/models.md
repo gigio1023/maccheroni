@@ -19,6 +19,7 @@ silently replace the model with another one.
 | speech-swift pyannote segmentation | `aufklarer/Pyannote-Segmentation-MLX` | `abef0110277063f0ea117a802832a3eba22af84c` | `fp32` | downloaded and smoke-tested |
 | speech-swift pyannote embedding | `aufklarer/WeSpeaker-ResNet34-LM-MLX` | `26499ce11ad1b48ac96aacc8d6fa433f941bdc96` | `fp32` | downloaded and smoke-tested |
 | speech-swift community1 | `aufklarer/Pyannote-Community-1-CoreML` | `a14e6c420d56e8472850649b016a486fd0acbe81` | `coreml-fp32` | downloaded and smoke-tested |
+| speech-swift Silero VAD | `aufklarer/Silero-VAD-v6.2.1-CoreML` | `523876545a57961474fee9df913e833e130560b8` | `coreml-float16` | downloaded for the pinned offline runtime |
 | FluidAudio offline diarization | `FluidInference/speaker-diarization-coreml` | `1ed7a662fdc7109e36d822db793ee6eebdaf8594` | `coreml-fp32+fp16` | downloaded and smoke-tested by the offline-only harness |
 
 Manifest quantization values are schema-safe identity tokens. The selected
@@ -30,7 +31,11 @@ weights. FluidAudio offline diarization stores segmentation, FBank, and PLDA
 as Float32 and its embedding model as Float16. Runtime graphs can still contain
 non-weight integer and Float32 operations.
 
-The Qwen tokenizer asset `Qwen/Qwen2.5-7B` revision
-`d149729398750b98c0af14eb82c78cfe92750796` was also fetched by speech-swift.
-It contains tokenizer files only, not inference weights, so quantization is
-not applicable.
+The locked mlx-audio 0.4.6 VibeVoice adapter indirectly uses the tokenizer
+from `Qwen/Qwen2.5-7B` revision
+`d149729398750b98c0af14eb82c78cfe92750796`. Provisioning fetches exactly
+`config.json`, `tokenizer.json`, `tokenizer_config.json`, `merges.txt`, and
+`vocab.json`. It does not fetch or load Qwen inference weights, so
+quantization is not applicable. The Qwen revision identifies this adapter's
+text vocabulary. It does not identify VibeVoice's release age and does not
+apply to every VibeVoice runtime.

@@ -588,6 +588,12 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
         let processResult = try await runSubprocess(arguments)
         guard FileManager.default.fileExists(atPath: outputURL.path) else {
             if let error = decodeRunnerError(processResult.standardError) { throw error }
+            if processResult.status != 0 {
+                throw ASRAdapterError.backendFailed(
+                    code: "subprocess_exit_\(processResult.status)",
+                    message: "diagnostic unavailable"
+                )
+            }
             throw ASRAdapterError.malformedOutput("ASR subprocess did not create its protected output record")
         }
         let data: Data
@@ -631,7 +637,7 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
         guard processResult.status == 0 else {
             throw ASRAdapterError.backendFailed(
                 code: "subprocess_exit_\(processResult.status)",
-                message: processResult.standardError.trimmingCharacters(in: .whitespacesAndNewlines)
+                message: "diagnostic unavailable"
             )
         }
         return try validate(document: document, request: request, outputURL: outputURL, maximumTokens: maximumTokens)
@@ -739,7 +745,14 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
               let data = String(line).data(using: .utf8),
               let error = try? JSONDecoder().decode(RunnerErrorDocument.self, from: data)
         else { return nil }
-        return .backendFailed(code: error.error.code, message: error.error.message)
+        guard runnerDiagnosticCodeIsAllowed(error.error.code) else { return nil }
+        return .backendFailed(
+            code: error.error.code,
+            message: promotableRunnerDiagnostic(
+                code: error.error.code,
+                message: error.error.message
+            ) ?? "diagnostic unavailable"
+        )
     }
 
     private func validate(
@@ -864,8 +877,6 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
             guard selected == .moss,
                   document.stopReason == .endOfSequence,
                   document.failure?.code == "invalid_eos_output",
-                  let message = document.failure?.message,
-                  !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   document.coverage.truncated,
                   abs(document.coverage.inputDurationS - expectedDuration) <= 0.01,
                   document.coverage.processedDurationS == 0,
@@ -877,6 +888,10 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
                     "MOSS invalid_eos_output record contains promotable or inconsistent output"
                 )
             }
+            let message = document.failure?.message
+                == "MOSS EOS output has no validated segments"
+                ? "MOSS EOS output has no validated segments"
+                : "diagnostic unavailable"
             throw ASRAdapterError.invalidEOSOutput(message)
         }
         if document.outcome == .limit {
@@ -1008,7 +1023,10 @@ public enum ASRDoctor {
         let process = try await adapter.runDoctor()
         guard process.status == 0 else {
             throw adapter.decodeRunnerError(process.standardError)
-                ?? ASRAdapterError.backendFailed(code: "doctor_exit_\(process.status)", message: process.standardError)
+                ?? ASRAdapterError.backendFailed(
+                    code: "doctor_exit_\(process.status)",
+                    message: "diagnostic unavailable"
+                )
         }
         guard let data = process.standardOutput.data(using: .utf8) else {
             throw ASRAdapterError.malformedOutput("doctor emitted non-UTF-8 output")
@@ -1077,7 +1095,7 @@ public enum MOSSContextPlanner {
                 .decodeRunnerError(process.standardError)
                 ?? ASRAdapterError.backendFailed(
                     code: "prompt_plan_exit_\(process.status)",
-                    message: process.standardError
+                    message: "diagnostic unavailable"
                 )
         }
         guard let data = process.standardOutput.data(using: .utf8) else {
@@ -1148,6 +1166,147 @@ private struct ProcessResult: Sendable {
     var standardError: String
 }
 
+private let maximumCapturedStandardErrorBytes = 16_384
+
+private func runnerDiagnosticCodeIsAllowed(_ code: String) -> Bool {
+    switch code {
+    case "backend_failed", "backend_import_failed", "backend_inference_failed",
+         "backend_load_failed", "context_preflight", "coverage_shortfall",
+         "dependency_invalid", "dependency_missing", "duration_limit", "environment_missing",
+         "environment_version", "glossary_invalid", "glossary_not_applied",
+         "harness_contract_mismatch", "harness_fingerprint_malformed",
+         "harness_fingerprint_stale", "injection_mode", "input_mutated",
+         "malformed_output", "model_unpinned", "output_alias", "request_invalid",
+         "runtime_missing":
+        true
+    default:
+        false
+    }
+}
+
+private func promotableRunnerDiagnostic(code: String, message: String) -> String? {
+    let exactMessages: [String: Set<String>] = [
+        "dependency_invalid": [
+            "VibeVoice tokenizer is missing required offline Qwen control tokens",
+        ],
+        "dependency_missing": [
+            "VibeVoice tokenizer failed its offline semantic probe",
+        ],
+        "duration_limit": [
+            "VibeVoice has a verified 59-minute limit; split this chunk before launch",
+        ],
+        "environment_missing": [
+            "mlx-audio is not installed in the pinned uv environment",
+        ],
+        "glossary_invalid": [
+            "a glossary injection mode requires nonempty glossary entries",
+            "absent glossary must not carry an original SHA-256",
+            "adapter must provide the original 64-character glossary SHA-256",
+            "glossary contains NUL",
+            "glossary has no usable entries",
+            "planner requires the original 64-character glossary SHA-256",
+        ],
+        "glossary_not_applied": [
+            "MOSS did not confirm the exact glossary payload",
+            "MOSS did not retain hotword instruction evidence",
+        ],
+        "harness_fingerprint_malformed": [
+            "MOSS harness fingerprint lacks the required v2 release evidence",
+        ],
+        "harness_fingerprint_stale": [
+            "MOSS harness binary or metallib no longer matches its fingerprint",
+        ],
+        "injection_mode": [
+            "glossary entries require a decode-time injection mode",
+        ],
+        "input_mutated": [
+            "audio input changed during ASR; backend artifacts were preserved for inspection",
+        ],
+        "malformed_output": [
+            "ASR subprocess output did not prove a safe diagnostic",
+            "MOSS did not create its output JSON",
+            "MOSS output is malformed",
+            "Qwen emitted an empty transcript",
+            "Qwen must emit exactly one Result line per chunk",
+            "VibeVoice JSON has no segments",
+            "VibeVoice JSON has no transcript text field",
+            "VibeVoice JSON is malformed",
+            "VibeVoice produced no JSON output",
+            "backend returned no normalized segments",
+        ],
+        "model_unpinned": [
+            "MOSS output does not prove the selected model identity",
+            "MOSS processor token-rate configuration differs from the pinned contract",
+            "MOSS processor token-rate configuration is invalid",
+            "MOSS tokenizer digits do not match the time-marker contract",
+            "MOSS tokenizer is missing required special tokens",
+            "MOSS prompt planner requires the pinned tokenizer and processor",
+            "model identity is incomplete",
+        ],
+        "output_alias": [
+            "output must not alias audio or glossary input",
+        ],
+        "request_invalid": [
+            "--max-tokens must be in 1...131072",
+            "ASR range must be a positive half-open interval",
+            "MOSS language must be auto or a BCP-47 language tag",
+            "MOSS sample count must be positive",
+        ],
+        "runtime_missing": [
+            "MOSS prompt tokenizer is unavailable or invalid",
+        ],
+    ]
+    if exactMessages[code]?.contains(message) == true { return message }
+
+    let patterns: [String: [String]] = [
+        "backend_failed": [#"Qwen backend exited with status -?[0-9]+"#],
+        "backend_import_failed": [#"VibeVoice dependency import failed \([A-Za-z_][A-Za-z0-9_]{0,63}\)"#],
+        "backend_inference_failed": [#"VibeVoice inference failed \([A-Za-z_][A-Za-z0-9_]{0,63}\)"#],
+        "backend_load_failed": [#"VibeVoice model load failed \([A-Za-z_][A-Za-z0-9_]{0,63}\)"#],
+        "context_preflight": [#"MOSS prompt plus output budget requires [0-9]+ tokens, exceeding 131072"#],
+        "coverage_shortfall": [
+            #"backend returned out-of-range output"#,
+            #"chunk duration [0-9]+\.[0-9]{3}s does not match request range [0-9]+\.[0-9]{3}s"#,
+            #"MOSS metrics audio duration differs from input chunk"#,
+            #"MOSS reported a duration different from the input chunk"#,
+            #"segment [0-9]+ is outside chunk duration"#,
+        ],
+        "dependency_missing": [#"VibeVoice dependency check [A-Za-z0-9_]+ failed"#],
+        "environment_version": [#"requires mlx-audio [0-9]+\.[0-9]+\.[0-9]+, found [0-9A-Za-z.+-]+"#],
+        "glossary_invalid": [#"invalid glossary entry at line [0-9]+"#],
+        "injection_mode": [#"(vibevoice|qwen3|moss) requires (free_text_context|hotword_instruction), got (none|free_text_context|hotword_instruction)"#],
+        "malformed_output": [
+            #"MOSS metrics field (preprocessing_s|audio_encoder_s|decoder_prefill_s|token_decode_s|total_s|model_load_s|audio_duration_s|prompt_tokens|generated_tokens|max_tokens|context_hard_cap_tokens|peak_rss_bytes) is invalid"#,
+            #"segment [0-9]+ has (empty text|invalid timestamps)"#,
+            #"VibeVoice (prompt_tokens|generation_tokens) evidence is invalid"#,
+            #"VibeVoice segment [0-9]+ is not an object"#,
+        ],
+        "model_unpinned": [#"model revision is not a 40-character SHA: [0-9a-f]{0,64}"#],
+    ]
+    guard let allowed = patterns[code] else { return nil }
+    return allowed.contains { pattern in
+        message.range(
+            of: "^(?:\(pattern))$",
+            options: .regularExpression
+        ) != nil
+    } ? message : nil
+}
+
+private func capturedStandardError(at url: URL) -> String {
+    guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
+    defer { try? handle.close() }
+    let size = (try? handle.seekToEnd()) ?? 0
+    if size > UInt64(maximumCapturedStandardErrorBytes) {
+        try? handle.seek(toOffset: size - UInt64(maximumCapturedStandardErrorBytes))
+    } else {
+        try? handle.seek(toOffset: 0)
+    }
+    return String(
+        decoding: (try? handle.readToEnd()) ?? Data(),
+        as: UTF8.self
+    )
+}
+
 private func runProcessSynchronously(
     executable: URL,
     arguments: [String],
@@ -1164,8 +1323,22 @@ private func runProcessSynchronously(
     let temporaryDirectory = FileManager.default.temporaryDirectory
     let stdoutURL = temporaryDirectory.appendingPathComponent("maccheroni-asr-stdout-\(UUID().uuidString)")
     let stderrURL = temporaryDirectory.appendingPathComponent("maccheroni-asr-stderr-\(UUID().uuidString)")
-    FileManager.default.createFile(atPath: stdoutURL.path, contents: nil)
-    FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
+    let privateFileAttributes: [FileAttributeKey: Any] = [
+        .posixPermissions: NSNumber(value: 0o600),
+    ]
+    guard FileManager.default.createFile(
+        atPath: stdoutURL.path,
+        contents: nil,
+        attributes: privateFileAttributes
+    ), FileManager.default.createFile(
+        atPath: stderrURL.path,
+        contents: nil,
+        attributes: privateFileAttributes
+    ) else {
+        throw ASRAdapterError.launchFailed(
+            "cannot create ASR subprocess capture files"
+        )
+    }
     let stdout: FileHandle
     let stderr: FileHandle
     do {
@@ -1207,7 +1380,7 @@ private func runProcessSynchronously(
     return ProcessResult(
         status: process.terminationStatus,
         standardOutput: String(data: (try? Data(contentsOf: stdoutURL)) ?? Data(), encoding: .utf8) ?? "",
-        standardError: String(data: (try? Data(contentsOf: stderrURL)) ?? Data(), encoding: .utf8) ?? ""
+        standardError: capturedStandardError(at: stderrURL)
     )
 }
 

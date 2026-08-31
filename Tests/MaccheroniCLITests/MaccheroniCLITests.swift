@@ -459,6 +459,269 @@ struct MaccheroniCLITests {
     }
 
     @Test
+    func doctorRejectsFalsePinnedSpeechAndIndirectASRDependencyChecksInJSON() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let profiles = try profileFile(in: root)
+        var dependencies = testDependencies()
+        dependencies.doctor = { _, _ in
+            [
+                "speech_runtime=speech@0.0.23",
+                "check.speech_runtime=false",
+                "check.asr_doctor=false",
+                "check.asr.tokenizer_ref=false",
+            ]
+        }
+        let app = testApplication(
+            runID: "doctor-runtime-dependencies",
+            dependencies: dependencies
+        )
+
+        let report = try await app.inspectDoctor(
+            profileName: "ko-meeting",
+            profilesPath: profiles.path
+        )
+
+        #expect(!report.isReady)
+        #expect(report.diagnosticValues.contains("speech_runtime=speech@0.0.23"))
+        #expect(report.diagnosticValues.contains("check.speech_runtime=false"))
+        #expect(report.diagnosticValues.contains("check.asr_doctor=false"))
+        #expect(report.diagnosticValues.contains("check.asr.tokenizer_ref=false"))
+
+        let json = try CLIOutput.doctorJSON(
+            diagnostics: report.diagnosticValues,
+            storage: report.storage,
+            ready: report.isReady
+        )
+        let object = try #require(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let values = try #require(object["values"] as? [String: String])
+        #expect(object["ready"] as? Bool == false)
+        #expect(values["speech_runtime"] == "speech@0.0.23")
+        #expect(values["check.speech_runtime"] == "false")
+        #expect(values["check.asr_doctor"] == "false")
+        #expect(values["check.asr.tokenizer_ref"] == "false")
+
+        do {
+            _ = try await app.execute(arguments: [
+                "doctor",
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+            ])
+            Issue.record("expected failed runtime and indirect dependency checks")
+        } catch let error as CLIError {
+            #expect(error.code == "RUN_ERROR")
+            let description = try #require(error.errorDescription)
+            #expect(description.contains("check.speech_runtime=false"))
+            #expect(description.contains("check.asr.tokenizer_ref=false"))
+        }
+    }
+
+    @Test
+    func productionSpeechFactoriesUseThePinnedDefaultCacheAndExplicitOverride() {
+        let home = URL(fileURLWithPath: "/private/tmp/maccheroni-test-home")
+        let defaultCache = home.appendingPathComponent(
+            "Library/Caches/Maccheroni/benchmarks",
+            isDirectory: true
+        )
+        let vad = productionVADAdapter(environment: [:], home: home)
+        let diarization = productionCommunity1Configuration(
+            environment: [:],
+            home: home
+        )
+        let defaultExecutable = defaultCache.appendingPathComponent(
+            "tools/offline-speech-runtime/bin/maccheroni-offline-speech-runtime"
+        )
+
+        #expect(vad.executableURL == defaultExecutable)
+        #expect(diarization.executableURL == defaultExecutable)
+        #expect(vad.modelCacheURL.path.hasPrefix(defaultCache.path + "/"))
+        #expect(vad.revisionMarkerURL.path.hasPrefix(defaultCache.path + "/"))
+        #expect(
+            vad.harnessModelRepositoryURL?.path.hasPrefix(
+                defaultCache.path + "/"
+            ) == true
+        )
+        #expect(
+            diarization.hfHomeURL
+                == defaultCache.appendingPathComponent(
+                    "models/huggingface",
+                    isDirectory: true
+                )
+        )
+        #expect(
+            diarization.harnessModelRepositoryURL?.path.hasPrefix(
+                defaultCache.path + "/"
+            ) == true
+        )
+        #expect(
+            productionVADAdapter(
+                environment: ["MACCHERONI_BENCHMARK_CACHE": ""],
+                home: home
+            ).executableURL == defaultExecutable
+        )
+
+        let cache = "/private/tmp/maccheroni-explicit-cache"
+        let cachedVAD = productionVADAdapter(environment: [
+            "MACCHERONI_BENCHMARK_CACHE": cache,
+        ], home: home)
+        let cachedDiarization = productionCommunity1Configuration(environment: [
+            "MACCHERONI_BENCHMARK_CACHE": cache,
+        ], home: home)
+        let expectedExecutable = URL(fileURLWithPath: cache)
+            .appendingPathComponent(
+                "tools/offline-speech-runtime/bin/maccheroni-offline-speech-runtime"
+            )
+        #expect(cachedVAD.executableURL == expectedExecutable)
+        #expect(cachedDiarization.executableURL == expectedExecutable)
+        #expect(
+            cachedVAD.harnessModelRepositoryURL?.lastPathComponent
+                == "Silero-VAD-v6.2.1-CoreML"
+        )
+        #expect(
+            cachedDiarization.harnessModelRepositoryURL?.lastPathComponent
+                == "Pyannote-Community-1-CoreML"
+        )
+    }
+
+    @Test
+    func runtimePayloadEvidenceIdentifiesTheExactCorruptOrMissingFile() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = root.appendingPathComponent("model", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: model,
+            withIntermediateDirectories: true
+        )
+        let config = root.appendingPathComponent("config.json")
+        let weights = model.appendingPathComponent("weights.bin")
+        try Data("{}".utf8).write(to: config)
+        try Data("payload".utf8).write(to: weights)
+        let expected = [
+            RuntimePayloadFile(
+                relativePath: "config.json",
+                sha256: "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            ),
+            RuntimePayloadFile(
+                relativePath: "model/weights.bin",
+                sha256: "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5"
+            ),
+        ]
+        let treeSHA256 =
+            "e60a86c6477522bfd0c0c5930ffffb89a68175500bd61b0953bf9c152016346f"
+
+        let valid = runtimePayloadEvidence(
+            at: root,
+            expectedFiles: expected,
+            expectedTreeSHA256: treeSHA256
+        )
+        #expect(valid.treeIsPinned)
+        #expect(valid.files.map { $0.isPinned } == [true, true])
+
+        try Data("tampered".utf8).write(to: weights)
+        let corrupt = runtimePayloadEvidence(
+            at: root,
+            expectedFiles: expected,
+            expectedTreeSHA256: treeSHA256
+        )
+        #expect(!corrupt.treeIsPinned)
+        #expect(corrupt.files.map { $0.isPinned } == [true, false])
+
+        try FileManager.default.removeItem(at: weights)
+        let missing = runtimePayloadEvidence(
+            at: root,
+            expectedFiles: expected,
+            expectedTreeSHA256: treeSHA256
+        )
+        #expect(!missing.treeIsPinned)
+        #expect(missing.files.map { $0.isPinned } == [true, false])
+    }
+
+    @Test
+    func offlineSpeechRuntimeEvidenceBindsSidecarInputsAndExecutableBytes() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let toolRoot = root.appendingPathComponent(
+            "tools/offline-speech-runtime",
+            isDirectory: true
+        )
+        let binaryDirectory = toolRoot.appendingPathComponent(
+            "bin",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: binaryDirectory,
+            withIntermediateDirectories: true
+        )
+        let binary = binaryDirectory.appendingPathComponent(
+            "maccheroni-offline-speech-runtime"
+        )
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: binary)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: binary.path
+        )
+        let executableSHA256 = try AudioPreprocessor.sha256(of: binary)
+        let sidecar: [String: String] = [
+            "contract_version": "offline-speech-runtime-v1",
+            "speech_revision": "c1aa219bc2284239ff6917d675a3e1978c840260",
+            "package_manifest_sha256": String(repeating: "a", count: 64),
+            "package_resolved_sha256": String(repeating: "b", count: 64),
+            "harness_source_sha256": String(repeating: "c", count: 64),
+            "executable_sha256": executableSHA256,
+            "swift_version": "Apple Swift version 6.3",
+        ]
+        let sidecarURL = toolRoot.appendingPathComponent("provenance.json")
+        try JSONSerialization.data(withJSONObject: sidecar).write(to: sidecarURL)
+        let expected = OfflineSpeechRuntimePin(
+            speechRevision: sidecar["speech_revision"]!,
+            packageManifestSHA256: sidecar["package_manifest_sha256"]!,
+            packageResolvedSHA256: sidecar["package_resolved_sha256"]!,
+            harnessSourceSHA256: sidecar["harness_source_sha256"]!,
+            executableSHA256: nil,
+            swiftVersionMarker: "Apple Swift version 6."
+        )
+
+        let valid = offlineSpeechRuntimeEvidence(
+            cacheRoot: root,
+            expected: expected
+        )
+        #expect(valid.executableIsUsable)
+        #expect(valid.executableMatchesSidecar)
+        #expect(valid.sidecarIsPinned)
+        #expect(valid.isPinned)
+
+        try Data("#!/bin/sh\nexit 1\n".utf8).write(to: binary)
+        let tampered = offlineSpeechRuntimeEvidence(
+            cacheRoot: root,
+            expected: expected
+        )
+        #expect(tampered.executableIsUsable)
+        #expect(!tampered.executableMatchesSidecar)
+        #expect(tampered.sidecarIsPinned)
+        #expect(!tampered.isPinned)
+
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: binary)
+        var wrongInputs = sidecar
+        wrongInputs["harness_source_sha256"] = String(
+            repeating: "d",
+            count: 64
+        )
+        try JSONSerialization.data(withJSONObject: wrongInputs).write(
+            to: sidecarURL
+        )
+        let mismatchedInputs = offlineSpeechRuntimeEvidence(
+            cacheRoot: root,
+            expected: expected
+        )
+        #expect(mismatchedInputs.executableIsUsable)
+        #expect(mismatchedInputs.executableMatchesSidecar)
+        #expect(!mismatchedInputs.sidecarIsPinned)
+        #expect(!mismatchedInputs.isPinned)
+    }
+
+    @Test
     func runDefaultAndDoctorInventoryUseTheSameConfiguredRunsRoot() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

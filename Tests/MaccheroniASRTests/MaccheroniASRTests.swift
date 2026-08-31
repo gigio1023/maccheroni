@@ -59,13 +59,16 @@ import Testing
 
     private func fakeLimitRuntime(
         nonzeroExit: Bool = false,
-        invalidEOSOutput: Bool = false
+        invalidEOSOutput: Bool = false,
+        unsafeInvalidEOSMessage: Bool = false
     ) throws -> (ASRRuntime, URL) {
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("maccheroni-asr-fake-limit-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         let runner = scratch.appendingPathComponent(
-            invalidEOSOutput ? "invalid-eos.py" : (nonzeroExit ? "limit-nonzero.py" : "limit.py")
+            unsafeInvalidEOSMessage
+                ? "invalid-eos-unsafe.py"
+                : (invalidEOSOutput ? "invalid-eos.py" : (nonzeroExit ? "limit-nonzero.py" : "limit.py"))
         )
         let source = #"""
         import argparse, hashlib, json, pathlib, sys
@@ -79,6 +82,8 @@ import Testing
         output = pathlib.Path(args.output); raw = output.with_suffix(".helper.json")
         raw.write_text('{"partial":"never promote"}\n', encoding="utf-8")
         invalid_eos = "invalid-eos" in pathlib.Path(sys.argv[0]).name
+        unsafe_message = "unsafe" in pathlib.Path(sys.argv[0]).name
+        failure_message = "민감한 전사 표식 private English transcript Bearer secret-token https://user:pass@example.test/private.wav" if unsafe_message else "MOSS EOS output has no validated segments"
         h = lambda value: hashlib.sha256(value.encode()).hexdigest()
         audio_hash = hashlib.sha256(pathlib.Path(args.audio).read_bytes()).hexdigest()
         entries = [line for line in pathlib.Path(args.glossary).read_text(encoding="utf-8").splitlines() if line] if args.glossary else []
@@ -87,7 +92,7 @@ import Testing
         document = {
           "backend":"moss", "model":{"hf_model_id":"aufklarer/MOSS-Transcribe-Diarize-0.9B-MLX-INT8", "revision":"90aa65287111a327db98eb83e325bd5332945edd", "quantization":"int8-decoder+fp16-audio-vq-kv"},
           "outcome":"invalid_eos_output" if invalid_eos else "limit", "stop_reason":"endOfSequence" if invalid_eos else "maximumTokens", "terminal_evidence":"observed", "timing_granularity":"segment", "raw_text":"", "segments":[],
-          "failure":{"code":"invalid_eos_output","message":"MOSS EOS output has no validated segments"} if invalid_eos else None,
+          "failure":{"code":"invalid_eos_output","message":failure_message} if invalid_eos else None,
           "language":{"requested":args.language,"instruction_sha256":instruction,"prompt_guidance_applied":args.language != "auto"},
           "glossary":{"provided":bool(entries),"sha256":args.glossary_sha256,"item_count":len(entries),"injection_mode":args.injection_mode if entries else "none","applied":bool(entries),"payload_sha256":instruction,"payload_entry_count":len(entries),"instruction_sha256":instruction},
           "coverage":{"input_duration_s":args.end_s-args.start_s,"processed_duration_s":0,"truncated":True},
@@ -634,9 +639,85 @@ import Testing
         let (runtime, scratch) = try fakeLimitRuntime(nonzeroExit: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
         let adapter = PinnedASRAdapter(.moss, runtime: runtime)
-        await #expect(throws: ASRAdapterError.backendFailed(code: "subprocess_exit_75", message: "")) {
+        await #expect(throws: ASRAdapterError.backendFailed(code: "subprocess_exit_75", message: "diagnostic unavailable")) {
             _ = try await adapter.transcribeAttempt(ASRRequest(audioURL: fixture("benchmarks/runs/it-asr/fixtures/italian-dialogue/input.wav"), startS: 0, endS: 28.8898125, language: .fixed("it")))
         }
+    }
+
+    @Test func doctorKeepsOnlyTheFinalStructuredDiagnostic() async throws {
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "maccheroni-asr-doctor-diagnostic-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: scratch,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let runner = scratch.appendingPathComponent("doctor.py")
+        try Data(#"""
+        import json
+        import sys
+        sys.stderr.write("\033[31m민감한 전사 표식 private English transcript Bearer secret https://user:pass@example.test /Users/private/audio.wav\033[0m\n")
+        print(json.dumps({"error": {"code": "runtime_missing", "message": "민감한 전사 표식 private English transcript Bearer secret https://user:pass@example.test/private.wav"}}), file=sys.stderr)
+        raise SystemExit(9)
+        """#.utf8).write(to: runner, options: .withoutOverwriting)
+        let runtime = ASRRuntime(
+            pythonExecutable: URL(fileURLWithPath: "/usr/bin/python3"),
+            runnerURL: runner,
+            cacheRoot: scratch,
+            outputRoot: scratch.appendingPathComponent("outputs"),
+            timeout: 5
+        )
+
+        await #expect(throws: ASRAdapterError.backendFailed(
+            code: "runtime_missing",
+            message: "diagnostic unavailable"
+        )) {
+            _ = try await ASRDoctor.diagnose(.vibeVoice, runtime: runtime)
+        }
+    }
+
+    @Test func invalidEOSRecordDoesNotPromoteUntrustedHelperMessage() async throws {
+        let (runtime, scratch) = try fakeLimitRuntime(
+            invalidEOSOutput: true,
+            unsafeInvalidEOSMessage: true
+        )
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let adapter = PinnedASRAdapter(.moss, runtime: runtime)
+        let terms = try glossary(
+            "benchmarks/runs/it-asr/fixtures/italian-dialogue/glossary.txt"
+        )
+        let request = ASRRequest(
+            audioURL: fixture("benchmarks/runs/it-asr/fixtures/italian-dialogue/input.wav"),
+            startS: 0,
+            endS: 28.8898125,
+            language: .fixed("it"),
+            glossary: terms,
+            injectionMode: .hotwordInstruction
+        )
+
+        await #expect(throws: ASRAdapterError.invalidEOSOutput(
+            "diagnostic unavailable"
+        )) {
+            _ = try await adapter.transcribeAttempt(request)
+        }
+
+        let output = scratch.appendingPathComponent("output")
+        let record = try #require(FileManager.default.contentsOfDirectory(
+            at: output,
+            includingPropertiesForKeys: nil
+        ).first { $0.pathExtension == "json" })
+        let protectedData = try Data(contentsOf: record)
+        let protectedRecord = try #require(
+            JSONSerialization.jsonObject(with: protectedData) as? [String: Any]
+        )
+        let failure = try #require(protectedRecord["failure"] as? [String: Any])
+        let message = try #require(failure["message"] as? String)
+        #expect(message.contains("민감한 전사 표식"))
+        #expect(message.contains("Bearer secret-token"))
+        #expect(message.contains("https://user:pass@example.test"))
     }
 
     @Test func invalidEOSOutputIsTypedAndKeepsOnlyTheProtectedRecord() async throws {

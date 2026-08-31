@@ -498,7 +498,7 @@ public struct CLIDependencies: Sendable {
             )
         },
         preprocess: { input, directory in try AudioPreprocessor().preprocess(inputURL: input, outputDirectory: directory, settings: .init(enhancement: .disabled)) },
-        vad: { try await SpeechSileroVADAdapter().detect(audioURL: $0) },
+        vad: { try await productionVADAdapter().detect(audioURL: $0) },
         plan: productionASRPlan,
         expectedHelperFingerprint: productionMossHelperFingerprint,
         mossContextPlan: { selected, samples, language, glossary, tokens in
@@ -513,7 +513,9 @@ public struct CLIDependencies: Sendable {
         diarize: { name, request in
             switch name {
             case "community1":
-                return try await Community1Diarizer().diarizeWithEvidence(request)
+                return try await Community1Diarizer(
+                    configuration: productionCommunity1Configuration()
+                ).diarizeWithEvidence(request)
             case "fluid":
                 return try await FluidAudioDiarizer().diarizeWithEvidence(request)
             default: throw CLIError.profile("unknown diarization backend: \(name)")
@@ -3631,6 +3633,301 @@ private func productionPostprocess(
     }
 }
 
+func productionCommunity1Configuration(
+    environment: [String: String] = ProcessInfo.processInfo.environment,
+    home: URL = FileManager.default.homeDirectoryForCurrentUser
+) -> Community1DiarizerConfiguration {
+    let cacheRoot = ASRRuntime.resolveCacheRoot(
+        environment: environment,
+        home: home
+    )
+    return Community1DiarizerConfiguration(
+        executableURL: cacheRoot.appendingPathComponent(
+            "tools/offline-speech-runtime/bin/maccheroni-offline-speech-runtime"
+        ),
+        hfHomeURL: cacheRoot.appendingPathComponent(
+            "models/huggingface",
+            isDirectory: true
+        ),
+        harnessModelRepositoryURL: cacheRoot.appendingPathComponent(
+            "qwen3-speech/models/aufklarer/Pyannote-Community-1-CoreML",
+            isDirectory: true
+        ),
+        environment: [
+            "HF_HUB_OFFLINE": "1",
+            "QWEN3_CACHE_DIR": cacheRoot.path,
+        ]
+    )
+}
+
+func productionVADAdapter(
+    environment: [String: String] = ProcessInfo.processInfo.environment,
+    home: URL = FileManager.default.homeDirectoryForCurrentUser
+) -> SpeechSileroVADAdapter {
+    let cacheRoot = ASRRuntime.resolveCacheRoot(
+        environment: environment,
+        home: home
+    )
+    return SpeechSileroVADAdapter(
+        executableURL: cacheRoot.appendingPathComponent(
+            "tools/offline-speech-runtime/bin/maccheroni-offline-speech-runtime"
+        ),
+        modelCacheURL: cacheRoot.appendingPathComponent(
+            "qwen3-speech/models/aufklarer/Silero-VAD-v6.2.1-CoreML/silero_vad.mlmodelc"
+        ),
+        revisionMarkerURL: cacheRoot.appendingPathComponent(
+            "models/huggingface/hub/models--aufklarer--Silero-VAD-v6.2.1-CoreML/refs/main"
+        ),
+        harnessModelRepositoryURL: cacheRoot.appendingPathComponent(
+            "qwen3-speech/models/aufklarer/Silero-VAD-v6.2.1-CoreML",
+            isDirectory: true
+        )
+    )
+}
+
+struct RuntimePayloadFile: Sendable {
+    var relativePath: String
+    var sha256: String
+}
+
+struct RuntimePayloadEvidence: Sendable {
+    var files: [(relativePath: String, isPinned: Bool)]
+    var treeSHA256: String?
+    var treeIsPinned: Bool
+}
+
+struct OfflineSpeechRuntimePin: Sendable {
+    var speechRevision: String
+    var packageManifestSHA256: String
+    var packageResolvedSHA256: String
+    var harnessSourceSHA256: String
+    var executableSHA256: String?
+    var swiftVersionMarker: String
+}
+
+struct OfflineSpeechRuntimeEvidence: Sendable {
+    var executableIsUsable: Bool
+    var executableMatchesSidecar: Bool
+    var sidecarIsPinned: Bool
+
+    var isPinned: Bool {
+        executableIsUsable && executableMatchesSidecar && sidecarIsPinned
+    }
+}
+
+private struct OfflineSpeechRuntimeProvenance: Decodable {
+    var contractVersion: String
+    var speechRevision: String
+    var packageManifestSHA256: String
+    var packageResolvedSHA256: String
+    var harnessSourceSHA256: String
+    var executableSHA256: String
+    var swiftVersion: String
+
+    enum CodingKeys: String, CodingKey {
+        case contractVersion = "contract_version"
+        case speechRevision = "speech_revision"
+        case packageManifestSHA256 = "package_manifest_sha256"
+        case packageResolvedSHA256 = "package_resolved_sha256"
+        case harnessSourceSHA256 = "harness_source_sha256"
+        case executableSHA256 = "executable_sha256"
+        case swiftVersion = "swift_version"
+    }
+}
+
+func offlineSpeechRuntimeEvidence(
+    cacheRoot: URL,
+    expected: OfflineSpeechRuntimePin
+) -> OfflineSpeechRuntimeEvidence {
+    let toolRoot = cacheRoot.appendingPathComponent(
+        "tools/offline-speech-runtime",
+        isDirectory: true
+    )
+    let executable = toolRoot.appendingPathComponent(
+        "bin/maccheroni-offline-speech-runtime"
+    )
+    let sidecar = toolRoot.appendingPathComponent("provenance.json")
+    let executableValues = try? executable.resourceValues(
+        forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+    )
+    let executableSHA256 = try? AudioPreprocessor.sha256(of: executable)
+    let executableIsUsable = FileManager.default.isExecutableFile(
+        atPath: executable.path
+    ) && executableValues?.isRegularFile == true
+        && executableValues?.isSymbolicLink != true
+        && (expected.executableSHA256 == nil
+            || executableSHA256 == expected.executableSHA256)
+    guard let sidecarValues = try? sidecar.resourceValues(
+        forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+    ), sidecarValues.isRegularFile == true,
+        sidecarValues.isSymbolicLink != true,
+        let data = try? Data(contentsOf: sidecar),
+        let provenance = try? JSONDecoder().decode(
+            OfflineSpeechRuntimeProvenance.self,
+            from: data
+        ) else {
+        return OfflineSpeechRuntimeEvidence(
+            executableIsUsable: executableIsUsable,
+            executableMatchesSidecar: false,
+            sidecarIsPinned: false
+        )
+    }
+    let executableMatchesSidecar = provenance.executableSHA256
+        == executableSHA256
+    let sidecarIsPinned = provenance.contractVersion
+        == "offline-speech-runtime-v1"
+        && provenance.speechRevision == expected.speechRevision
+        && provenance.packageManifestSHA256
+            == expected.packageManifestSHA256
+        && provenance.packageResolvedSHA256
+            == expected.packageResolvedSHA256
+        && provenance.harnessSourceSHA256
+            == expected.harnessSourceSHA256
+        && (expected.executableSHA256 == nil
+            || provenance.executableSHA256 == expected.executableSHA256)
+        && !provenance.swiftVersion.isEmpty
+        && provenance.swiftVersion.contains(expected.swiftVersionMarker)
+    return OfflineSpeechRuntimeEvidence(
+        executableIsUsable: executableIsUsable,
+        executableMatchesSidecar: executableMatchesSidecar,
+        sidecarIsPinned: sidecarIsPinned
+    )
+}
+
+private let sileroRuntimePayload = [
+    RuntimePayloadFile(
+        relativePath: "config.json",
+        sha256: "459e764d58cdc13f3db6878adfdf8a29b5fd467ad1f4ef2161137cc115339c81"
+    ),
+    RuntimePayloadFile(
+        relativePath: "silero_vad.mlmodelc/analytics/coremldata.bin",
+        sha256: "b777c3751d72b7430eac7f8544769a3d918faf77c15db184fec30e44c56007a3"
+    ),
+    RuntimePayloadFile(
+        relativePath: "silero_vad.mlmodelc/coremldata.bin",
+        sha256: "f6fcd92c3132c9c718e5f54e0e770a8c8075beaa50a5b212a6287273b4ddae67"
+    ),
+    RuntimePayloadFile(
+        relativePath: "silero_vad.mlmodelc/metadata.json",
+        sha256: "1b953eb3818e7092deedd96e976c05354f77beb2ddc2976fe416af17e47f62d2"
+    ),
+    RuntimePayloadFile(
+        relativePath: "silero_vad.mlmodelc/model.mil",
+        sha256: "b0a1384c4a664697989d9eb9cfb166b4b85f151206aeefd1bfa391ef9e5ad08f"
+    ),
+    RuntimePayloadFile(
+        relativePath: "silero_vad.mlmodelc/weights/weight.bin",
+        sha256: "83210545de90c65195e8d6db1b349b7e5c31f989f48d0a908a8dc0e2f586e5f9"
+    ),
+]
+
+private let community1RuntimePayload = [
+    RuntimePayloadFile(
+        relativePath: "config.json",
+        sha256: "6bf96d3f361ad1b5bcfbcf2bdf70a2072d211fefd875700231e1f3b2fb69e713"
+    ),
+    RuntimePayloadFile(
+        relativePath: "embedding.mlmodelc/analytics/coremldata.bin",
+        sha256: "f4b5ad2e2ea815e334acaf162fa42e999ecd9881ecac4166ff43d6bc1d9322d6"
+    ),
+    RuntimePayloadFile(
+        relativePath: "embedding.mlmodelc/coremldata.bin",
+        sha256: "3ad7a2f309143107fc5394f34592ce80482bf6dbe6831e0588cff44cbaa609e5"
+    ),
+    RuntimePayloadFile(
+        relativePath: "embedding.mlmodelc/model.mil",
+        sha256: "66d248aad00b3e103151097a9bbba558402933c0cf31c010f66b086ac94d7aaf"
+    ),
+    RuntimePayloadFile(
+        relativePath: "embedding.mlmodelc/weights/weight.bin",
+        sha256: "1019c1bb4472abfe705da19db3b5d0764adcb2d59dabf766fef74f0963f810f2"
+    ),
+    RuntimePayloadFile(
+        relativePath: "plda.safetensors",
+        sha256: "aff6294b68b66adcbc1c2a402b1379ecfdd98d8d759dc2cca62b5380babea359"
+    ),
+    RuntimePayloadFile(
+        relativePath: "segmentation.mlmodelc/analytics/coremldata.bin",
+        sha256: "44d83274cec5ccfe4a959eca359a89e4fd757b1872962449f2206784fb2031e5"
+    ),
+    RuntimePayloadFile(
+        relativePath: "segmentation.mlmodelc/coremldata.bin",
+        sha256: "5385e1af87712e3027ac96915d3b85de9450681e73ef355dfadd4b274cc9ba58"
+    ),
+    RuntimePayloadFile(
+        relativePath: "segmentation.mlmodelc/model.mil",
+        sha256: "8c0956cbbce7bac956cb85176fde28353a0d4a1e623f5621b6277b3d256ad0e8"
+    ),
+    RuntimePayloadFile(
+        relativePath: "segmentation.mlmodelc/weights/weight.bin",
+        sha256: "d2c1c75adec19e64ea732808839b6b8da2968a8a26b8aa3e170ef283df44a6ca"
+    ),
+]
+
+private let pinnedOfflineSpeechRuntime = OfflineSpeechRuntimePin(
+    speechRevision: "c1aa219bc2284239ff6917d675a3e1978c840260",
+    packageManifestSHA256:
+        "5059f0c80bcec9cfc88bc56db8bc48504860ed556930f0225c817feb6607e5fd",
+    packageResolvedSHA256:
+        "e81c1d4f14185323abc782967b18a2342e36358b696b57be25a702718ab2330c",
+    harnessSourceSHA256:
+        "ba28b93e69c3b0ee6da9b19b328642a797355220f60a82eb87115496b6b8ff79",
+    executableSHA256: nil,
+    swiftVersionMarker: "Apple Swift version 6."
+)
+
+func runtimePayloadEvidence(
+    at root: URL,
+    expectedFiles: [RuntimePayloadFile],
+    expectedTreeSHA256: String
+) -> RuntimePayloadEvidence {
+    do {
+        var checks: [(relativePath: String, isPinned: Bool)] = []
+        var hasher = SHA256()
+        for expected in expectedFiles {
+            let file = root.appendingPathComponent(expected.relativePath)
+            guard let values = try? file.resourceValues(
+                forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+            ), values.isRegularFile == true,
+                values.isSymbolicLink != true,
+                let actualSHA256 = try? AudioPreprocessor.sha256(of: file),
+                actualSHA256 == expected.sha256 else {
+                checks.append((expected.relativePath, false))
+                continue
+            }
+            checks.append((expected.relativePath, true))
+            let name = Data(expected.relativePath.utf8)
+            var nameLength = UInt32(name.count).bigEndian
+            withUnsafeBytes(of: &nameLength) {
+                hasher.update(data: Data($0))
+            }
+            hasher.update(data: name)
+            let handle = try FileHandle(forReadingFrom: file)
+            defer { try? handle.close() }
+            while true {
+                let data = try handle.read(upToCount: 1_048_576) ?? Data()
+                if data.isEmpty { break }
+                hasher.update(data: data)
+            }
+        }
+        let allFilesPinned = checks.count == expectedFiles.count
+            && checks.allSatisfy { $0.isPinned }
+        let digest = hasher.finalize().map { String(format: "%02x", $0) }
+            .joined()
+        return RuntimePayloadEvidence(
+            files: checks,
+            treeSHA256: digest,
+            treeIsPinned: allFilesPinned && digest == expectedTreeSHA256
+        )
+    } catch {
+        return RuntimePayloadEvidence(
+            files: expectedFiles.map { ($0.relativePath, false) },
+            treeSHA256: nil,
+            treeIsPinned: false
+        )
+    }
+}
+
 private func productionTranslation(
     _ backend: PostprocessBackendID,
     _ request: TranslationRequest
@@ -3705,6 +4002,10 @@ private func productionDoctorChecks(
     _ selected: SelectedASRBackend,
     _ profile: CLIProfile
 ) async -> [String] {
+    let environment = ProcessInfo.processInfo.environment
+    let benchmarkCacheRoot = ASRRuntime.resolveCacheRoot(
+        environment: environment
+    )
     let asrRuntime = ASRRuntime.local
     let afconvertIsExecutable = FileManager.default.isExecutableFile(
         atPath: "/usr/bin/afconvert"
@@ -3721,6 +4022,7 @@ private func productionDoctorChecks(
         "check.asr_runner=\(asrRunnerExists)",
         "check.asr_lock=\(asrLockExists)",
     ]
+    let vad = productionVADAdapter(environment: environment)
     do {
         let report = try await ASRDoctor.diagnose(selected, runtime: asrRuntime)
         lines.append("check.asr_doctor=\(report.ok)")
@@ -3754,19 +4056,47 @@ private func productionDoctorChecks(
         }
     }
 
-    let vad = SpeechSileroVADAdapter()
-    let vadRevision = try? String(
-        contentsOf: vad.revisionMarkerURL,
-        encoding: .utf8
-    ).trimmingCharacters(in: .whitespacesAndNewlines)
     lines.append(
         "check.vad_executable=\(FileManager.default.isExecutableFile(atPath: vad.executableURL.path))"
     )
-    lines.append(
-        "check.vad_model_cache=\(FileManager.default.fileExists(atPath: vad.modelCacheURL.path))"
+    let runtime = offlineSpeechRuntimeEvidence(
+        cacheRoot: benchmarkCacheRoot,
+        expected: pinnedOfflineSpeechRuntime
     )
     lines.append(
-        "check.vad_revision=\(vadRevision == vad.provenance.model.revision)"
+        "offline_speech_runtime=soniqo/speech-swift@\(pinnedOfflineSpeechRuntime.speechRevision)"
+    )
+    lines.append(
+        "check.offline_speech_runtime_executable=\(runtime.executableIsUsable)"
+    )
+    lines.append(
+        "check.offline_speech_runtime_fingerprint=\(runtime.executableMatchesSidecar)"
+    )
+    lines.append(
+        "check.offline_speech_runtime_sidecar=\(runtime.sidecarIsPinned)"
+    )
+    lines.append("check.offline_speech_runtime=\(runtime.isPinned)")
+    let vadRepository = benchmarkCacheRoot.appendingPathComponent(
+        "qwen3-speech/models/aufklarer/Silero-VAD-v6.2.1-CoreML",
+        isDirectory: true
+    )
+    let vadPayload = runtimePayloadEvidence(
+        at: vadRepository,
+        expectedFiles: sileroRuntimePayload,
+        expectedTreeSHA256:
+            "edd772745342372800516b0da27556cf4aae1db386784620b2590183d94da346"
+    )
+    lines += runtimePayloadCheckLines(prefix: "vad", evidence: vadPayload)
+    lines.append("check.vad_model_cache=\(vadPayload.treeIsPinned)")
+    let vadSnapshot = benchmarkCacheRoot.appendingPathComponent(
+        "models/huggingface/hub/models--aufklarer--Silero-VAD-v6.2.1-CoreML/snapshots/\(vad.provenance.model.revision)",
+        isDirectory: true
+    )
+    lines.append(
+        "check.vad_snapshot=\(FileManager.default.fileExists(atPath: vadSnapshot.path))"
+    )
+    lines.append(
+        "check.vad_ref=\(exactRevisionReference(at: vad.revisionMarkerURL, expected: vad.provenance.model.revision))"
     )
 
     guard profile.diarization.enabled else {
@@ -3775,7 +4105,9 @@ private func productionDoctorChecks(
     }
     switch profile.diarization.backend {
     case "community1":
-        let configuration = Community1DiarizerConfiguration()
+        let configuration = productionCommunity1Configuration(
+            environment: environment
+        )
         let repository = configuration.hfHomeURL.appendingPathComponent(
             "hub/models--aufklarer--Pyannote-Community-1-CoreML",
             isDirectory: true
@@ -3786,18 +4118,35 @@ private func productionDoctorChecks(
                 Community1Diarizer.modelRevision,
                 isDirectory: true
             )
-        let reference = try? String(
-            contentsOf: repository.appendingPathComponent("refs/main"),
-            encoding: .utf8
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let referenceIsPinned = exactRevisionReference(
+            at: repository.appendingPathComponent("refs/main"),
+            expected: Community1Diarizer.modelRevision
+        )
         lines.append(
             "check.diarization_executable=\(FileManager.default.isExecutableFile(atPath: configuration.executableURL.path))"
         )
         lines.append(
-            "check.diarization_model_cache=\(FileManager.default.fileExists(atPath: snapshot.path))"
+            "check.diarization_snapshot=\(FileManager.default.fileExists(atPath: snapshot.path))"
         )
         lines.append(
-            "check.diarization_revision=\(reference == Community1Diarizer.modelRevision)"
+            "check.diarization_revision=\(referenceIsPinned)"
+        )
+        let runtimeRepository = benchmarkCacheRoot.appendingPathComponent(
+            "qwen3-speech/models/aufklarer/Pyannote-Community-1-CoreML",
+            isDirectory: true
+        )
+        let payload = runtimePayloadEvidence(
+            at: runtimeRepository,
+            expectedFiles: community1RuntimePayload,
+            expectedTreeSHA256:
+                "74247105450a08414a71ef5d512a52b706a7c23ac61efdcef051f4e44fae237a"
+        )
+        lines += runtimePayloadCheckLines(
+            prefix: "diarization",
+            evidence: payload
+        )
+        lines.append(
+            "check.diarization_model_cache=\(payload.treeIsPinned)"
         )
     case "fluid":
         let configuration = FluidAudioDiarizerConfiguration()
@@ -3811,6 +4160,31 @@ private func productionDoctorChecks(
         lines.append("check.diarization_backend=false")
     }
     return lines
+}
+
+private func exactRevisionReference(at url: URL, expected: String) -> Bool {
+    guard expected.utf8.count == 40,
+          let data = try? Data(contentsOf: url) else {
+        return false
+    }
+    return data == Data(expected.utf8)
+}
+
+private func runtimePayloadCheckLines(
+    prefix: String,
+    evidence: RuntimePayloadEvidence
+) -> [String] {
+    let files = evidence.files.map { file in
+        let name = file.relativePath.replacingOccurrences(
+            of: "[^A-Za-z0-9_-]",
+            with: "_",
+            options: .regularExpression
+        )
+        return "check.\(prefix)_runtime_file.\(name)=\(file.isPinned)"
+    }
+    return files + [
+        "check.\(prefix)_runtime_tree=\(evidence.treeIsPinned)",
+    ]
 }
 
 private func fluidModelTreeIsPinned(at modelsRootURL: URL) -> Bool {

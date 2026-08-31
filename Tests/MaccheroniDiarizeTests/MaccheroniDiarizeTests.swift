@@ -1,3 +1,5 @@
+import AVFoundation
+import CryptoKit
 import Foundation
 import Testing
 @testable import MaccheroniDiarize
@@ -50,10 +52,31 @@ import MaccheroniCore
         return Set(try FileManager.default.contentsOfDirectory(atPath: directory.path))
     }
 
-    @Test func community1NormalizesProcessOutputAndPassesRangeHint() async throws {
+    @Test func community1StandaloneDefaultsRemainPinnedToLegacySpeechCLI() {
+        let configuration = Community1DiarizerConfiguration()
+
+        #expect(configuration.executableURL.path == "/opt/homebrew/bin/speech")
+        #expect(configuration.harnessModelRepositoryURL == nil)
+        #expect(configuration.timeoutS == 3_600)
+        #expect(configuration.timestampRoundingToleranceS == 0.1)
+        #expect(configuration.validatesPinnedModel)
+        #expect(Community1Diarizer().descriptor == BackendDescriptor(
+            name: "speech-swift-cli",
+            version: "0.0.23"
+        ))
+    }
+
+    @Test func community1OfflineHarnessReceivesExactRepositoryAndRangeHint() async throws {
         let directory = try temporaryDirectory()
         let argumentsURL = directory.appendingPathComponent("arguments.txt")
+        let modelRepositoryURL = directory.appendingPathComponent("community1-repository", isDirectory: true)
+        let audioURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 30)
         let fixture = try fixtureURL("community1-valid.json")
+        let runtimePayload = try writeRuntimePayload(
+            at: modelRepositoryURL,
+            relativePaths: community1RuntimeRelativePaths
+        )
         let script = try writeExecutable(
             """
             #!/bin/sh
@@ -62,15 +85,20 @@ import MaccheroniCore
             """,
             in: directory
         )
-        let backend = Community1Diarizer(configuration: .init(
+        let configuration = Community1DiarizerConfiguration(
             executableURL: script,
             hfHomeURL: directory,
+            harnessModelRepositoryURL: modelRepositoryURL,
             timeoutS: 5,
             environment: [:],
             validatesPinnedModel: false
-        ))
+        )
+        let backend = Community1Diarizer(
+            testing: configuration,
+            harnessRuntimePayload: runtimePayload
+        )
         let result = try await backend.diarizeWithEvidence(DiarizationRequest(
-            audioURL: repositoryURL("benchmarks/runs/diarization/fixtures/it-dialogue/input.wav"),
+            audioURL: audioURL,
             speakerCountHint: 2...3
         ))
         let timeline = result.timeline
@@ -80,13 +108,70 @@ import MaccheroniCore
         let fixtureData = try Data(contentsOf: fixture)
         #expect(result.rawJSON == fixtureData)
         let arguments = try String(contentsOf: argumentsURL, encoding: .utf8)
+        #expect(arguments.contains("--cache-dir\n\(modelRepositoryURL.path)\n"))
+        #expect(!arguments.contains("--engine"))
         #expect(arguments.contains("--min-speakers\n2\n"))
         #expect(arguments.contains("--max-speakers\n3\n"))
     }
 
+    @Test func community1HarnessRejectsSameSizePayloadCorruptionBeforeLaunch() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let modelRepositoryURL = directory.appendingPathComponent(
+            "community1-repository",
+            isDirectory: true
+        )
+        let runtimePayload = try writeRuntimePayload(
+            at: modelRepositoryURL,
+            relativePaths: community1RuntimeRelativePaths
+        )
+        let corruptedURL = modelRepositoryURL.appendingPathComponent(
+            "embedding.mlmodelc/weights/weight.bin"
+        )
+        var corrupted = try Data(contentsOf: corruptedURL)
+        let originalSize = corrupted.count
+        corrupted[corrupted.startIndex] ^= 0x01
+        try corrupted.write(to: corruptedURL)
+        #expect(try Data(contentsOf: corruptedURL).count == originalSize)
+
+        let audioURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 1)
+        let launchMarkerURL = directory.appendingPathComponent("launched")
+        let script = try writeExecutable(
+            "#!/bin/sh\nprintf launched > '\(launchMarkerURL.path)'\nprintf '{ \\\"segments\\\": [] }\\n'\n",
+            in: directory
+        )
+        let configuration = Community1DiarizerConfiguration(
+            executableURL: script,
+            hfHomeURL: directory,
+            harnessModelRepositoryURL: modelRepositoryURL,
+            timeoutS: 5,
+            environment: [:],
+            validatesPinnedModel: false
+        )
+        let backend = Community1Diarizer(
+            testing: configuration,
+            harnessRuntimePayload: runtimePayload
+        )
+
+        await #expect(throws: DiarizationError.modelMismatch(
+            expected: "aufklarer/Pyannote-Community-1-CoreML@a14e6c420d56e8472850649b016a486fd0acbe81",
+            actual: "local runtime payload"
+        )) {
+            try await backend.diarize(DiarizationRequest(audioURL: audioURL))
+        }
+        #expect(!FileManager.default.fileExists(atPath: launchMarkerURL.path))
+    }
+
     @Test func community1PromotesMalformedOutputAndProcessFailure() async throws {
         let directory = try temporaryDirectory()
-        let malformed = try writeExecutable("#!/bin/sh\nprintf 'not-json'\n", in: directory)
+        let audioURL = directory.appendingPathComponent("private-input.wav")
+        try writeSilentWAV(to: audioURL, durationS: 1)
+        let privateOutput = "{\\\"transcript\\\":\\\"sensitive-transcript-payload synthetic-secret\"}"
+        let malformed = try writeExecutable(
+            "#!/bin/sh\nprintf '%s' '\(privateOutput)'\n",
+            in: directory
+        )
         let backend = Community1Diarizer(configuration: .init(
             executableURL: malformed,
             hfHomeURL: directory,
@@ -95,7 +180,7 @@ import MaccheroniCore
         ))
         do {
             _ = try await backend.diarize(DiarizationRequest(
-                audioURL: repositoryURL("benchmarks/runs/diarization/fixtures/it-dialogue/input.wav")
+                audioURL: audioURL
             ))
             Issue.record("expected invalid JSON")
         } catch let error as DiarizationError {
@@ -103,9 +188,16 @@ import MaccheroniCore
                 Issue.record("expected invalidJSON, got \(error)")
                 return
             }
+            #expect(!(error.errorDescription ?? "").contains("sensitive-transcript-payload"))
+            #expect(!(error.errorDescription ?? "").contains("synthetic-secret"))
         }
 
-        let failure = try writeExecutable("#!/bin/sh\nprintf 'backend unavailable' >&2\nexit 19\n", in: try temporaryDirectory())
+        let privateInput = audioURL.path
+        let secret = "Bearer synthetic-secret sensitive-transcript-payload \(privateInput)"
+        let failure = try writeExecutable(
+            "#!/bin/sh\nprintf '%s' '\(secret)' >&2\nexit 19\n",
+            in: try temporaryDirectory()
+        )
         let failingBackend = Community1Diarizer(configuration: .init(
             executableURL: failure,
             hfHomeURL: directory,
@@ -114,7 +206,7 @@ import MaccheroniCore
         ))
         do {
             _ = try await failingBackend.diarize(DiarizationRequest(
-                audioURL: repositoryURL("benchmarks/runs/diarization/fixtures/it-dialogue/input.wav")
+                audioURL: audioURL
             ))
             Issue.record("expected process failure")
         } catch let error as DiarizationError {
@@ -123,7 +215,10 @@ import MaccheroniCore
                 return
             }
             #expect(exitCode == 19)
-            #expect(standardError.contains("backend unavailable"))
+            #expect(standardError == "diagnostic unavailable")
+            #expect(!standardError.contains(secret))
+            #expect(!standardError.contains(privateInput))
+            #expect(!(error.errorDescription ?? "").contains(secret))
         }
     }
 
@@ -352,6 +447,57 @@ import MaccheroniCore
         let rawLast = try #require(rawSegments.last)
         #expect(rawLast["end"] as? Double == warning.rawEndS)
     }
+
+    private var community1RuntimeRelativePaths: [String] {
+        [
+            "config.json",
+            "embedding.mlmodelc/analytics/coremldata.bin",
+            "embedding.mlmodelc/coremldata.bin",
+            "embedding.mlmodelc/model.mil",
+            "embedding.mlmodelc/weights/weight.bin",
+            "plda.safetensors",
+            "segmentation.mlmodelc/analytics/coremldata.bin",
+            "segmentation.mlmodelc/coremldata.bin",
+            "segmentation.mlmodelc/model.mil",
+            "segmentation.mlmodelc/weights/weight.bin",
+        ]
+    }
+
+    private func writeRuntimePayload(
+        at root: URL,
+        relativePaths: [String]
+    ) throws -> RuntimePayloadPin {
+        var files: [RuntimePayloadFile] = []
+        var treeHasher = SHA256()
+        for (index, relativePath) in relativePaths.enumerated() {
+            let file = root.appendingPathComponent(relativePath)
+            try FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = Data("fixture-payload-\(index)".utf8)
+            try data.write(to: file)
+            let digest = SHA256.hash(data: data).map {
+                String(format: "%02x", $0)
+            }.joined()
+            files.append(RuntimePayloadFile(
+                relativePath: relativePath,
+                sha256: digest
+            ))
+
+            let name = Data(relativePath.utf8)
+            var nameLength = UInt32(name.count).bigEndian
+            withUnsafeBytes(of: &nameLength) {
+                treeHasher.update(data: Data($0))
+            }
+            treeHasher.update(data: name)
+            treeHasher.update(data: data)
+        }
+        let treeSHA256 = treeHasher.finalize().map {
+            String(format: "%02x", $0)
+        }.joined()
+        return RuntimePayloadPin(files: files, treeSHA256: treeSHA256)
+    }
 }
 
 private func writeFluidHarnessCopying(_ fixture: URL, in directory: URL) throws -> URL {
@@ -372,6 +518,33 @@ private func writeFluidHarnessCopying(_ fixture: URL, in directory: URL) throws 
     return executable
 }
 
+private func writeSilentWAV(to url: URL, durationS: Double) throws {
+    let sampleRate = 16_000.0
+    guard let format = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: sampleRate,
+        channels: 1,
+        interleaved: false
+    ), let buffer = AVAudioPCMBuffer(
+        pcmFormat: format,
+        frameCapacity: AVAudioFrameCount(sampleRate * durationS)
+    ) else {
+        throw FixtureError.couldNotCreateAudio
+    }
+    buffer.frameLength = buffer.frameCapacity
+    if let samples = buffer.floatChannelData?[0] {
+        samples.initialize(repeating: 0, count: Int(buffer.frameLength))
+    }
+    let output = try AVAudioFile(
+        forWriting: url,
+        settings: format.settings,
+        commonFormat: .pcmFormatFloat32,
+        interleaved: false
+    )
+    try output.write(from: buffer)
+}
+
 private enum FixtureError: Error {
     case missing(String)
+    case couldNotCreateAudio
 }
