@@ -20,6 +20,40 @@ The script pins every file to a commit revision. The default destination is
 For example, run
 `bash benchmarks/datasets/acquire-public-datasets.sh /tmp/maccheroni-public-datasets`.
 
+## Rebuilding the legacy Stage 2 fixtures
+
+The eight Stage 2 fixtures are generated artifacts and stay ignored. The tracked
+builder reads only the pinned public source tree and writes a separate mirror root. It
+keeps the historical `benchmarks/runs/...` logical paths inside that mirror so the six
+toolchain-deterministic `fixture-check.json` files remain byte-identical to their
+originals.
+
+```sh
+bash benchmarks/datasets/acquire-public-datasets.sh
+fixture_root="benchmarks/runs/post-v1-reliability-reset/fixture-rebuild"
+uv run --project benchmarks/scripts/fixtures --frozen python \
+  benchmarks/scripts/fixtures/build_stage2_fixtures.py \
+  --source-root . \
+  --output-root "$fixture_root"
+uv run --project benchmarks/scripts/fixtures --frozen python \
+  benchmarks/scripts/fixtures/verify_stage2_fixtures.py \
+  --source-root . \
+  --fixture-root "$fixture_root"
+```
+
+Both tools fail closed when any pinned public-source hash changes. The builder also
+refuses to overwrite any of the eight target directories. The verifier checks the
+historical SHA-256 ledger for `hike-tech`, both FLEURS fixtures, `ko-code-switch`, and
+the two VoxConverse fixtures. `voxconverse-ppgjx-78m` is a ninefold repeated reel for
+duration and global-speaker checks. It is not a natural 78-minute conversation.
+
+`italian-dialogue` and its byte-copied `it-dialogue` view use macOS `/usr/bin/say`.
+Their selections record the exact macOS product and build versions, `say` binary hash,
+code-signing identifier, voice, rate, and text. OS updates can change the waveform. The
+verifier therefore requires exact current-host provenance and reports whether it matches
+the historical generator, but it does not require historical fixture hashes for these
+two host-bound outputs.
+
 ## ASR: FLEURS Test Split by Language
 
 | Target | Selected source | Pinned revision | Selected scope | Ground-truth format | License |
