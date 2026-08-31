@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import wave
 
 
@@ -27,6 +28,7 @@ from check_acceptance_evaluation import (  # noqa: E402
     create_evaluation,
     snapshot_tree,
     validate_exact_partition,
+    validate_fixture,
     validate_runner_evidence,
     verify_evaluation,
     vibevoice_glossary_payload_sha256,
@@ -1131,6 +1133,7 @@ esac
                     run,
                     manifest,
                     vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
+                    trusted_input_frame_count=32_000,
                 )
 
     def test_product_float32_preprocess_converts_to_canonical_pcm16(self) -> None:
@@ -1150,6 +1153,7 @@ esac
             )
             canonical = canonical_pcm16_mono_samples(
                 path,
+                expected_frame_count=7,
                 label="production-shaped preprocess",
                 source_format="float32",
             )
@@ -1157,6 +1161,42 @@ esac
                 struct.unpack("<7h", canonical),
                 (0, 1, -1, 2, -2, 31_130, -31_130),
             )
+
+    def test_huge_source_duration_is_rejected_before_any_wav_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, input_path, run = self.make_case(root, "hike-code-switch-v1")
+            manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
+            manifest["coverage"]["input_duration_s"] = 1_000_000_000.0
+            glossary_payload_hash = vibevoice_glossary_payload_sha256(
+                input_path.parent / "glossary.txt"
+            )
+            with mock.patch.object(
+                Path,
+                "open",
+                side_effect=AssertionError("WAV read attempted"),
+            ):
+                with self.assertRaisesRegex(
+                    EvaluationError,
+                    "sealed fixture frame count",
+                ):
+                    validate_runner_evidence(
+                        run,
+                        manifest,
+                        glossary_payload_hash,
+                        trusted_input_frame_count=32_000,
+                    )
+
+    def test_huge_fixture_duration_is_rejected_from_physical_wav_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            fixture, input_path, _ = self.make_case(root, "hike-code-switch-v1")
+            check_path = fixture / "fixture-check.json"
+            check = json.loads(check_path.read_text(encoding="utf-8"))
+            check["input_wav"]["duration_s"] = 1e308
+            write_json(check_path, check)
+            with self.assertRaisesRegex(EvaluationError, "physical PCM input"):
+                validate_fixture(fixture, "hike-code-switch-v1", input_path)
 
     def test_float32_preprocess_rejects_nonfinite_out_of_range_and_malformed_riff(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1174,6 +1214,7 @@ esac
                     with self.assertRaisesRegex(EvaluationError, message):
                         canonical_pcm16_mono_samples(
                             path,
+                            expected_frame_count=1,
                             label=label,
                             source_format="float32",
                         )
@@ -1188,6 +1229,7 @@ esac
             with self.assertRaisesRegex(EvaluationError, "repeats a RIFF chunk"):
                 canonical_pcm16_mono_samples(
                     duplicate,
+                    expected_frame_count=1,
                     label="duplicate",
                     source_format="float32",
                 )
@@ -1198,9 +1240,95 @@ esac
             with self.assertRaisesRegex(EvaluationError, "invalid RIFF size"):
                 canonical_pcm16_mono_samples(
                     truncated,
+                    expected_frame_count=1,
                     label="truncated",
                     source_format="float32",
                 )
+
+            inner_truncated = root / "inner-truncated.wav"
+            truncated_body = b"data" + struct.pack("<I", 4) + b"\0\0"
+            inner_truncated.write_bytes(
+                b"RIFF"
+                + struct.pack("<I", len(truncated_body) + 4)
+                + b"WAVE"
+                + truncated_body
+            )
+            with self.assertRaisesRegex(EvaluationError, "truncated RIFF chunk"):
+                canonical_pcm16_mono_samples(
+                    inner_truncated,
+                    expected_frame_count=1,
+                    label="inner-truncated",
+                    source_format="float32",
+                )
+
+            nonzero_padding = root / "nonzero-padding.wav"
+            padding_body = b"JUNK" + struct.pack("<I", 1) + b"x" + b"\1"
+            nonzero_padding.write_bytes(
+                b"RIFF"
+                + struct.pack("<I", len(padding_body) + 4)
+                + b"WAVE"
+                + padding_body
+            )
+            with self.assertRaisesRegex(EvaluationError, "nonzero RIFF padding byte"):
+                canonical_pcm16_mono_samples(
+                    nonzero_padding,
+                    expected_frame_count=1,
+                    label="nonzero-padding",
+                    source_format="float32",
+                )
+
+    def test_float32_frame_count_requires_exact_l_minus_one_l_and_l_plus_one(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for frame_count in (0, 1, 2):
+                with self.subTest(frame_count=frame_count):
+                    path = root / f"frames-{frame_count}.wav"
+                    write_float32_wav(path, [0.0] * frame_count)
+                    if frame_count == 1:
+                        self.assertEqual(
+                            canonical_pcm16_mono_samples(
+                                path,
+                                expected_frame_count=1,
+                                label="exact-frames",
+                                source_format="float32",
+                            ),
+                            b"\0\0",
+                        )
+                    else:
+                        with self.assertRaisesRegex(
+                            EvaluationError,
+                            "exact expected frame count",
+                        ):
+                            canonical_pcm16_mono_samples(
+                                path,
+                                expected_frame_count=1,
+                                label="wrong-frames",
+                                source_format="float32",
+                            )
+
+    def test_wav_container_cap_checks_l_minus_one_l_and_l_plus_one_before_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            limit = 4 + 64 * 1024
+            for size in (limit - 1, limit, limit + 1):
+                with self.subTest(size=size):
+                    path = root / f"sparse-{size}.wav"
+                    with path.open("wb") as output:
+                        output.truncate(size)
+                    opener = mock.mock_open(read_data=b"")
+                    with mock.patch.object(Path, "open", opener):
+                        with self.assertRaises(EvaluationError):
+                            canonical_pcm16_mono_samples(
+                                path,
+                                expected_frame_count=1,
+                                label="bounded-sparse",
+                                source_format="float32",
+                            )
+                    if size <= limit:
+                        opener.assert_called_once_with("rb")
+                        opener().read.assert_called_once_with(size + 1)
+                    else:
+                        opener.assert_not_called()
 
     def test_runner_evidence_requires_float32_preprocess_and_pcm16_partitions(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1215,6 +1343,7 @@ esac
                     run,
                     manifest,
                     vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
+                    trusted_input_frame_count=32_000,
                 )
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -1229,6 +1358,7 @@ esac
                     run,
                     manifest,
                     vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
+                    trusted_input_frame_count=32_000,
                 )
 
     def test_runner_and_swift_outcome_language_shapes_are_distinct(self) -> None:
@@ -1281,6 +1411,7 @@ esac
                         run,
                         manifest,
                         vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
+                        trusted_input_frame_count=32_000,
                     )
 
     def test_runner_evidence_hashes_actual_leaf_audio_bytes(self) -> None:
@@ -1316,6 +1447,7 @@ esac
                     run,
                     manifest,
                     vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
+                    trusted_input_frame_count=32_000,
                 )
 
     def test_runner_evidence_rejects_noncanonical_leaf_paths(self) -> None:
@@ -1342,6 +1474,7 @@ esac
                     run,
                     manifest,
                     vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
+                    trusted_input_frame_count=32_000,
                 )
 
     def test_runner_evidence_rejects_request_attempt_mismatch(self) -> None:
@@ -1368,6 +1501,7 @@ esac
                     run,
                     manifest,
                     vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
+                    trusted_input_frame_count=32_000,
                 )
 
     def test_runner_evidence_rejects_range_root_rate_and_arbitrary_wav_reseals(self) -> None:
@@ -1400,6 +1534,7 @@ esac
                         run,
                         manifest,
                         vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
+                        trusted_input_frame_count=32_000,
                     )
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -1440,6 +1575,7 @@ esac
                     run,
                     manifest,
                     vibevoice_glossary_payload_sha256(input_path.parent / "glossary.txt"),
+                    trusted_input_frame_count=32_000,
                 )
 
     def test_runner_evidence_uses_sealed_normalized_audio_not_raw_fixture_pcm(self) -> None:
@@ -1555,6 +1691,7 @@ esac
                         vibevoice_glossary_payload_sha256(
                             input_path.parent / "glossary.txt"
                         ),
+                        trusted_input_frame_count=32_000,
                     )
 
     def test_exact_partition_rejects_leaf_and_root_gaps_and_overlaps(self) -> None:

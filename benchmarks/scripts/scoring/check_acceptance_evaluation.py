@@ -202,21 +202,46 @@ def file_record(path: Path) -> dict[str, object]:
 def canonical_pcm16_mono_samples(
     path: Path,
     *,
+    expected_frame_count: int,
     label: str,
     source_format: str,
 ) -> bytes:
     """Read a strict product WAV and return its canonical PCM16 sample bytes."""
 
+    if (
+        not isinstance(expected_frame_count, int)
+        or isinstance(expected_frame_count, bool)
+        or expected_frame_count < 0
+    ):
+        raise EvaluationError(f"{label} has an invalid expected frame count")
+    bytes_per_frame = {"float32": 4, "pcm16": 2}.get(source_format)
+    if bytes_per_frame is None:
+        raise EvaluationError(f"unsupported internal WAV source format: {source_format}")
+    maximum_container_bytes = expected_frame_count * bytes_per_frame + 64 * 1024
     try:
-        payload = path.read_bytes()
+        metadata = path.lstat()
     except OSError as error:
         raise EvaluationError(f"{label} is not a readable WAV") from error
+    if not stat.S_ISREG(metadata.st_mode) or path.is_symlink():
+        raise EvaluationError(f"{label} is not a regular WAV file")
+    if metadata.st_size > maximum_container_bytes:
+        raise EvaluationError(f"{label} exceeds its bounded WAV container size")
+    try:
+        with path.open("rb") as source:
+            payload = source.read(metadata.st_size + 1)
+    except OSError as error:
+        raise EvaluationError(f"{label} is not a readable WAV") from error
+    if len(payload) > maximum_container_bytes:
+        raise EvaluationError(f"{label} exceeds its bounded WAV container size")
+    if len(payload) != metadata.st_size:
+        raise EvaluationError(f"{label} changed while its WAV evidence was read")
     if len(payload) < 12 or payload[:4] != b"RIFF" or payload[8:12] != b"WAVE":
         raise EvaluationError(f"{label} is not a little-endian RIFF/WAVE file")
     if struct.unpack_from("<I", payload, 4)[0] != len(payload) - 8:
         raise EvaluationError(f"{label} has an invalid RIFF size")
 
-    chunks: dict[bytes, bytes] = {}
+    payload_view = memoryview(payload)
+    chunks: dict[bytes, memoryview] = {}
     offset = 12
     while offset < len(payload):
         if len(payload) - offset < 8:
@@ -232,7 +257,7 @@ def canonical_pcm16_mono_samples(
             raise EvaluationError(f"{label} has a nonzero RIFF padding byte")
         if chunk_id in chunks:
             raise EvaluationError(f"{label} repeats a RIFF chunk")
-        chunks[chunk_id] = payload[data_start:data_end]
+        chunks[chunk_id] = payload_view[data_start:data_end]
         offset = padded_end
     if offset != len(payload):
         raise EvaluationError(f"{label} has trailing bytes outside its RIFF chunks")
@@ -248,8 +273,7 @@ def canonical_pcm16_mono_samples(
         "float32": (3, 1, 16_000, 64_000, 4, 32),
         "pcm16": (1, 1, 16_000, 32_000, 2, 16),
     }.get(source_format)
-    if expected_format is None:
-        raise EvaluationError(f"unsupported internal WAV source format: {source_format}")
+    assert expected_format is not None
     if (
         audio_format,
         channels,
@@ -259,10 +283,11 @@ def canonical_pcm16_mono_samples(
         bits_per_sample,
     ) != expected_format:
         raise EvaluationError(f"{label} is not 16 kHz mono {source_format} WAV")
-    if len(audio_data) % block_align != 0:
-        raise EvaluationError(f"{label} has a partial audio sample")
+    expected_data_bytes = expected_frame_count * block_align
+    if len(audio_data) != expected_data_bytes:
+        raise EvaluationError(f"{label} does not contain the exact expected frame count")
     if source_format == "pcm16":
-        return audio_data
+        return bytes(audio_data)
 
     canonical = bytearray(len(audio_data) // 2)
     output_offset = 0
@@ -647,6 +672,21 @@ def validate_fixture(
     input_check = check.get("input_wav")
     if not isinstance(input_check, dict):
         raise EvaluationError("fixture-check has no input_wav record")
+    try:
+        input_audio = wave_info_file(input_path)
+    except PackError as error:
+        raise EvaluationError("fixture input is not a readable PCM WAV") from error
+    if (
+        input_audio.sample_rate_hz != 16_000
+        or input_audio.channels != 1
+        or input_audio.sample_width_bytes != 2
+        or input_check.get("sample_rate_hz") != input_audio.sample_rate_hz
+        or input_check.get("channels") != input_audio.channels
+        or input_check.get("sample_width_bytes") != input_audio.sample_width_bytes
+        or input_check.get("duration_s") != rounded_seconds(input_audio.duration_s)
+    ):
+        raise EvaluationError("fixture-check input_wav differs from the physical PCM input")
+    input_frame_count = input_audio.frames
     expected_input_hash = require_hash(input_check.get("sha256"), label="fixture input hash")
     input_record = file_record(input_path)
     if input_record["sha256"] != expected_input_hash:
@@ -691,6 +731,7 @@ def validate_fixture(
     return {
         "artifact_sha256": dict(sorted(sealed_artifacts.items())),
         "fixture_check_sha256": sha256_file(check_path),
+        "input_frame_count": input_frame_count,
         "input_sha256": expected_input_hash,
         "input_size_bytes": input_record["size_bytes"],
         "pack_manifest_sha256": sha256_file(PACK_MANIFEST),
@@ -765,7 +806,26 @@ def validate_runner_evidence(
     source_run: Path,
     manifest: dict[str, Any],
     expected_glossary_payload_sha256: str,
+    *,
+    trusted_input_frame_count: int,
 ) -> dict[str, object]:
+    if (
+        not isinstance(trusted_input_frame_count, int)
+        or isinstance(trusted_input_frame_count, bool)
+        or trusted_input_frame_count <= 0
+    ):
+        raise EvaluationError("fixture input frame count is invalid")
+    coverage = manifest.get("coverage")
+    manifest_duration = coverage.get("input_duration_s") if isinstance(coverage, dict) else None
+    trusted_duration = trusted_input_frame_count / 16_000
+    duration_tolerance = 0.5 / 16_000 + 1e-9
+    if (
+        not isinstance(manifest_duration, (int, float))
+        or isinstance(manifest_duration, bool)
+        or not math.isfinite(float(manifest_duration))
+        or abs(float(manifest_duration) - trusted_duration) > duration_tolerance
+    ):
+        raise EvaluationError("source manifest duration differs from the sealed fixture frame count")
     manifest_artifacts = {
         item["path"]: item["sha256"]
         for item in manifest.get("artifacts", [])
@@ -824,6 +884,7 @@ def validate_runner_evidence(
     if manifest.get("preprocessing") != expected_preprocessing:
         raise EvaluationError("source run does not use the exact ko-meeting preprocessing contract")
     sample_rate = 16_000
+    expected_input_samples = trusted_input_frame_count
     preprocessed_records = [
         item
         for item in manifest.get("artifacts", [])
@@ -838,6 +899,7 @@ def validate_runner_evidence(
     sealed_evidence_file(preprocessed_relative)
     preprocessed_pcm = canonical_pcm16_mono_samples(
         source_run / preprocessed_relative,
+        expected_frame_count=expected_input_samples,
         label="preprocessed acceptance input",
         source_format="float32",
     )
@@ -858,7 +920,11 @@ def validate_runner_evidence(
             raise EvaluationError("source run has noncanonical ASR root chunk boundaries")
         start_sample = round(float(boundary["start_s"]) * sample_rate)
         end_sample = round(float(boundary["end_s"]) * sample_rate)
-        if start_sample < 0 or end_sample <= start_sample:
+        if (
+            start_sample < 0
+            or end_sample <= start_sample
+            or end_sample > expected_input_samples
+        ):
             raise EvaluationError("source run has an invalid ASR root sample range")
         root_ranges_by_index[root_index] = (start_sample, end_sample)
         chunk_audio_relative = f"primary/chunks/{root_index}/audio.wav"
@@ -867,6 +933,7 @@ def validate_runner_evidence(
         sealed_evidence_file(root_record_relative)
         chunk_pcm = canonical_pcm16_mono_samples(
             source_run / chunk_audio_relative,
+            expected_frame_count=end_sample - start_sample,
             label=f"ASR root {root_index} audio",
             source_format="pcm16",
         )
@@ -899,7 +966,6 @@ def validate_runner_evidence(
         promoted_hashes_from_roots.extend(root_result_hashes)
     if promoted_ids_from_roots != attempt_ids or promoted_hashes_from_roots != result_hashes:
         raise EvaluationError("ASR root indexes differ from canonical promotion")
-    expected_input_samples = round(float(manifest["coverage"]["input_duration_s"]) * sample_rate)
     if len(preprocessed_pcm) != expected_input_samples * 2:
         raise EvaluationError("preprocessed input PCM length differs from the source manifest")
     boundary_ranges = [
@@ -1002,6 +1068,7 @@ def validate_runner_evidence(
             raise EvaluationError(f"ASR leaf {raw_attempt_id} request audio hash differs from audio.wav")
         leaf_pcm = canonical_pcm16_mono_samples(
             source_run / audio_relative,
+            expected_frame_count=request["end_sample"] - request["start_sample"],
             label=f"ASR leaf {raw_attempt_id} audio",
             source_format="pcm16",
         )
@@ -1218,6 +1285,7 @@ def build_envelope(
         source_run,
         source_manifest,
         vibevoice_glossary_payload_sha256(fixture_root / "glossary.txt"),
+        trusted_input_frame_count=int(fixture["input_frame_count"]),
     )
     scorer_files = scorer_hashes()
     scored_inputs: dict[str, str] = {
@@ -1468,6 +1536,7 @@ def verify_evaluation(
         source_run,
         source_manifest,
         vibevoice_glossary_payload_sha256(fixture_root / "glossary.txt"),
+        trusted_input_frame_count=int(actual_fixture["input_frame_count"]),
     ):
         raise EvaluationError("evaluation runner-evidence summary mismatch")
     if envelope.get("glossary") != source_manifest["glossary"]:
