@@ -121,9 +121,21 @@ swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-Die App gibt ihren Bundle-Pfad aus, wenn Build, Ressourcen-Allowlist-Inventur und strenge Codesign-Prüfungen erfolgreich sind. Das ausführbare Bundle enthält weder Modellgewichte noch Python-Umgebungen. Die Profildefinitionen `ko-meeting` und `it-dialogue` sind enthalten und `maccheroni doctor` meldet ihre beobachteten Abhängigkeiten und den Speicherzustand. Die Bereitstellung und abschließende Doctor-Prüfung von `ko-meeting` aus einem leeren Cache sind noch unvollständig: Der indirekte Qwen-Tokenizer und die Hugging-Face-Metadaten müssen manuell vorbereitet werden.
+Die Standardsuite `swift test` verwendet gebündelte oder erzeugte Fixtures. Sie greift weder auf einen nutzerspezifischen Modell-Cache noch auf externe Benchmarkläufe oder eine nutzerseitig eingerichtete Python-Modellumgebung zu und führt keine echte Modellinferenz aus. Das Setup-Skript richtet die vollständig festgeschriebene `ko-meeting`-Laufzeit mit VibeVoice ASR, Silero VAD und Community-1-Diarisierung ein. Es lädt außerdem die von VibeVoice indirekt benötigten Tokenizer-Dateien aus `Qwen/Qwen2.5-7B`; dieser Pfad verwendet keine Qwen-Inferenzgewichte.
 
-Die ausführbare Datei bietet fünf Produktbefehle:
+Richte den gepinnten Cache ein und führe die Modellintegration ausdrücklich so aus:
+
+```bash
+cache_root="${MACCHERONI_BENCHMARK_CACHE:-$HOME/Library/Caches/Maccheroni/benchmarks}"
+MACCHERONI_BENCHMARK_CACHE="$cache_root" zsh scripts/setup-transcription-runtime.zsh --profile ko-meeting
+MACCHERONI_RUN_MODEL_INTEGRATION=1 MACCHERONI_BENCHMARK_CACHE="$cache_root" MACCHERONI_HF_HOME="$cache_root/models/huggingface" swift test --filter MaccheroniModelIntegrationTests
+```
+
+Die ausdrücklich aktivierte Suite prüft nur VibeVoice, Silero und Community-1. Wenn festgeschriebene Voraussetzungen fehlen oder unvollständig sind, schlägt sie vor dem Start eines Backends mit einem klaren Voraussetzungsfehler fehl.
+
+Die App gibt ihren Bundle-Pfad aus, wenn Build, Ressourcen-Allowlist-Inventur und strenge Codesign-Prüfungen erfolgreich sind. Das ausführbare Bundle enthält weder Modellgewichte noch Python-Umgebungen. Die Profildefinitionen `ko-meeting` und `it-dialogue` sind enthalten und `maccheroni doctor` meldet ihre beobachteten Abhängigkeiten und den Speicherzustand.
+
+Die ausführbare Datei bietet diese Produktbefehle:
 
 ```bash
 .build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
@@ -167,7 +179,7 @@ Issues und gezielte Pull Requests sind willkommen. Build- und Testbefehle, der V
 | `Tests/` | Fixturebasierte Tests |
 | `benchmarks/scripts/` | Runner, Scorer und der Vergleichs-Harness für Korrekturpfade, mit abgeleiteten Urteilen und Negativtests |
 | `docs/` | Forschungsübersicht, Quellcodeprüfungen, Richtlinie für Beschränkungen, Verträge (JSON-Schemas), UI-Design |
-| `scripts/` | App-Bundle-Build, MOSS-Harness-Build, Einrichtung der Nachbearbeitungslaufzeit |
+| `scripts/` | App-Bundle-Build, Einrichtung der Transkriptions- und Nachbearbeitungslaufzeit, Builds der Benchmark-Harnesse |
 | [PROJECT.md](PROJECT.md) | Absichtshierarchie: Grundsätze, Nicht-Ziele, Entscheidungsregeln, ausschließlich ergänztes Entscheidungsprotokoll |
 | [AGENTS.md](AGENTS.md) | Arbeitskonventionen für dieses Repository |
 
@@ -175,4 +187,4 @@ Jede Abschlussbehauptung in der Dokumentation enthält den Befehl, der sie hervo
 
 ## Lizenz und Danksagungen
 
-MIT. Dieses Projekt baut auf [speech-swift](https://github.com/soniqo/speech-swift) (MLX/CoreML-Laufzeitumgebungen für Sprache), den Autorinnen und Autoren der Modelle MOSS, VibeVoice, Silero und pyannote sowie [mlx](https://github.com/ml-explore/mlx) auf. Die Quellcodeprüfung der Referenzprojekte unter `docs/` würdigt die 24 Open-Source-Projekte, deren gute wie schlechte Entwurfsentscheidungen dieses Projekt geprägt haben.
+MIT. Dieses Projekt baut auf [speech-swift](https://github.com/soniqo/speech-swift) (MLX/CoreML-Laufzeitumgebungen für Sprache), den Autorinnen und Autoren der Modelle MOSS, VibeVoice, Silero und pyannote sowie [mlx](https://github.com/ml-explore/mlx) auf. Die Quellcodeprüfung der Referenzprojekte unter `docs/` würdigt die Open-Source-Projekte, deren gute wie schlechte Entwurfsentscheidungen dieses Projekt geprägt haben.

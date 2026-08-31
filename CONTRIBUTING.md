@@ -11,7 +11,7 @@ Requirements: Apple Silicon Mac, macOS 26, Xcode 26, [uv](https://docs.astral.sh
 ```bash
 git clone https://github.com/gigio1023/maccheroni.git
 cd maccheroni
-swift build && swift test          # full Swift suite
+swift build && swift test          # portable, cache-independent Swift suite
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 .build/debug/maccheroni doctor     # reports observed runtime and model readiness
 ```
@@ -21,12 +21,31 @@ For the optional local post-processing model, run
 
 ## Testing
 
-Swift fixture suites:
+The default Swift suite uses bundled or generated fixtures. It does not depend
+on an owner model cache, external benchmark runs, or the owner-provisioned
+model Python environment.
 
 ```bash
-swift test                                        # everything
+swift test
 swift test --filter MaccheroniASRTests            # one suite while iterating
 ```
+
+Real VibeVoice, Silero, and Community-1 inference is an explicit integration
+lane. Provision the exact `ko-meeting` closure, then opt in:
+
+```bash
+cache_root="$HOME/Library/Caches/Maccheroni/benchmarks"
+MACCHERONI_BENCHMARK_CACHE="$cache_root" \
+  zsh scripts/setup-transcription-runtime.zsh --profile ko-meeting
+MACCHERONI_RUN_MODEL_INTEGRATION=1 MACCHERONI_BENCHMARK_CACHE="$cache_root" MACCHERONI_HF_HOME="$cache_root/models/huggingface" swift test --filter MaccheroniModelIntegrationTests
+```
+
+The opt-in tests fail with a prerequisite error when setup is missing or the
+runtime is incomplete. Model data and the pinned Python environment stay in
+the external benchmark cache. Change `cache_root` to relocate it while keeping
+setup and test paths aligned. This closure includes the tokenizer
+files that mlx-audio's VibeVoice adapter reads from `Qwen/Qwen2.5-7B`; it does
+not include Qwen inference weights or the MOSS runtime.
 
 Python contract suites:
 

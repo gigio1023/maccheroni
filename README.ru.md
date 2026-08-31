@@ -121,9 +121,29 @@ swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-После успешной сборки, инвентаризации разрешённых ресурсов и строгих проверок подписи кода приложение выводит путь к своему bundle. Исполняемый bundle не содержит веса моделей или среды Python. Определения профилей `ko-meeting` и `it-dialogue` включены, а `maccheroni doctor` сообщает их обнаруженные зависимости и состояние хранилища. Подготовка `ko-meeting` из пустого кеша и завершающая проверка doctor пока неполны: косвенный токенизатор Qwen и метаданные Hugging Face нужно подготовить вручную.
+Стандартный набор тестов Swift использует включённые в репозиторий или создаваемые во время тестов fixtures. Он не зависит от кеша моделей разработчика, внешних запусков benchmark или подготовленной разработчиком среды Python с моделями и не выполняет реальный инференс.
 
-Исполняемый файл предоставляет пять команд продукта:
+Подготовьте точный внешний runtime для профиля корейских совещаний:
+
+```bash
+cache_root="$HOME/Library/Caches/Maccheroni/benchmarks"
+MACCHERONI_BENCHMARK_CACHE="$cache_root" \
+  zsh scripts/setup-transcription-runtime.zsh --profile ko-meeting
+```
+
+Команда устанавливает полный закреплённый набор зависимостей `ko-meeting`, включая VibeVoice, Silero, Community-1 и среду Python, в кеш benchmark Maccheroni. Веса моделей и среды Python остаются вне репозитория и bundle приложения. Косвенная зависимость `Qwen/Qwen2.5-7B` содержит только файлы токенизатора. Этот профиль не устанавливает веса для инференса MOSS, Qwen ASR или ForcedAligner.
+
+После подготовки явно включите интеграционные тесты с реальным инференсом VibeVoice, Silero и Community-1:
+
+```bash
+MACCHERONI_RUN_MODEL_INTEGRATION=1 MACCHERONI_BENCHMARK_CACHE="$cache_root" MACCHERONI_HF_HOME="$cache_root/models/huggingface" swift test --filter MaccheroniModelIntegrationTests
+```
+
+Если точный runtime отсутствует или неполон, необязательный набор тестов завершается с понятной ошибкой о недостающих предварительных компонентах. Измените `cache_root`, чтобы использовать другой внешний кеш.
+
+После успешной сборки, инвентаризации разрешённых ресурсов и строгих проверок подписи кода приложение выводит путь к своему bundle. Исполняемый bundle не содержит веса моделей или среды Python. Определения профилей `ko-meeting` и `it-dialogue` включены, а `maccheroni doctor` сообщает их обнаруженные зависимости и состояние хранилища.
+
+Исполняемый файл предоставляет следующие команды продукта:
 
 ```bash
 .build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
@@ -167,7 +187,7 @@ zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 | `Tests/` | Тесты на основе fixtures |
 | `benchmarks/scripts/` | Средства запуска и оценки и стенд сравнения путей коррекции с производными вердиктами и негативными тестами |
 | `docs/` | Обзор исследований, проверки исходного кода, политика ограничений, контракты (схемы JSON), дизайн интерфейса |
-| `scripts/` | Сборка bundle приложения, сборка harness MOSS, настройка среды постобработки |
+| `scripts/` | Сборка bundle приложения, настройка сред транскрибирования и постобработки, сборка benchmark harnesses |
 | [PROJECT.md](PROJECT.md) | Иерархия замысла: принципы, нецели, правила принятия решений и журнал решений только для дополнения |
 | [AGENTS.md](AGENTS.md) | Рабочие соглашения для этого репозитория |
 
@@ -175,4 +195,4 @@ zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 
 ## Лицензия и благодарности
 
-MIT. Проект опирается на [speech-swift](https://github.com/soniqo/speech-swift) (среды выполнения речи MLX/CoreML), авторов моделей MOSS, VibeVoice, Silero и pyannote, а также [mlx](https://github.com/ml-explore/mlx). Проверка исходного кода эталонных проектов в `docs/` отмечает 24 проекта с открытым исходным кодом, чьи удачные и неудачные решения повлияли на этот проект.
+MIT. Проект опирается на [speech-swift](https://github.com/soniqo/speech-swift) (среды выполнения речи MLX/CoreML), авторов моделей MOSS, VibeVoice, Silero и pyannote, а также [mlx](https://github.com/ml-explore/mlx). Проверка исходного кода эталонных проектов в `docs/` отмечает проекты с открытым исходным кодом, чьи удачные и неудачные решения повлияли на этот проект.

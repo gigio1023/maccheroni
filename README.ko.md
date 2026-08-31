@@ -120,9 +120,21 @@ swift build && swift test
 zsh scripts/build-app.zsh          # builds and codesigns Maccheroni.app
 ```
 
-build, resource allowlist inventory, strict codesign 검사를 모두 통과하면 앱이 bundle 경로를 출력합니다. 실행 파일은 모델 weight나 Python 환경을 포함하지 않습니다. `ko-meeting`과 `it-dialogue` 프로필 정의를 제공하며 `maccheroni doctor`는 관찰한 의존성과 저장소 상태를 보고합니다. 빈 cache에서 `ko-meeting`을 준비하고 `doctor`로 완전히 검증하는 과정은 아직 완결되지 않았습니다. 간접 Qwen tokenizer와 Hugging Face metadata를 수동으로 준비해야 합니다.
+기본 `swift test`는 포함하거나 생성한 fixture를 사용합니다. 사용자의 모델 캐시, 외부 run, 사용자가 준비한 모델용 Python 환경, 실제 추론에 의존하지 않습니다.
 
-실행 파일은 다섯 가지 제품 명령을 제공합니다.
+고정된 `ko-meeting` 의존성 묶음을 준비하고 모델 통합 테스트를 명시적으로 실행하려면 다음 명령을 사용하세요.
+
+```bash
+cache_root="${MACCHERONI_BENCHMARK_CACHE:-$HOME/Library/Caches/Maccheroni/benchmarks}"
+MACCHERONI_BENCHMARK_CACHE="$cache_root" zsh scripts/setup-transcription-runtime.zsh --profile ko-meeting
+MACCHERONI_RUN_MODEL_INTEGRATION=1 MACCHERONI_BENCHMARK_CACHE="$cache_root" MACCHERONI_HF_HOME="$cache_root/models/huggingface" swift test --filter MaccheroniModelIntegrationTests
+```
+
+통합 테스트에서는 VibeVoice, Silero, Community-1만 추론합니다. `Qwen/Qwen2.5-7B`는 간접 tokenizer로만 준비하며 추론에 사용하지 않습니다. 고정된 선행 조건이 하나라도 빠지면 이 선택 경로는 명확한 오류로 종료합니다.
+
+build, resource allowlist inventory, strict codesign 검사를 모두 통과하면 앱이 bundle 경로를 출력합니다. 실행 파일은 모델 weight나 Python 환경을 포함하지 않습니다. `ko-meeting`과 `it-dialogue` 프로필 정의를 제공하며 `maccheroni doctor`는 관찰한 의존성과 저장소 상태를 보고합니다.
+
+실행 파일은 다음 제품 명령을 제공합니다.
 
 ```bash
 .build/debug/maccheroni help [help|run|postprocess|doctor|capabilities]
@@ -166,7 +178,7 @@ Issue와 범위를 명확히 한 pull request를 환영합니다. Build 및 test
 | `Tests/` | fixture 기반 Swift test |
 | `benchmarks/scripts/` | Derived verdict와 negative test를 포함한 runner, scorer, correction 경로 비교 harness |
 | `docs/` | 조사 digest, source audit, constraint policy, 계약(JSON schema), UI design |
-| `scripts/` | App bundle build, MOSS harness build, post-processing runtime setup |
+| `scripts/` | App bundle과 benchmark harness build, transcription runtime과 post-processing runtime setup |
 | [PROJECT.md](PROJECT.md) | 의도 계층: 기둥, 비목표, 판단 규칙, 추가만 가능한 결정 기록 |
 | [AGENTS.md](AGENTS.md) | 이 저장소에서 작업할 때 따르는 운영 규칙 |
 
@@ -174,4 +186,4 @@ Issue와 범위를 명확히 한 pull request를 환영합니다. Build 및 test
 
 ## 라이선스와 감사의 말
 
-MIT. 이 프로젝트는 [speech-swift](https://github.com/soniqo/speech-swift)의 MLX/CoreML 음성 runtime, MOSS, VibeVoice, Silero, pyannote 모델 제작자, [mlx](https://github.com/ml-explore/mlx)를 토대로 만들었습니다. `docs/`의 reference project source audit에는 좋은 설계와 나쁜 설계 모두 이 프로젝트에 영향을 준 오픈 소스 프로젝트 24개의 출처를 밝혔습니다.
+MIT. 이 프로젝트는 [speech-swift](https://github.com/soniqo/speech-swift)의 MLX/CoreML 음성 runtime, MOSS, VibeVoice, Silero, pyannote 모델 제작자, [mlx](https://github.com/ml-explore/mlx)를 토대로 만들었습니다. `docs/`의 reference project source audit에는 좋은 설계와 나쁜 설계 모두 이 프로젝트에 영향을 준 오픈 소스 프로젝트의 출처를 밝혔습니다.
