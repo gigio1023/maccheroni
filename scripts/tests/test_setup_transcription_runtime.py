@@ -1,6 +1,8 @@
+import datetime
 import json
 import hashlib
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -572,7 +574,8 @@ class SetupTranscriptionRuntimeTests(unittest.TestCase):
         finally:
             fake.close()
 
-    def test_untrusted_external_venv_python_symlink_is_rejected(self) -> None:
+    def test_stale_venv_interpreter_symlink_names_its_cause_and_remedy(self) -> None:
+        """The condition a 2026-08-03 provisioning run left in the real cache."""
         fake = FakeRuntime()
         try:
             outside = fake.cache.parent / "untrusted-interpreter"
@@ -580,14 +583,34 @@ class SetupTranscriptionRuntimeTests(unittest.TestCase):
             target = outside / "python3"
             target.write_text("#!/bin/zsh\nprint sentinel\n", encoding="utf-8")
             target.chmod(0o755)
-            binary = fake.cache / "venvs/mlx-audio/bin"
+            venv = fake.cache / "venvs/mlx-audio"
+            binary = venv / "bin"
             binary.mkdir(parents=True)
             (binary / "python").symlink_to(target)
 
             result = fake.run("--profile", "ko-meeting")
+            today = datetime.date.today().strftime("%Y%m%d")
 
             self.assertEqual(result.returncode, 65, result.stderr)
-            self.assertIn("external writer symlink outside cache tree", result.stderr)
+            self.assertIn("stale provisioning environment", result.stderr)
+            self.assertNotIn(
+                "external writer symlink outside cache tree", result.stderr
+            )
+            self.assertIn(str(venv), result.stderr)
+            self.assertIn("its interpreter link bin/python", result.stderr)
+            self.assertIn(str(target), result.stderr)
+            self.assertIn(
+                f'mv "{venv}" "{venv}.stale-{today}"',
+                result.stderr,
+            )
+            self.assertIn(
+                f'MACCHERONI_BENCHMARK_CACHE="{fake.cache}"',
+                result.stderr,
+            )
+            self.assertIn("--profile ko-meeting", result.stderr)
+
+            self.assertNotIn("rm ", result.stderr)
+            self.assertTrue((binary / "python").is_symlink())
             self.assertEqual(
                 target.read_text(encoding="utf-8"),
                 "#!/bin/zsh\nprint sentinel\n",
@@ -609,6 +632,164 @@ class SetupTranscriptionRuntimeTests(unittest.TestCase):
             )
             self.assertEqual(fake.hf_calls(), [])
             self.assertEqual(fake.swift_calls(), [])
+        finally:
+            fake.close()
+
+    def test_broken_stale_venv_interpreter_symlink_reads_as_stale(self) -> None:
+        fake = FakeRuntime()
+        try:
+            missing = fake.cache.parent / "removed-uv-python/bin/python3"
+            binary = fake.cache / "venvs/mlx-audio/bin"
+            binary.mkdir(parents=True)
+            (binary / "python3.12").symlink_to(missing)
+
+            result = fake.run("--profile", "ko-meeting")
+
+            self.assertEqual(result.returncode, 65, result.stderr)
+            self.assertIn("stale provisioning environment", result.stderr)
+            self.assertIn("its interpreter link bin/python3.12", result.stderr)
+            self.assertIn(f"{missing} (no longer present)", result.stderr)
+            self.assertNotIn("rm ", result.stderr)
+            self.assertEqual(fake.hf_calls(), [])
+            self.assertEqual(fake.swift_calls(), [])
+        finally:
+            fake.close()
+
+    def test_printed_stale_remedy_moves_aside_and_restores_provisioning(self) -> None:
+        fake = FakeRuntime()
+        try:
+            outside = fake.cache.parent / "earlier-run-interpreter"
+            outside.mkdir()
+            target = outside / "python3"
+            shutil.copy2(fake.tool_source / "python", target)
+            target.chmod(0o755)
+            venv = fake.cache / "venvs/mlx-audio"
+            (venv / "bin").mkdir(parents=True)
+            (venv / "bin/python").symlink_to(target)
+            (venv / "pyvenv.cfg").write_text("home = elsewhere\n", encoding="utf-8")
+
+            refused = fake.run("--profile", "ko-meeting")
+            self.assertEqual(refused.returncode, 65, refused.stderr)
+
+            remedy = [
+                line.strip()
+                for line in refused.stderr.splitlines()
+                if line.strip().startswith("mv ")
+            ]
+            self.assertEqual(len(remedy), 1, refused.stderr)
+            moved = subprocess.run(
+                shlex.split(remedy[0]), text=True, capture_output=True, check=False
+            )
+            self.assertEqual(moved.returncode, 0, moved.stderr)
+
+            aside = Path(shlex.split(remedy[0])[2])
+            self.assertEqual(
+                (aside / "pyvenv.cfg").read_text(encoding="utf-8"),
+                "home = elsewhere\n",
+            )
+
+            repaired = fake.run("--profile", "ko-meeting")
+            self.assertEqual(repaired.returncode, 0, repaired.stderr)
+            self.assertEqual(repaired.stdout.strip(), "ko-meeting ready")
+        finally:
+            fake.close()
+
+    def test_stale_remedy_never_targets_an_occupied_move_aside_path(self) -> None:
+        fake = FakeRuntime()
+        try:
+            outside = fake.cache.parent / "another-interpreter"
+            outside.mkdir()
+            target = outside / "python3"
+            target.write_text("#!/bin/zsh\nexit 0\n", encoding="utf-8")
+            target.chmod(0o755)
+            venv = fake.cache / "venvs/mlx-audio"
+            (venv / "bin").mkdir(parents=True)
+            (venv / "bin/python3").symlink_to(target)
+            today = datetime.date.today().strftime("%Y%m%d")
+            occupied = venv.with_name(f"mlx-audio.stale-{today}")
+            occupied.mkdir()
+            (occupied / "keep").write_text("earlier move aside", encoding="utf-8")
+
+            result = fake.run("--profile", "ko-meeting")
+
+            self.assertEqual(result.returncode, 65, result.stderr)
+            self.assertIn(
+                f'mv "{venv}" "{venv}.stale-{today}-2"',
+                result.stderr,
+            )
+            self.assertEqual(
+                (occupied / "keep").read_text(encoding="utf-8"),
+                "earlier move aside",
+            )
+        finally:
+            fake.close()
+
+    def test_non_interpreter_venv_escape_keeps_the_unsafe_tree_message(self) -> None:
+        """Only bin/python* is residue. Everything else stays a tampering report."""
+        for relative in ("lib/python", "bin/activate", "bin/python-wrapper"):
+            with self.subTest(relative=relative):
+                fake = FakeRuntime()
+                try:
+                    outside = fake.cache.parent / "outside-payload"
+                    outside.write_text("sentinel", encoding="utf-8")
+                    entry = fake.cache / "venvs/mlx-audio" / relative
+                    entry.parent.mkdir(parents=True)
+                    entry.symlink_to(outside)
+
+                    result = fake.run("--profile", "ko-meeting")
+
+                    self.assertEqual(result.returncode, 65, result.stderr)
+                    self.assertIn(
+                        "refusing external writer symlink outside cache tree",
+                        result.stderr,
+                    )
+                    self.assertNotIn("stale provisioning environment", result.stderr)
+                    self.assertEqual(outside.read_text(encoding="utf-8"), "sentinel")
+                    self.assertEqual(fake.hf_calls(), [])
+                    self.assertEqual(fake.swift_calls(), [])
+                finally:
+                    fake.close()
+
+    def test_source_build_is_announced_with_its_stages_before_it_runs(self) -> None:
+        fake = FakeRuntime()
+        try:
+            first = fake.run("--profile", "ko-meeting")
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(first.stdout.strip(), "ko-meeting ready")
+
+            announced = [
+                line for line in first.stderr.splitlines() if line.startswith("setup: ")
+            ]
+            joined = "\n".join(announced)
+            self.assertIn("compiled from source", joined)
+            self.assertIn("tens of minutes", joined)
+            self.assertIn("that is progress, not a hang", joined)
+            stages = [
+                index
+                for index, line in enumerate(announced)
+                if line.startswith("setup: build stage ")
+            ]
+            self.assertEqual(len(stages), 4)
+            self.assertEqual(stages, sorted(stages))
+            self.assertLess(
+                announced.index(
+                    next(line for line in announced if "tens of minutes" in line)
+                ),
+                stages[0],
+            )
+
+            second = fake.run("--profile", "ko-meeting")
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertIn("already installed in this cache", second.stderr)
+            self.assertNotIn("tens of minutes", second.stderr)
+            self.assertNotIn("setup: build stage ", second.stderr)
+            builds = [
+                call for call in fake.swift_calls()
+                if "--product" in call
+                and call[call.index("--product") + 1]
+                    == "maccheroni-offline-speech-runtime"
+            ]
+            self.assertEqual(len(builds), 1)
         finally:
             fake.close()
 
