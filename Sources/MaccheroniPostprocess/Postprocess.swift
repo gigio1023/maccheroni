@@ -302,6 +302,221 @@ public struct TranslationResult: Equatable, Sendable {
     }
 }
 
+// MARK: - Marked non-acoustic speaker proposal
+
+public enum SpeakerProposalDisposition: String, Codable, Equatable, Sendable {
+    case propose
+    case decline
+}
+
+/// One backend answer about one unattributed segment, before validation.
+public struct SpeakerProposalDecision: Codable, Equatable, Sendable {
+    public var segmentIndex: Int
+    /// Empty when `disposition` is `.decline`.
+    public var proposedSpeaker: String
+    public var disposition: SpeakerProposalDisposition
+    public var reason: String
+
+    public init(
+        segmentIndex: Int,
+        proposedSpeaker: String,
+        disposition: SpeakerProposalDisposition,
+        reason: String
+    ) {
+        self.segmentIndex = segmentIndex
+        self.proposedSpeaker = proposedSpeaker
+        self.disposition = disposition
+        self.reason = reason
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case disposition, reason
+        case segmentIndex = "segment_index"
+        case proposedSpeaker = "proposed_speaker"
+    }
+}
+
+public struct SpeakerProposalBackendResponse: Equatable, Sendable {
+    public var decisions: [SpeakerProposalDecision]
+    public var responseUTF8Bytes: Int
+
+    public init(decisions: [SpeakerProposalDecision], responseUTF8Bytes: Int) {
+        self.decisions = decisions
+        self.responseUTF8Bytes = responseUTF8Bytes
+    }
+}
+
+/// Receives a bounded text-only prompt and returns speaker proposals only. It
+/// never sees audio, and nothing it returns reaches a source run.
+public protocol SpeakerProposalBackend: Sendable {
+    var id: PostprocessBackendID { get }
+    var manifestPostprocess: ManifestPostprocess { get }
+    var model: ModelDescriptor? { get }
+    var batchPolicy: PostprocessBatchPolicy { get }
+    func proposeSpeakers(prompt: String) async throws -> SpeakerProposalBackendResponse
+}
+
+/// A speaker this layer proposes for a segment the source run left
+/// unattributed, with the acoustic evidence that did not settle it.
+///
+/// `proposedSpeaker` is deliberately not called `speaker`: nothing in this
+/// record is an assignment, and a reader who sees only this type should not be
+/// able to mistake it for one.
+public struct SpeakerProposal: Codable, Equatable, Sendable {
+    public var segmentIndex: Int
+    public var proposedSpeaker: String
+    public var reason: String
+    public var acousticOutcome: String
+    public var acousticTimelineCoverage: Double
+    public var acousticCandidates: [SpeakerCandidateEvidence]
+
+    public init(
+        segmentIndex: Int,
+        proposedSpeaker: String,
+        reason: String,
+        acousticOutcome: String,
+        acousticTimelineCoverage: Double,
+        acousticCandidates: [SpeakerCandidateEvidence]
+    ) {
+        self.segmentIndex = segmentIndex
+        self.proposedSpeaker = proposedSpeaker
+        self.reason = reason
+        self.acousticOutcome = acousticOutcome
+        self.acousticTimelineCoverage = acousticTimelineCoverage
+        self.acousticCandidates = acousticCandidates
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case reason
+        case segmentIndex = "segment_index"
+        case proposedSpeaker = "proposed_speaker"
+        case acousticOutcome = "acoustic_outcome"
+        case acousticTimelineCoverage = "acoustic_timeline_coverage"
+        case acousticCandidates = "acoustic_candidates"
+    }
+}
+
+/// An unattributed segment this layer looked at and did not propose a speaker
+/// for, with why. Declining is a result, not a gap, so it is recorded with the
+/// same evidence a proposal carries.
+public struct SpeakerProposalDeclination: Codable, Equatable, Sendable {
+    public var segmentIndex: Int
+    public var reason: String
+    public var acousticOutcome: String
+    public var acousticTimelineCoverage: Double
+    public var acousticCandidates: [SpeakerCandidateEvidence]
+
+    public init(
+        segmentIndex: Int,
+        reason: String,
+        acousticOutcome: String,
+        acousticTimelineCoverage: Double,
+        acousticCandidates: [SpeakerCandidateEvidence]
+    ) {
+        self.segmentIndex = segmentIndex
+        self.reason = reason
+        self.acousticOutcome = acousticOutcome
+        self.acousticTimelineCoverage = acousticTimelineCoverage
+        self.acousticCandidates = acousticCandidates
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case reason
+        case segmentIndex = "segment_index"
+        case acousticOutcome = "acoustic_outcome"
+        case acousticTimelineCoverage = "acoustic_timeline_coverage"
+        case acousticCandidates = "acoustic_candidates"
+    }
+}
+
+/// The derived run's speaker-proposal artifact.
+///
+/// Every segment the source run left unattributed appears exactly once, in
+/// `proposals` or in `declined`. That is what makes a run that proposed almost
+/// nothing honest rather than empty: the file still says which segments were
+/// examined and why each was left alone.
+public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
+    public static let layer = "speaker-proposal"
+
+    public var schemaVersion: String
+    /// Always `speaker-proposal`. Present so the artifact names what it is
+    /// without reference to the manifest that points at it.
+    public var layer: String
+    public var sourceSegmentsSHA256: String
+    /// How much of the recording the source transcript covers. Carried here as
+    /// well as in the derived manifest, because a reader looking at proposals
+    /// must not have to open another file to learn that 30.56 s of the meeting
+    /// has no transcript at all.
+    public var sourceCoverage: DerivedSourceCoverage
+    /// The speaker labels the source run uses for an unattributed segment.
+    public var unattributedSpeakers: [String]
+    public var proposals: [SpeakerProposal]
+    public var declined: [SpeakerProposalDeclination]
+    public var batches: [TranslationBatchRecord]
+
+    public init(
+        schemaVersion: String = MaccheroniSchema.version,
+        layer: String = SpeakerProposalDocument.layer,
+        sourceSegmentsSHA256: String,
+        sourceCoverage: DerivedSourceCoverage,
+        unattributedSpeakers: [String] = UnattributedSpeaker.labels,
+        proposals: [SpeakerProposal],
+        declined: [SpeakerProposalDeclination],
+        batches: [TranslationBatchRecord]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.layer = layer
+        self.sourceSegmentsSHA256 = sourceSegmentsSHA256
+        self.sourceCoverage = sourceCoverage
+        self.unattributedSpeakers = unattributedSpeakers
+        self.proposals = proposals
+        self.declined = declined
+        self.batches = batches
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case layer, proposals, declined, batches
+        case schemaVersion = "schema_version"
+        case sourceSegmentsSHA256 = "source_segments_sha256"
+        case sourceCoverage = "source_coverage"
+        case unattributedSpeakers = "unattributed_speakers"
+    }
+}
+
+public struct SpeakerProposalRequest: Sendable {
+    public var document: SegmentsDocument
+    /// Exactly one entry per unattributed segment, from the source run's
+    /// `merged/conflicts.json`.
+    public var evidence: [SegmentSpeakerEvidence]
+    public var sourceSegmentsSHA256: String
+    public var sourceCoverage: DerivedSourceCoverage
+
+    public init(
+        document: SegmentsDocument,
+        evidence: [SegmentSpeakerEvidence],
+        sourceSegmentsSHA256: String,
+        sourceCoverage: DerivedSourceCoverage
+    ) {
+        self.document = document
+        self.evidence = evidence
+        self.sourceSegmentsSHA256 = sourceSegmentsSHA256
+        self.sourceCoverage = sourceCoverage
+    }
+}
+
+public struct SpeakerProposalResult: Equatable, Sendable {
+    public var document: SpeakerProposalDocument
+    public var manifestPostprocess: ManifestPostprocess
+
+    public init(
+        document: SpeakerProposalDocument,
+        manifestPostprocess: ManifestPostprocess
+    ) {
+        self.document = document
+        self.manifestPostprocess = manifestPostprocess
+    }
+}
+
 public struct PostprocessBackendResponse: Equatable, Sendable {
     public var proposals: [PostprocessProposal]
     public var responseUTF8Bytes: Int
@@ -358,6 +573,16 @@ public enum PostprocessError: Error, Equatable, Sendable, LocalizedError {
         maximum: Int
     )
     case backendOutputBudgetExceeded(upperBound: Int, maximum: Int)
+    case noUnattributedSegments
+    case speakerEvidenceMissing(Int)
+    case speakerEvidenceForAttributedSegment(Int)
+    case duplicateSpeakerEvidence(Int)
+    case duplicateSpeakerDecision(Int)
+    case speakerDecisionOutOfRange(Int)
+    case speakerProposalOverridesAssignedSpeaker(segmentIndex: Int, speaker: String)
+    case speakerProposalNotACandidate(segmentIndex: Int, speaker: String)
+    case speakerDeclineNamesSpeaker(segmentIndex: Int, speaker: String)
+    case emptySpeakerProposalReason(Int)
     case backendFailed(String)
     case missingOutput(String)
     case malformedOutput(String)
@@ -382,6 +607,26 @@ public enum PostprocessError: Error, Equatable, Sendable, LocalizedError {
             "segment \(index) has \(bytes) input text bytes and needs an estimated \(estimate) output tokens, above the \(maximum)-token planning budget"
         case let .backendOutputBudgetExceeded(upperBound, maximum):
             "backend output needs a conservative \(upperBound)-token upper bound, above the \(maximum)-token planning budget"
+        case .noUnattributedSegments:
+            "the source run left no segment unattributed, so there is nothing to propose a speaker for"
+        case let .speakerEvidenceMissing(index):
+            "unattributed segment \(index) has no acoustic evidence record"
+        case let .speakerEvidenceForAttributedSegment(index):
+            "segment \(index) already has an acoustic speaker and takes no proposal"
+        case let .duplicateSpeakerEvidence(index):
+            "multiple acoustic evidence records describe segment \(index)"
+        case let .duplicateSpeakerDecision(index):
+            "multiple speaker decisions target segment \(index)"
+        case let .speakerDecisionOutOfRange(index):
+            "speaker decision targets segment \(index), which this batch did not ask about"
+        case let .speakerProposalOverridesAssignedSpeaker(index, speaker):
+            "speaker proposal \(speaker) targets segment \(index), which the acoustics already assigned"
+        case let .speakerProposalNotACandidate(index, speaker):
+            "speaker proposal \(speaker) for segment \(index) is not one of its acoustic candidates"
+        case let .speakerDeclineNamesSpeaker(index, speaker):
+            "declined segment \(index) still names speaker \(speaker)"
+        case let .emptySpeakerProposalReason(index):
+            "the speaker decision for segment \(index) gives no reason"
         case let .backendFailed(message), let .missingOutput(message), let .malformedOutput(message),
              let .launchFailed(message), let .authenticationRequired(message): message
         }
@@ -666,6 +911,266 @@ public struct TranscriptTranslator: Sendable {
     }
 }
 
+/// Proposes a speaker for segments the source run left unattributed, and for
+/// nothing else.
+///
+/// The layering is enforced here rather than trusted: a decision about a
+/// segment that already carries an acoustic speaker is rejected as a contract
+/// violation, not merged. Judgment rule 4 permits this proposal only in a
+/// derived run, marked, beside the acoustic candidates, and this type produces
+/// exactly that and never touches the source document.
+public struct SpeakerProposer: Sendable {
+    public let backend: any SpeakerProposalBackend
+
+    public init(backend: any SpeakerProposalBackend) {
+        self.backend = backend
+    }
+
+    public func propose(
+        _ request: SpeakerProposalRequest
+    ) async throws -> SpeakerProposalResult {
+        guard !request.document.segments.isEmpty else {
+            throw PostprocessError.emptyDocument
+        }
+        guard isSHA256(request.sourceSegmentsSHA256) else {
+            throw PostprocessError.invalidSourceSegmentsSHA256
+        }
+
+        let segments = request.document.segments
+        let unattributed = segments.indices.filter {
+            UnattributedSpeaker.isUnattributed(segments[$0].speaker)
+        }
+        guard !unattributed.isEmpty else {
+            throw PostprocessError.noUnattributedSegments
+        }
+        let targets = Set(unattributed)
+        let knownSpeakers = Set(segments.map(\.speaker))
+            .subtracting(UnattributedSpeaker.labels)
+            .sorted()
+
+        var evidenceByIndex: [Int: SegmentSpeakerEvidence] = [:]
+        for record in request.evidence {
+            guard segments.indices.contains(record.segmentIndex),
+                  targets.contains(record.segmentIndex)
+            else {
+                throw PostprocessError.speakerEvidenceForAttributedSegment(
+                    record.segmentIndex
+                )
+            }
+            guard evidenceByIndex[record.segmentIndex] == nil else {
+                throw PostprocessError.duplicateSpeakerEvidence(record.segmentIndex)
+            }
+            evidenceByIndex[record.segmentIndex] = record
+        }
+        for index in unattributed where evidenceByIndex[index] == nil {
+            throw PostprocessError.speakerEvidenceMissing(index)
+        }
+
+        let batches = try TextBatchPlanner.plan(
+            document: request.document,
+            policy: backend.batchPolicy
+        ) { batchSegments in
+            try SpeakerProposalPrompt.make(
+                segments: batchSegments,
+                document: request.document,
+                targets: targets,
+                evidence: evidenceByIndex,
+                knownSpeakers: knownSpeakers
+            )
+        }
+
+        var decisions: [Int: SpeakerProposalDecision] = [:]
+        var records: [TranslationBatchRecord] = []
+        var batchIndex = 0
+        for batch in batches {
+            let batchTargets = batch.segments.map(\.index).filter(targets.contains)
+            // A batch that asks about nothing is not sent. The model is not
+            // billed for context it cannot answer about, and an empty answer
+            // from it would be indistinguishable from a decline.
+            guard !batchTargets.isEmpty else { continue }
+            let response = try await backend.proposeSpeakers(prompt: batch.prompt)
+            let allowed = Set(batchTargets)
+            var batchDecisions: [SpeakerProposalDecision] = []
+            for decision in response.decisions {
+                guard allowed.contains(decision.segmentIndex) else {
+                    // A decision about an acoustically assigned segment is the
+                    // layering going wrong, so it is named as that rather than
+                    // as an out-of-range index.
+                    if segments.indices.contains(decision.segmentIndex),
+                       !targets.contains(decision.segmentIndex),
+                       decision.disposition == .propose
+                    {
+                        throw PostprocessError
+                            .speakerProposalOverridesAssignedSpeaker(
+                                segmentIndex: decision.segmentIndex,
+                                speaker: decision.proposedSpeaker
+                            )
+                    }
+                    throw PostprocessError.speakerDecisionOutOfRange(
+                        decision.segmentIndex
+                    )
+                }
+                guard decisions[decision.segmentIndex] == nil,
+                      !batchDecisions.contains(where: {
+                          $0.segmentIndex == decision.segmentIndex
+                      })
+                else {
+                    throw PostprocessError.duplicateSpeakerDecision(
+                        decision.segmentIndex
+                    )
+                }
+                try validate(
+                    decision,
+                    evidence: evidenceByIndex[decision.segmentIndex],
+                    knownSpeakers: knownSpeakers
+                )
+                batchDecisions.append(decision)
+            }
+            let outputTextUTF8Bytes = batchDecisions.reduce(0) {
+                saturatingAdd(
+                    saturatingAdd($0, $1.proposedSpeaker.utf8.count),
+                    $1.reason.utf8.count
+                )
+            }
+            guard response.responseUTF8Bytes >= outputTextUTF8Bytes else {
+                throw PostprocessError.malformedOutput(
+                    "backend response byte evidence is smaller than its decoded text"
+                )
+            }
+            let acceptedOutputTokenUpperBound =
+                backend.batchPolicy.acceptedOutputTokenUpperBound(
+                    responseUTF8Bytes: response.responseUTF8Bytes,
+                    segmentCount: batchDecisions.count
+                )
+            guard acceptedOutputTokenUpperBound
+                    <= backend.batchPolicy.outputTokenPlanningBudget
+            else {
+                throw PostprocessError.backendOutputBudgetExceeded(
+                    upperBound: acceptedOutputTokenUpperBound,
+                    maximum: backend.batchPolicy.outputTokenPlanningBudget
+                )
+            }
+            for decision in batchDecisions {
+                decisions[decision.segmentIndex] = decision
+            }
+            records.append(TranslationBatchRecord(
+                batchIndex: batchIndex,
+                segmentIndices: batchTargets,
+                promptUTF8Bytes: batch.promptUTF8Bytes,
+                inputTextUTF8Bytes: batch.inputTextUTF8Bytes,
+                estimatedOutputTokens: batch.estimatedOutputTokens,
+                outputTextUTF8Bytes: outputTextUTF8Bytes,
+                responseUTF8Bytes: response.responseUTF8Bytes,
+                acceptedOutputTokenUpperBound: acceptedOutputTokenUpperBound
+            ))
+            batchIndex += 1
+        }
+
+        var proposals: [SpeakerProposal] = []
+        var declined: [SpeakerProposalDeclination] = []
+        for index in unattributed {
+            // Force-unwrapping is safe: every unattributed index was checked
+            // against `evidenceByIndex` above.
+            let evidence = evidenceByIndex[index]!
+            guard let decision = decisions[index],
+                  decision.disposition == .propose
+            else {
+                declined.append(SpeakerProposalDeclination(
+                    segmentIndex: index,
+                    reason: decisions[index]?.reason
+                        ?? "the proposer returned no decision for this segment",
+                    acousticOutcome: evidence.outcome,
+                    acousticTimelineCoverage: evidence.timelineCoverage,
+                    acousticCandidates: evidence.candidates
+                ))
+                continue
+            }
+            proposals.append(SpeakerProposal(
+                segmentIndex: index,
+                proposedSpeaker: decision.proposedSpeaker,
+                reason: decision.reason,
+                acousticOutcome: evidence.outcome,
+                acousticTimelineCoverage: evidence.timelineCoverage,
+                acousticCandidates: evidence.candidates
+            ))
+        }
+
+        var provenance = backend.manifestPostprocess
+        provenance.glossarySHA256 = nil
+        provenance.mode = .correction
+        provenance.targetLanguage = nil
+        provenance.sourceSegmentsSHA256 = request.sourceSegmentsSHA256
+        provenance.batching = backend.batchPolicy.manifest(
+            batchesPlanned: records.count,
+            maximumObservedPromptUTF8Bytes:
+                records.map(\.promptUTF8Bytes).max() ?? 0,
+            maximumObservedInputTextUTF8Bytes:
+                records.map(\.inputTextUTF8Bytes).max() ?? 0,
+            maximumObservedEstimatedOutputTokens:
+                records.map(\.estimatedOutputTokens).max() ?? 0,
+            maximumObservedOutputTextUTF8Bytes:
+                records.map(\.outputTextUTF8Bytes).max() ?? 0,
+            maximumObservedResponseUTF8Bytes:
+                records.map(\.responseUTF8Bytes).max() ?? 0,
+            maximumObservedAcceptedOutputTokenUpperBound:
+                records.map(\.acceptedOutputTokenUpperBound).max() ?? 0
+        )
+        return SpeakerProposalResult(
+            document: SpeakerProposalDocument(
+                sourceSegmentsSHA256: request.sourceSegmentsSHA256,
+                sourceCoverage: request.sourceCoverage,
+                proposals: proposals,
+                declined: declined,
+                batches: records
+            ),
+            manifestPostprocess: provenance
+        )
+    }
+
+    private func validate(
+        _ decision: SpeakerProposalDecision,
+        evidence: SegmentSpeakerEvidence?,
+        knownSpeakers: [String]
+    ) throws {
+        guard !decision.reason.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ).isEmpty else {
+            throw PostprocessError.emptySpeakerProposalReason(decision.segmentIndex)
+        }
+        switch decision.disposition {
+        case .decline:
+            guard decision.proposedSpeaker.isEmpty else {
+                throw PostprocessError.speakerDeclineNamesSpeaker(
+                    segmentIndex: decision.segmentIndex,
+                    speaker: decision.proposedSpeaker
+                )
+            }
+        case .propose:
+            // A proposal may only name a speaker the acoustics already put in
+            // play for this segment. Where the acoustics named nobody at all,
+            // it may name any speaker the run itself resolved, and no other:
+            // this layer proposes who spoke, it never invents a speaker.
+            let allowed = evidence.map { record in
+                record.candidates.isEmpty
+                    ? Set(knownSpeakers)
+                    : Set(record.candidates.map(\.speaker))
+            } ?? Set(knownSpeakers)
+            guard allowed.contains(decision.proposedSpeaker) else {
+                throw PostprocessError.speakerProposalNotACandidate(
+                    segmentIndex: decision.segmentIndex,
+                    speaker: decision.proposedSpeaker
+                )
+            }
+        }
+    }
+
+    private func isSHA256(_ value: String) -> Bool {
+        value.count == 64 && value.unicodeScalars.allSatisfy {
+            (48 ... 57).contains($0.value) || (97 ... 102).contains($0.value)
+        }
+    }
+}
+
 private struct IndexedTextSegment: Sendable {
     var index: Int
     var text: String
@@ -904,6 +1409,115 @@ public enum TranslationPrompt {
             {"translations":[{"segment_index":0,"translated_text":"complete translated segment text"}]}
             The only root key is translations. Every translation has exactly segment_index and translated_text. Return exactly one nonempty translation for every input segment without merging, splitting, reordering, or omitting indices.
             """,
+            input: input
+        )
+    }
+}
+
+public enum SpeakerProposalPrompt {
+    private struct Input: Codable {
+        struct CandidateInput: Codable {
+            var speaker: String
+            var overlapS: Double
+            var share: Double
+
+            enum CodingKeys: String, CodingKey {
+                case speaker, share
+                case overlapS = "overlap_s"
+            }
+        }
+
+        struct SegmentInput: Codable {
+            var segmentIndex: Int
+            var target: Bool
+            var text: String
+            var speaker: String?
+            var acousticOutcome: String?
+            var acousticCandidates: [CandidateInput]?
+
+            enum CodingKeys: String, CodingKey {
+                case target, text, speaker
+                case segmentIndex = "segment_index"
+                case acousticOutcome = "acoustic_outcome"
+                case acousticCandidates = "acoustic_candidates"
+            }
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(segmentIndex, forKey: .segmentIndex)
+                try container.encode(target, forKey: .target)
+                try container.encode(text, forKey: .text)
+                try container.encodeIfPresent(speaker, forKey: .speaker)
+                try container.encodeIfPresent(
+                    acousticOutcome,
+                    forKey: .acousticOutcome
+                )
+                try container.encodeIfPresent(
+                    acousticCandidates,
+                    forKey: .acousticCandidates
+                )
+            }
+        }
+
+        var knownSpeakers: [String]
+        var segments: [SegmentInput]
+
+        enum CodingKeys: String, CodingKey {
+            case segments
+            case knownSpeakers = "known_speakers"
+        }
+    }
+
+    /// Shares and overlaps are rounded for the prompt only. Three decimals is
+    /// past any distinction this decision turns on, and it saves prompt bytes
+    /// on every candidate; the artifact keeps the merger's unrounded values.
+    private static func rounded(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return (value * 1_000).rounded() / 1_000
+    }
+
+    fileprivate static func make(
+        segments: [IndexedTextSegment],
+        document: SegmentsDocument,
+        targets: Set<Int>,
+        evidence: [Int: SegmentSpeakerEvidence],
+        knownSpeakers: [String]
+    ) throws -> String {
+        let input = Input(
+            knownSpeakers: knownSpeakers,
+            segments: segments.map { segment in
+                let isTarget = targets.contains(segment.index)
+                let record = isTarget ? evidence[segment.index] : nil
+                return Input.SegmentInput(
+                    segmentIndex: segment.index,
+                    target: isTarget,
+                    text: segment.text,
+                    speaker: isTarget
+                        ? nil
+                        : document.segments[segment.index].speaker,
+                    acousticOutcome: record?.outcome,
+                    acousticCandidates: record?.candidates.map {
+                        Input.CandidateInput(
+                            speaker: $0.speaker,
+                            overlapS: rounded($0.overlapS),
+                            share: rounded($0.share)
+                        )
+                    }
+                )
+            }
+        )
+        let instruction = [
+            "Propose which speaker spoke each target segment of this meeting transcript. This is a proposal for human review. The acoustic speaker assignment is authoritative and your answer never changes it.",
+            "Only segments with target true are open. Segments with target false already have an acoustic speaker; they are context and you must not answer for them.",
+            "acoustic_candidates lists the speakers whose diarization turns overlapped a target segment, how many seconds each held, and each one's share of the segment's attributed time. A share near 0.5 means the acoustics could not choose between them. What you add is the conversation: who was answering whom, who was mid-sentence, who the surrounding turns belong to.",
+            "When a target segment has a nonempty acoustic_candidates list, proposed_speaker must be one of those candidate speakers. When it is empty, proposed_speaker must be one of known_speakers. Never name a speaker outside those sets and never invent one.",
+            "Use decline whenever the surrounding text gives no real reason to prefer one candidate over another. A decline is a correct answer; a guess dressed as a proposal is not.",
+            "Return exactly one JSON object with this shape and no commentary:",
+            #"{"speaker_proposals":[{"segment_index":0,"proposed_speaker":"0","disposition":"propose","reason":"brief reason"}]}"#,
+            #"The only root key is speaker_proposals. Every entry has exactly segment_index, proposed_speaker, disposition, and reason. disposition is propose or decline. When disposition is decline, proposed_speaker must be the empty string. Answer exactly once for every segment whose target is true, and for no other segment."#,
+        ]
+        return try prompt(
+            instruction: instruction.joined(separator: "\n"),
             input: input
         )
     }

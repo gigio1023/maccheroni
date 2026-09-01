@@ -40,6 +40,370 @@ import Testing
         )
     }
 
+    // MARK: - Marked non-acoustic speaker proposal
+
+    private static let sourceHash = String(repeating: "a", count: 64)
+
+    /// Two speakers hold segment 1 in an exact tie and segment 3 has no
+    /// diarization turn at all; segments 0 and 2 are acoustically assigned.
+    private func speakerProposalDocument() -> SegmentsDocument {
+        SegmentsDocument(
+            segments: [
+                Segment(speaker: "0", startS: 0, endS: 2, text: "그래서 이거 언제까지죠"),
+                Segment(speaker: "UNKNOWN", startS: 2, endS: 4, text: "다음 주 금요일이요"),
+                Segment(speaker: "1", startS: 4, endS: 6, text: "알겠습니다"),
+                Segment(speaker: "UNASSIGNED", startS: 6, endS: 8, text: "네"),
+            ],
+            numSpeakers: 2,
+            source: SourceAudio(
+                fileName: "meeting.m4a",
+                sha256: String(repeating: "b", count: 64),
+                durationS: 8
+            )
+        )
+    }
+
+    private func speakerProposalEvidence() -> [SegmentSpeakerEvidence] {
+        [
+            SegmentSpeakerEvidence(
+                segmentIndex: 1,
+                outcome: "no_dominant_speaker",
+                candidates: [
+                    SpeakerCandidateEvidence(
+                        speaker: "0",
+                        overlapS: 1.0000000000000002,
+                        share: 0.5000000000000001
+                    ),
+                    SpeakerCandidateEvidence(
+                        speaker: "1",
+                        overlapS: 0.9999999999999998,
+                        share: 0.4999999999999999
+                    ),
+                ],
+                timelineCoverage: 0.97
+            ),
+            SegmentSpeakerEvidence(
+                segmentIndex: 3,
+                outcome: "no_overlapping_turn",
+                candidates: [],
+                timelineCoverage: 0
+            ),
+        ]
+    }
+
+    /// A source that lost 0.5 s of its 8 s, so the incompleteness has to reach
+    /// the artifact rather than only the manifest.
+    private func speakerProposalCoverage() -> DerivedSourceCoverage {
+        DerivedSourceCoverage(
+            complete: false,
+            inputDurationS: 8,
+            processedDurationS: 7.5,
+            message: "1 range(s) produced no transcript: [4.0, 4.5) s"
+        )
+    }
+
+    private func speakerProposalRequest() -> SpeakerProposalRequest {
+        SpeakerProposalRequest(
+            document: speakerProposalDocument(),
+            evidence: speakerProposalEvidence(),
+            sourceSegmentsSHA256: Self.sourceHash,
+            sourceCoverage: speakerProposalCoverage()
+        )
+    }
+
+    @Test
+    func aSpeakerProposalCarriesTheAcousticCandidatesItCouldNotSettle() async throws {
+        let result = try await SpeakerProposer(
+            backend: StubSpeakerProposalBackend(decisions: [
+                SpeakerProposalDecision(
+                    segmentIndex: 1,
+                    proposedSpeaker: "0",
+                    disposition: .propose,
+                    reason: "answers the question the same speaker asked"
+                ),
+                SpeakerProposalDecision(
+                    segmentIndex: 3,
+                    proposedSpeaker: "",
+                    disposition: .decline,
+                    reason: "a bare acknowledgement either speaker could give"
+                ),
+            ])
+        ).propose(speakerProposalRequest())
+
+        #expect(result.document.layer == "speaker-proposal")
+        #expect(result.document.sourceSegmentsSHA256 == Self.sourceHash)
+        #expect(result.document.proposals.map(\.segmentIndex) == [1])
+        #expect(result.document.declined.map(\.segmentIndex) == [3])
+        let proposal = try #require(result.document.proposals.first)
+        #expect(proposal.proposedSpeaker == "0")
+        #expect(proposal.acousticOutcome == "no_dominant_speaker")
+        // The shares travel unrounded: what the merger computed is what the
+        // reader sees beside the proposal.
+        #expect(proposal.acousticCandidates == speakerProposalEvidence()[0].candidates)
+        #expect(proposal.acousticTimelineCoverage == 0.97)
+        #expect(result.document.declined[0].acousticOutcome == "no_overlapping_turn")
+        #expect(result.document.declined[0].acousticCandidates.isEmpty)
+        // The source's incompleteness is stated in the artifact that carries
+        // the proposals, not only in the manifest beside it.
+        #expect(result.document.sourceCoverage == speakerProposalCoverage())
+        #expect(result.document.sourceCoverage.missingDurationS == 0.5)
+        #expect(result.document.sourceCoverage.message?.isEmpty == false)
+        #expect(result.manifestPostprocess.sourceSegmentsSHA256 == Self.sourceHash)
+        #expect(result.manifestPostprocess.inputMode == .textOnly)
+        #expect(result.manifestPostprocess.batching?.batchesPlanned == 1)
+    }
+
+    @Test
+    func aProposalNeverLandsOnAnAcousticallyAssignedSegment() async throws {
+        // Segment 2 already has speaker "1"; a decision about it is the
+        // layering going wrong, not a merge conflict to resolve.
+        await #expect(throws: PostprocessError.speakerProposalOverridesAssignedSpeaker(
+            segmentIndex: 2,
+            speaker: "0"
+        )) {
+            _ = try await SpeakerProposer(
+                backend: StubSpeakerProposalBackend(decisions: [
+                    SpeakerProposalDecision(
+                        segmentIndex: 2,
+                        proposedSpeaker: "0",
+                        disposition: .propose,
+                        reason: "should never be accepted"
+                    ),
+                ])
+            ).propose(self.speakerProposalRequest())
+        }
+    }
+
+    @Test
+    func aProposalNamesOnlyASpeakerTheAcousticsPutInPlay() async throws {
+        await #expect(throws: PostprocessError.speakerProposalNotACandidate(
+            segmentIndex: 1,
+            speaker: "7"
+        )) {
+            _ = try await SpeakerProposer(
+                backend: StubSpeakerProposalBackend(decisions: [
+                    SpeakerProposalDecision(
+                        segmentIndex: 1,
+                        proposedSpeaker: "7",
+                        disposition: .propose,
+                        reason: "a speaker no turn ever held"
+                    ),
+                ])
+            ).propose(self.speakerProposalRequest())
+        }
+    }
+
+    @Test
+    func aSegmentWithNoOverlappingTurnMayTakeAnySpeakerTheRunResolved() async throws {
+        let result = try await SpeakerProposer(
+            backend: StubSpeakerProposalBackend(decisions: [
+                SpeakerProposalDecision(
+                    segmentIndex: 3,
+                    proposedSpeaker: "1",
+                    disposition: .propose,
+                    reason: "continues the same speaker's turn"
+                ),
+            ])
+        ).propose(speakerProposalRequest())
+        #expect(result.document.proposals.map(\.segmentIndex) == [3])
+        #expect(result.document.declined.map(\.segmentIndex) == [1])
+
+        // ...and no speaker the run never resolved.
+        await #expect(throws: PostprocessError.speakerProposalNotACandidate(
+            segmentIndex: 3,
+            speaker: "9"
+        )) {
+            _ = try await SpeakerProposer(
+                backend: StubSpeakerProposalBackend(decisions: [
+                    SpeakerProposalDecision(
+                        segmentIndex: 3,
+                        proposedSpeaker: "9",
+                        disposition: .propose,
+                        reason: "invented"
+                    ),
+                ])
+            ).propose(self.speakerProposalRequest())
+        }
+    }
+
+    @Test
+    func aDeclineMayNotSmuggleASpeakerAndAReasonIsAlwaysRequired() async throws {
+        await #expect(throws: PostprocessError.speakerDeclineNamesSpeaker(
+            segmentIndex: 1,
+            speaker: "0"
+        )) {
+            _ = try await SpeakerProposer(
+                backend: StubSpeakerProposalBackend(decisions: [
+                    SpeakerProposalDecision(
+                        segmentIndex: 1,
+                        proposedSpeaker: "0",
+                        disposition: .decline,
+                        reason: "declined but still naming someone"
+                    ),
+                ])
+            ).propose(self.speakerProposalRequest())
+        }
+        await #expect(throws: PostprocessError.emptySpeakerProposalReason(1)) {
+            _ = try await SpeakerProposer(
+                backend: StubSpeakerProposalBackend(decisions: [
+                    SpeakerProposalDecision(
+                        segmentIndex: 1,
+                        proposedSpeaker: "0",
+                        disposition: .propose,
+                        reason: "   "
+                    ),
+                ])
+            ).propose(self.speakerProposalRequest())
+        }
+    }
+
+    @Test
+    func aSilentProposerLeavesTheArtifactHonestRatherThanEmpty() async throws {
+        let result = try await SpeakerProposer(
+            backend: StubSpeakerProposalBackend(decisions: [])
+        ).propose(speakerProposalRequest())
+        #expect(result.document.proposals.isEmpty)
+        #expect(result.document.declined.map(\.segmentIndex) == [1, 3])
+        // Every unattributed segment is still accounted for, with what the
+        // acoustics held and a stated reason.
+        #expect(result.document.declined.allSatisfy { !$0.reason.isEmpty })
+        #expect(result.document.declined[0].acousticCandidates.count == 2)
+    }
+
+    @Test
+    func aRunWithNothingUnattributedHasNothingToPropose() async throws {
+        var document = speakerProposalDocument()
+        document.segments[1].speaker = "0"
+        document.segments[3].speaker = "1"
+        await #expect(throws: PostprocessError.noUnattributedSegments) {
+            _ = try await SpeakerProposer(
+                backend: StubSpeakerProposalBackend(decisions: [])
+            ).propose(SpeakerProposalRequest(
+                document: document,
+                evidence: [],
+                sourceSegmentsSHA256: Self.sourceHash,
+                sourceCoverage: self.speakerProposalCoverage()
+            ))
+        }
+    }
+
+    @Test
+    func everyUnattributedSegmentNeedsItsAcousticRecordBeforeAnyProposalRuns() async throws {
+        await #expect(throws: PostprocessError.speakerEvidenceMissing(3)) {
+            _ = try await SpeakerProposer(
+                backend: StubSpeakerProposalBackend(decisions: [])
+            ).propose(SpeakerProposalRequest(
+                document: self.speakerProposalDocument(),
+                evidence: [self.speakerProposalEvidence()[0]],
+                sourceSegmentsSHA256: Self.sourceHash,
+                sourceCoverage: self.speakerProposalCoverage()
+            ))
+        }
+        await #expect(throws: PostprocessError.speakerEvidenceForAttributedSegment(0)) {
+            _ = try await SpeakerProposer(
+                backend: StubSpeakerProposalBackend(decisions: [])
+            ).propose(SpeakerProposalRequest(
+                document: self.speakerProposalDocument(),
+                evidence: self.speakerProposalEvidence() + [
+                    SegmentSpeakerEvidence(
+                        segmentIndex: 0,
+                        outcome: "attributed",
+                        candidates: [],
+                        timelineCoverage: 1
+                    ),
+                ],
+                sourceSegmentsSHA256: Self.sourceHash,
+                sourceCoverage: self.speakerProposalCoverage()
+            ))
+        }
+    }
+
+    @Test
+    func theSpeakerPromptMarksTargetsAndShowsTheSharesThatDidNotDecide() async throws {
+        let recorder = SpeakerPromptRecorder()
+        _ = try await SpeakerProposer(
+            backend: StubSpeakerProposalBackend(decisions: [], recorder: recorder)
+        ).propose(speakerProposalRequest())
+        let prompt = try #require(recorder.prompts.first)
+        let parts = try correctionPromptParts(prompt)
+
+        #expect(parts.instruction.contains("proposal for human review"))
+        #expect(parts.instruction.contains("never changes it"))
+        #expect(parts.instruction.contains("A decline is a correct answer"))
+        #expect(parts.input["known_speakers"] as? [String] == ["0", "1"])
+        let segments = try #require(parts.input["segments"] as? [[String: Any]])
+        #expect(segments.count == 4)
+        #expect(segments.map { $0["target"] as? Bool } == [false, true, false, true])
+        // Context segments carry their acoustic speaker and no candidate list;
+        // targets carry the candidates and no speaker.
+        #expect(segments[0]["speaker"] as? String == "0")
+        #expect(segments[0]["acoustic_candidates"] == nil)
+        #expect(segments[1]["speaker"] == nil)
+        let candidates = try #require(
+            segments[1]["acoustic_candidates"] as? [[String: Any]]
+        )
+        #expect(candidates.map { $0["speaker"] as? String } == ["0", "1"])
+        #expect(candidates.map { $0["share"] as? Double } == [0.5, 0.5])
+        #expect(segments[1]["acoustic_outcome"] as? String == "no_dominant_speaker")
+        // No timing, and no speaker for a target: the proposer is given text
+        // and shares, never the acoustic decision it is meant to complement.
+        #expect(segments[1]["start_s"] == nil)
+        #expect(segments[1]["end_s"] == nil)
+    }
+
+    @Test
+    func speakerProposalOutputMustBeExactlyItsSchema() async throws {
+        func backend(_ payload: String) -> LocalPostprocessBackend {
+            LocalPostprocessBackend(
+                runtime: LocalPostprocessRuntime(
+                    pythonExecutableURL: URL(fileURLWithPath: "/tests/python"),
+                    runnerURL: URL(fileURLWithPath: "/tests/runner.py"),
+                    modelSnapshotURL: URL(fileURLWithPath: "/tests/model")
+                ),
+                executor: MockExecutor(output: Data(payload.utf8))
+            )
+        }
+        for payload in [
+            #"{"speaker_proposals":[],"extra":1}"#,
+            #"{"proposals":[]}"#,
+            #"{"speaker_proposals":[{"segment_index":0,"proposed_speaker":"0","disposition":"propose"}]}"#,
+            #"{"speaker_proposals":[{"segment_index":0,"proposed_speaker":"0","disposition":"propose","reason":"r","extra":1}]}"#,
+        ] {
+            await #expect(throws: PostprocessError.self) {
+                _ = try await backend(payload).proposeSpeakers(prompt: "x")
+            }
+        }
+        let accepted = try await backend(
+            #"{"speaker_proposals":[{"segment_index":0,"proposed_speaker":"","disposition":"decline","reason":"r"}]}"#
+        ).proposeSpeakers(prompt: "x")
+        #expect(accepted.decisions == [SpeakerProposalDecision(
+            segmentIndex: 0,
+            proposedSpeaker: "",
+            disposition: .decline,
+            reason: "r"
+        )])
+    }
+
+    @Test
+    func theLocalRunnerIsAskedForTheSpeakerProposalMode() async throws {
+        let recorder = InvocationRecorder()
+        let backend = LocalPostprocessBackend(
+            runtime: LocalPostprocessRuntime(
+                pythonExecutableURL: URL(fileURLWithPath: "/tests/python"),
+                runnerURL: URL(fileURLWithPath: "/tests/runner.py"),
+                modelSnapshotURL: URL(fileURLWithPath: "/tests/model")
+            ),
+            executor: MockExecutor(
+                recorder: recorder,
+                output: Data(#"{"speaker_proposals":[]}"#.utf8)
+            )
+        )
+        _ = try await backend.proposeSpeakers(prompt: "x")
+        let invocation = try #require(recorder.invocations.first)
+        #expect(invocation.arguments.contains("speaker-proposal"))
+        #expect(invocation.environment["HF_HUB_OFFLINE"] == "1")
+    }
+
     private func expectRegularPackagedFile(_ url: URL) throws {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         #expect(attributes[.type] as? FileAttributeType == .typeRegular)
@@ -1292,6 +1656,60 @@ import Testing
             ofItemAtPath: url.path
         )
         return url
+    }
+}
+
+private final class SpeakerPromptRecorder: @unchecked Sendable {
+    var prompts: [String] = []
+}
+
+/// A proposer whose answers are scripted, so the layering rules can be probed
+/// without a model.
+private struct StubSpeakerProposalBackend: SpeakerProposalBackend {
+    var decisions: [SpeakerProposalDecision]
+    var recorder: SpeakerPromptRecorder?
+    var responseUTF8BytesOverride: Int?
+
+    var id: PostprocessBackendID { .local }
+    var manifestPostprocess: ManifestPostprocess {
+        ManifestPostprocess(
+            backend: BackendDescriptor(name: "speaker-stub", version: "1"),
+            modelID: "speaker-stub"
+        )
+    }
+    var model: ModelDescriptor? { nil }
+    var batchPolicy: PostprocessBatchPolicy {
+        PostprocessBatchPolicy(
+            maximumPromptUTF8Bytes: 1_000_000,
+            maximumSegmentsPerBatch: 1_000,
+            maximumOutputTokens: 1_024,
+            outputTokenLimitStatus: .configured,
+            outputTokenPlanningBudget: 1_024,
+            outputTokensPerInputUTF8BytePermille: 1,
+            baseOutputTokenReserve: 0,
+            perSegmentOutputTokenReserve: 0
+        )
+    }
+
+    func proposeSpeakers(
+        prompt: String
+    ) async throws -> SpeakerProposalBackendResponse {
+        recorder?.prompts.append(prompt)
+        let data = try JSONEncoder().encode(
+            SpeakerProposalTestEnvelope(speakerProposals: decisions)
+        )
+        return SpeakerProposalBackendResponse(
+            decisions: decisions,
+            responseUTF8Bytes: responseUTF8BytesOverride ?? data.count
+        )
+    }
+}
+
+private struct SpeakerProposalTestEnvelope: Codable {
+    var speakerProposals: [SpeakerProposalDecision]
+
+    enum CodingKeys: String, CodingKey {
+        case speakerProposals = "speaker_proposals"
     }
 }
 

@@ -482,6 +482,263 @@ import Testing
         #expect(try JSONDecoder().decode(DerivedManifest.self, from: data) == manifest)
     }
 
+    // MARK: - Derived operation kind and the merged-source gate
+
+    @Test func aDerivedOperationWrittenBeforeTheKindFieldReadsAsATextOperation() throws {
+        let legacy = Data(#"""
+        {"profile_name":"ko-meeting","mode":"correction","target_language":null,
+         "glossary_semantics":"current-profile","glossary_sha256":null,
+         "glossary_item_count":0}
+        """#.utf8)
+        let decoded = try JSONDecoder().decode(DerivedOperation.self, from: legacy)
+        #expect(decoded.kind == .textPostprocess)
+        #expect(decoded.sourceCoverageComplete)
+
+        let proposal = DerivedOperation(
+            profileName: "ko-meeting",
+            mode: .correction,
+            glossarySemantics: .currentProfile,
+            glossaryItemCount: 0,
+            kind: .speakerProposal,
+            sourceCoverage: DerivedSourceCoverage(
+                complete: false,
+                inputDurationS: 1_243.08,
+                processedDurationS: 1_212.52,
+                message: "1 range(s) produced no transcript: [871.552, 902.112) s"
+            )
+        )
+        let object = try #require(JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(proposal)
+        ) as? [String: Any])
+        #expect(object["kind"] as? String == "speaker-proposal")
+        // The bare flag stays, so a skim cannot miss it, and the durations sit
+        // beside it so the reader knows how much of the meeting is missing.
+        #expect(object["source_coverage_complete"] as? Bool == false)
+        let coverage = try #require(object["source_coverage"] as? [String: Any])
+        #expect(coverage["complete"] as? Bool == false)
+        #expect(coverage["input_duration_s"] as? Double == 1_243.08)
+        #expect(coverage["processed_duration_s"] as? Double == 1_212.52)
+        #expect(
+            abs((coverage["missing_duration_s"] as? Double ?? 0) - 30.56) < 0.001
+        )
+        #expect((coverage["message"] as? String)?.contains("871.552") == true)
+        #expect(try JSONDecoder().decode(
+            DerivedOperation.self,
+            from: try JSONEncoder().encode(proposal)
+        ) == proposal)
+    }
+
+    /// Build a run directory that passes every integrity check, then let the
+    /// caller decide whether its coverage is complete.
+    private func writeRunFixture(
+        at root: URL,
+        runID: String,
+        status: RunStatus,
+        truncated: Bool,
+        processedDurationS: Double,
+        failure: Failure?
+    ) throws -> URL {
+        let run = root.appendingPathComponent(runID, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: run,
+            withIntermediateDirectories: true
+        )
+        let inputHash = String(repeating: "c", count: 64)
+        let document = SegmentsDocument(
+            segments: [
+                Segment(speaker: "0", startS: 0, endS: 1, text: "one"),
+                Segment(speaker: "UNKNOWN", startS: 1, endS: 2, text: "two"),
+            ],
+            numSpeakers: 1,
+            source: SourceAudio(
+                fileName: "meeting.wav",
+                sha256: inputHash,
+                durationS: 2
+            )
+        )
+        var files: [(kind: String, path: String, data: Data)] = [
+            ("primary_raw", "primary/raw.txt", Data("one\ntwo\n".utf8)),
+            (
+                "primary_segments",
+                "primary/segments.json",
+                try JSONEncoder().encode(document)
+            ),
+            (
+                "diarization_timeline",
+                "diarization/timeline.json",
+                try JSONEncoder().encode(Timeline(segments: [
+                    TimelineSegment(speaker: "0", startS: 0, endS: 1),
+                ]))
+            ),
+            (
+                "merged_segments",
+                "merged/segments.json",
+                try JSONEncoder().encode(document)
+            ),
+            ("merged_conflicts", "merged/conflicts.json", Data("[]".utf8)),
+        ]
+        var artifacts: [Artifact] = []
+        for file in files {
+            let url = run.appendingPathComponent(file.path)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try file.data.write(to: url)
+            artifacts.append(Artifact(
+                kind: file.kind,
+                path: file.path,
+                sha256: try RunIntegrityVerifier.sha256(of: url)
+            ))
+        }
+        files.removeAll()
+        let manifest = Manifest(
+            runID: runID,
+            status: status,
+            input: InputAudio(
+                fileName: "meeting.wav",
+                sha256: inputHash,
+                sizeBytes: 1_024
+            ),
+            backend: BackendDescriptor(name: "fixture", version: "1"),
+            models: [ModelDescriptor(
+                role: .asr,
+                hfModelID: "fixture/model",
+                revision: String(repeating: "d", count: 40),
+                quantization: "int8"
+            )],
+            glossary: .absent,
+            preprocessing: PreprocessingConfiguration(
+                sampleRateHz: 16_000,
+                channels: 1,
+                peakNormalization: true,
+                vad: ProcessingSwitch(enabled: true, backend: "silero"),
+                enhancement: ProcessingSwitch(enabled: false, backend: nil)
+            ),
+            coverage: Coverage(
+                inputDurationS: 2,
+                processedDurationS: processedDurationS,
+                truncated: truncated,
+                strategy: truncated ? .backendTruncated : .full,
+                chunksPlanned: processedDurationS > 0 ? 1 : 0,
+                chunksCompleted: processedDurationS > 0 ? 1 : 0
+            ),
+            chunkBoundaries: processedDurationS > 0
+                ? [ChunkBoundary(
+                    index: 0,
+                    startS: 0,
+                    endS: processedDurationS,
+                    status: .succeeded
+                )]
+                : [],
+            timing: RunTiming(
+                startedAt: "2026-09-02T12:00:00Z",
+                finishedAt: "2026-09-02T12:00:01Z",
+                wallTimeS: 1
+            ),
+            artifacts: artifacts,
+            failure: failure
+        )
+        try JSONEncoder().encode(manifest).write(
+            to: run.appendingPathComponent("manifest.json")
+        )
+        return run
+    }
+
+    @Test func aPartialRunIsADerivableMergedSourceButNotACompletedRun() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "MaccheroniCoreMergedSource-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let complete = try writeRunFixture(
+            at: root,
+            runID: "complete",
+            status: .succeeded,
+            truncated: false,
+            processedDurationS: 2,
+            failure: nil
+        )
+        #expect(try RunIntegrityVerifier
+            .verifyCompletedRun(at: complete).coverageIsComplete)
+        #expect(try RunIntegrityVerifier
+            .verifyMergedRun(at: complete).coverageIsComplete)
+
+        let partial = try writeRunFixture(
+            at: root,
+            runID: "partial",
+            status: .partial,
+            truncated: true,
+            processedDurationS: 1.5,
+            failure: Failure(
+                code: "ASR_REPETITION_DEGENERATION",
+                message: "one range produced no transcript"
+            )
+        )
+        #expect(throws: RunIntegrityError.sourceRunNotComplete) {
+            _ = try RunIntegrityVerifier.verifyCompletedRun(at: partial)
+        }
+        let merged = try RunIntegrityVerifier.verifyMergedRun(at: partial)
+        #expect(!merged.coverageIsComplete)
+        #expect(merged.lineage.segmentsPath == "merged/segments.json")
+        #expect(merged.document.segments.count == 2)
+
+        // Dropping the coverage gate drops nothing else: a tampered artifact
+        // is still refused on the relaxed path.
+        try Data("[{}]".utf8).write(
+            to: partial.appendingPathComponent("merged/conflicts.json")
+        )
+        #expect(throws: RunIntegrityError.artifactHashMismatch(
+            "merged/conflicts.json"
+        )) {
+            _ = try RunIntegrityVerifier.verifyMergedRun(at: partial)
+        }
+    }
+
+    @Test func aFailedRunIsNeverADerivableMergedSource() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "MaccheroniCoreFailedSource-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for status in [RunStatus.failed, .canceled] {
+            let run = try writeRunFixture(
+                at: root,
+                runID: "run-\(status.rawValue)",
+                status: status,
+                truncated: true,
+                processedDurationS: 1,
+                failure: Failure(code: "RUN_ERROR", message: "stopped")
+            )
+            #expect(throws: RunIntegrityError.sourceRunNotComplete) {
+                _ = try RunIntegrityVerifier.verifyMergedRun(at: run)
+            }
+        }
+
+        // Nor is a run that promoted nothing at all.
+        let empty = try writeRunFixture(
+            at: root,
+            runID: "run-empty",
+            status: .partial,
+            truncated: true,
+            processedDurationS: 0,
+            failure: Failure(code: "RUN_ERROR", message: "nothing promoted")
+        )
+        #expect(throws: RunIntegrityError.sourceRunNotComplete) {
+            _ = try RunIntegrityVerifier.verifyMergedRun(at: empty)
+        }
+    }
+
     @Test func completedRunVerifierRejectsTypedIntegrityFailures() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "MaccheroniCoreIntegrity-\(UUID().uuidString)",

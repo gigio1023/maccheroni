@@ -41,6 +41,23 @@ MOSS_DEFAULT_INSTRUCTION = (
     "并在段末标注结束时间戳，以清晰标明该段语音范围。"
 )
 
+# Repetition-degeneration detection for the VibeVoice path.  A collapsed
+# decoder stops producing new content and repeats one token or short phrase
+# until the output cap, so the signal is the length of the longest run of
+# consecutive identical units rather than the generated-token count.  The
+# threshold carries headroom over the worst run observed inside an accepted
+# end-of-sequence transcript; see the VibeVoice section of
+# docs/engineering-constraint-policy.md.
+VIBEVOICE_REPETITION_RUN_THRESHOLD = 12
+# A runaway does not always cycle a single token.  A measured collapse cycled a
+# five-unit phrase 333 times, which a four-unit window scores as 2 and misses
+# entirely.  Eight is the widest window validated against every accepted
+# payload: across 16 accepted and 13 collapsed payloads the worst run inside an
+# accepted transcript is 6 at any width up to 8, and the smallest run inside a
+# collapsed one is 339.
+VIBEVOICE_REPETITION_PHRASE_UNITS = 8
+VIBEVOICE_REPETITION_UNIT = re.compile(r"[^\s,.!?;:~…·。，、！？]+")
+
 
 @dataclass(frozen=True)
 class ModelSpec:
@@ -646,6 +663,146 @@ def validate_moss_eos_structure(
     return None, segments
 
 
+def repetition_units(text: Any) -> list[str]:
+    """Split transcript text into the units repetition is measured over."""
+    if not isinstance(text, str):
+        return []
+    return VIBEVOICE_REPETITION_UNIT.findall(text)
+
+
+def repetition_run_length(text: Any, *, phrase_units: int = VIBEVOICE_REPETITION_PHRASE_UNITS) -> int:
+    """Longest run of consecutive identical 1..``phrase_units``-grams.
+
+    A healthy transcript repeats a word two or three times; a collapsed
+    decoder repeats one unit or a short phrase for the rest of the
+    generation.  Counting repeats rather than a frequency share keeps a long
+    passage that happens to reuse a common word from scoring as degenerate.
+    """
+    units = repetition_units(text)
+    total = len(units)
+    if total == 0:
+        return 0
+    longest = 1
+    for width in range(1, max(1, phrase_units) + 1):
+        if total < 2 * width:
+            break
+        index = 0
+        while index + width <= total:
+            cursor, repeats = index, 1
+            while (
+                cursor + 2 * width <= total
+                and units[cursor:cursor + width] == units[cursor + width:cursor + 2 * width]
+            ):
+                repeats += 1
+                cursor += width
+            longest = max(longest, repeats)
+            index = cursor + width
+    return longest
+
+
+def is_repetition_degenerate(text: Any) -> bool:
+    return repetition_run_length(text) >= VIBEVOICE_REPETITION_RUN_THRESHOLD
+
+
+def decode_leading_transcript_objects(text: Any) -> tuple[list[tuple[dict[str, Any], int]], str]:
+    """Incrementally decode the leading complete objects of a JSON array in string form.
+
+    VibeVoice emits its transcript into the payload ``text`` field as a JSON
+    array of objects.  When generation collapses, the array is never closed,
+    ``mlx-audio`` cannot parse it, and the payload ``segments`` list arrives
+    empty even though the leading objects are complete and correct.  This
+    returns each complete object with the offset just past it, plus the
+    trailing text that could not be decoded.
+    """
+    if not isinstance(text, str):
+        return [], ""
+    decoder = json.JSONDecoder()
+    index, total = 0, len(text)
+    while index < total and text[index] in " \t\r\n":
+        index += 1
+    if index < total and text[index] == "[":
+        index += 1
+    decoded: list[tuple[dict[str, Any], int]] = []
+    while True:
+        while index < total and text[index] in " \t\r\n,":
+            index += 1
+        if index >= total or text[index] != "{":
+            break
+        try:
+            item, end = decoder.raw_decode(text, index)
+        except ValueError:
+            break
+        if not isinstance(item, dict):
+            break
+        decoded.append((item, end))
+        index = end
+    return decoded, text[index:]
+
+
+def recover_vibevoice_prefix(raw_text: Any, duration: float) -> dict[str, Any]:
+    """Recover the leading valid transcript prefix from a VibeVoice payload.
+
+    Degeneration is intermittent before it is terminal: a collapsed passage
+    can be followed by correct output.  Stopping at the first repeated run
+    would therefore discard recoverable transcript, so only trailing
+    degenerate objects are dropped and an interior one is kept and marked.
+    """
+    decoded, tail = decode_leading_transcript_objects(raw_text)
+    segments: list[dict[str, Any]] = []
+    offsets: list[int] = []
+    previous_end = 0.0
+    for index, (item, end_offset) in enumerate(decoded):
+        try:
+            start, end, text = validate_segment(
+                item.get("Start"), item.get("End"), item.get("Content"), duration, index
+            )
+        except RunnerError:
+            break
+        if start < previous_end - TIME_TOLERANCE_SECONDS:
+            break
+        previous_end = end
+        speaker = item.get("Speaker")
+        if isinstance(speaker, bool) or not isinstance(speaker, (str, int)):
+            speaker = ""
+        else:
+            speaker = str(speaker).strip()
+        segments.append({
+            "start_s": start,
+            "end_s": end,
+            "text": text,
+            "speaker": speaker,
+            "degenerate": is_repetition_degenerate(text),
+        })
+        offsets.append(end_offset)
+    promoted = len(segments)
+    while promoted > 0 and segments[promoted - 1]["degenerate"]:
+        promoted -= 1
+    tail_run = repetition_run_length(tail)
+    if repetition_units(tail):
+        terminal_collapse = tail_run >= VIBEVOICE_REPETITION_RUN_THRESHOLD
+    else:
+        terminal_collapse = bool(segments) and segments[-1]["degenerate"]
+    # The promoted bytes are the model's own emission up to the end of the
+    # last promoted object; only the array terminator is added back.
+    prefix_text = raw_text[:offsets[promoted - 1]] + "]" if promoted else ""
+    return {
+        "complete_object_count": len(decoded),
+        "validated_object_count": len(segments),
+        "promoted_object_count": promoted,
+        "degenerate_object_count": sum(1 for item in segments if item["degenerate"]),
+        "coverage_s": segments[promoted - 1]["end_s"] if promoted else 0.0,
+        "repetition_run_threshold": VIBEVOICE_REPETITION_RUN_THRESHOLD,
+        "repetition_run_maximum": max(
+            (repetition_run_length(item["text"]) for item in segments), default=0
+        ),
+        "tail_repetition_run": tail_run,
+        "tail_characters": len(tail),
+        "terminal_collapse": terminal_collapse,
+        "raw_text": prefix_text,
+        "segments": segments[:promoted],
+    }
+
+
 def run_vibevoice(
     *,
     spec: ModelSpec,
@@ -750,19 +907,30 @@ def run_vibevoice(
         "context_hard_cap_tokens": "mlx-audio 0.4.6 does not expose the model context hard cap",
         "peak_rss_bytes": "mlx-audio 0.4.6 does not report process peak RSS",
     }
+    payload_text = payload.get("text") if isinstance(payload, dict) else None
+    common = {
+        "payload_hash": sha256_bytes(context.encode("utf-8")) if context else None,
+        "command": ["mlx_audio.stt.generate"],
+        "artifact": raw_artifact,
+        "terminal_evidence": "observed",
+        "timing_granularity": "segment",
+        "metrics": metrics,
+        "metrics_unavailable": metrics_unavailable,
+    }
     if reached_limit:
+        # The generator was exhausted, so the transcript array in ``text`` was
+        # never closed and ``segments`` arrived empty.  Recover the leading
+        # valid objects as a non-promotable prefix instead of discarding the
+        # payload, and separate a collapsed decoder from a transcript that
+        # legitimately ran out of output budget.
+        prefix = recover_vibevoice_prefix(payload_text, duration)
         return {
+            **common,
             "raw_text": "",
             "segments": [],
-            "payload_hash": sha256_bytes(context.encode("utf-8")) if context else None,
-            "command": ["mlx_audio.stt.generate"],
-            "artifact": raw_artifact,
             "outcome": "limit",
-            "stop_reason": "maximumTokens",
-            "terminal_evidence": "observed",
-            "timing_granularity": "segment",
-            "metrics": metrics,
-            "metrics_unavailable": metrics_unavailable,
+            "stop_reason": "repetitionDegeneration" if prefix["terminal_collapse"] else "maximumTokens",
+            "partial_prefix": prefix,
         }
 
     raw_segments = payload.get("segments") if isinstance(payload, dict) else None
@@ -787,24 +955,34 @@ def run_vibevoice(
             speaker = str(speaker).strip()
         else:
             speaker = ""
-        segments.append({
+        entry = {
             "start_s": start,
             "end_s": end,
             "text": text,
             "speaker": speaker,
-        })
+        }
+        if is_repetition_degenerate(text):
+            entry["degenerate"] = True
+        segments.append(entry)
+    # An end-of-sequence stop is not by itself a complete result: a decoder
+    # that collapsed and then emitted EOS ends on repeated content.  Close
+    # that case as a limit outcome carrying the same recovered prefix rather
+    # than promoting the repetition as canonical.
+    if segments[-1].get("degenerate"):
+        return {
+            **common,
+            "raw_text": "",
+            "segments": [],
+            "outcome": "limit",
+            "stop_reason": "repetitionDegeneration",
+            "partial_prefix": recover_vibevoice_prefix(raw_text, duration),
+        }
     return {
+        **common,
         "raw_text": raw_text,
         "segments": segments,
-        "payload_hash": sha256_bytes(context.encode("utf-8")) if context else None,
-        "command": ["mlx_audio.stt.generate"],
-        "artifact": raw_artifact,
         "outcome": "complete",
         "stop_reason": "endOfSequence",
-        "terminal_evidence": "observed",
-        "timing_granularity": "segment",
-        "metrics": metrics,
-        "metrics_unavailable": metrics_unavailable,
     }
 
 
@@ -1056,6 +1234,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     failure: dict[str, Any] | None = None
     diagnostics: dict[str, Any] | None = None
     evidence_unavailable: dict[str, str] | None = None
+    partial_prefix: dict[str, Any] | None = None
     if spec.backend == "vibevoice":
         backend = run_vibevoice(
             spec=spec,
@@ -1074,6 +1253,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         metrics, metrics_unavailable = backend["metrics"], backend["metrics_unavailable"]
         instruction_hash = payload_hash or sha256_bytes(b"vibevoice-no-prompt")
         prompt_guidance = False
+        partial_prefix = backend.get("partial_prefix")
     elif spec.backend == "qwen3":
         backend = run_qwen(
             spec=spec,
@@ -1139,6 +1319,20 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "metrics": metrics,
         "metrics_unavailable": metrics_unavailable,
     }
+    if partial_prefix is not None:
+        # The prefix is diagnostic evidence with an explicit covered range.
+        # It is reported on the same timeline as the promoted segments so the
+        # caller can promote it as partial coverage without recomputing it.
+        # ``coverage_s`` stays a duration measured from the leaf start while
+        # the segments carry absolute source timestamps, matching the
+        # document's own coverage and segment conventions.
+        document["partial_prefix"] = {
+            **partial_prefix,
+            "segments": [
+                {**segment, "start_s": segment["start_s"] + args.start_s, "end_s": segment["end_s"] + args.start_s}
+                for segment in partial_prefix["segments"]
+            ],
+        }
     if failure is not None:
         document["failure"] = failure
     if evidence_unavailable:

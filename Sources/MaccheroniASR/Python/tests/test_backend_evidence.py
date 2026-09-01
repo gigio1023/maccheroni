@@ -473,6 +473,220 @@ class BackendEvidenceTests(unittest.TestCase):
         self.assertNotIn("Bearer", result["failure"]["message"])
         self.assertNotIn("https://", result["failure"]["message"])
 
+    @staticmethod
+    def transcript_object(start: float, end: float, content: str, speaker: int = 0) -> str:
+        return json.dumps(
+            {"Start": start, "End": end, "Speaker": speaker, "Content": content},
+            ensure_ascii=False,
+        )
+
+    def test_repetition_run_counts_consecutive_repeats_not_frequency(self) -> None:
+        cases = {
+            "": 0,
+            "one two three": 1,
+            "so so": 2,
+            "yes, yes, yes": 3,
+            "the plan is the plan is the plan is fine": 3,
+            "ok " * 40: 40,
+            "네, " * 75: 75,
+            # A long passage that reuses one common word without ever repeating
+            # a block adjacently is not degeneration.
+            " ".join("the item%d" % index for index in range(20)): 1,
+            # A multi-unit phrase cycled adjacently is degeneration, and is the
+            # shape a four-unit window missed on a measured run.
+            " ".join(["the customer count rose sharply"] * 30): 30,
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text[:24]):
+                self.assertEqual(runner.repetition_run_length(text), expected)
+
+    def test_phrase_window_catches_the_measured_five_unit_runaway(self) -> None:
+        """A five-unit cycle is the shape that defeated a four-unit window.
+
+        A measured collapse repeated a five-unit phrase 333 times inside a
+        single unterminated object.  Scored over 1-to-4-grams that reads as 2
+        and the payload is filed as a legitimate cap hit; scored over
+        1-to-8-grams it reads as 333.
+        """
+        cycle = "the customer count rose sharply "
+        self.assertEqual(runner.VIBEVOICE_REPETITION_PHRASE_UNITS, 8)
+        self.assertEqual(runner.repetition_run_length(cycle * 333), 333)
+        self.assertTrue(runner.is_repetition_degenerate(cycle * 333))
+        # The same text scored with the old window is why the miss happened.
+        self.assertLess(runner.repetition_run_length(cycle * 333, phrase_units=4), 12)
+
+    def test_repetition_threshold_boundary_is_below_at_and_above(self) -> None:
+        self.assertFalse(runner.is_repetition_degenerate("ok " * (runner.VIBEVOICE_REPETITION_RUN_THRESHOLD - 1)))
+        self.assertTrue(runner.is_repetition_degenerate("ok " * runner.VIBEVOICE_REPETITION_RUN_THRESHOLD))
+        self.assertTrue(runner.is_repetition_degenerate("ok " * (runner.VIBEVOICE_REPETITION_RUN_THRESHOLD + 1)))
+
+    def test_a_sub_critical_stutter_that_escapes_is_not_degeneration(self) -> None:
+        """The strongest negative case: an accepted transcript contains the
+        same failure mode below the threshold.
+
+        The 240-second Korean leaf that completed with end-of-sequence and
+        full coverage carries a segment that repeats one word six times and
+        then resumes normal speech.  A detector that fired on it would fail a
+        passing run, so the threshold has to clear that shape with margin.
+        """
+        escaped = "and then " + "again " * 6 + "the meeting moved on to the next item"
+        self.assertEqual(runner.repetition_run_length(escaped), 6)
+        self.assertFalse(runner.is_repetition_degenerate(escaped))
+
+        # The same word repeated in the audio itself, transcribed correctly.
+        backchannel = "yes, yes, yes. the address is over there"
+        self.assertFalse(runner.is_repetition_degenerate(backchannel))
+
+        prefix = runner.recover_vibevoice_prefix(
+            "[" + ",".join([
+                self.transcript_object(0.0, 10.0, escaped),
+                self.transcript_object(10.0, 20.0, backchannel),
+            ]) + "]",
+            30.0,
+        )
+        self.assertEqual(prefix["promoted_object_count"], 2)
+        self.assertEqual(prefix["degenerate_object_count"], 0)
+        self.assertFalse(prefix["terminal_collapse"])
+        self.assertEqual(prefix["coverage_s"], 20.0)
+
+    def test_recovered_episodes_and_the_terminal_one_are_separated_by_position(self) -> None:
+        """An episode followed by clean output recovered; the last one did not.
+
+        Position, not episode length, is the discriminator: the evidence that
+        an episode was survivable is that correct output follows it.  The
+        measured lengths corroborate the split rather than define it.
+        """
+        episode = "ok, " * 74
+        text = "[" + ",".join([
+            self.transcript_object(0.0, 10.0, "first clean passage"),
+            self.transcript_object(10.0, 20.0, episode),
+            self.transcript_object(20.0, 30.0, "recovered clean passage"),
+            self.transcript_object(30.0, 40.0, episode),
+            self.transcript_object(40.0, 50.0, "recovered a second time"),
+        ]) + ',{"Start":50.0,"End":60.0,"Speaker":0,"Content":"' + "ok, " * 1050
+
+        prefix = runner.recover_vibevoice_prefix(text, 90.0)
+
+        self.assertEqual(prefix["promoted_object_count"], 5)
+        self.assertEqual(prefix["degenerate_object_count"], 2)
+        self.assertEqual(prefix["coverage_s"], 50.0)
+        self.assertTrue(prefix["terminal_collapse"])
+        # Both survivable episodes stay inside the promoted prefix, marked.
+        self.assertEqual(
+            [item["degenerate"] for item in prefix["segments"]],
+            [False, True, False, True, False],
+        )
+
+    def test_prefix_recovery_keeps_an_interior_collapse_and_drops_the_terminal_one(self) -> None:
+        collapsed = "ok, " * 40
+        text = "[" + ",".join([
+            self.transcript_object(0.0, 10.0, "first clean passage"),
+            self.transcript_object(10.0, 20.0, collapsed),
+            self.transcript_object(20.0, 30.0, "recovered clean passage"),
+            self.transcript_object(30.0, 40.0, collapsed),
+        ]) + ',{"Start":40.0,"End":50.0,"Speaker":0,"Content":"' + collapsed
+
+        prefix = runner.recover_vibevoice_prefix(text, 60.0)
+
+        self.assertEqual(prefix["complete_object_count"], 4)
+        self.assertEqual(prefix["validated_object_count"], 4)
+        self.assertEqual(prefix["promoted_object_count"], 3)
+        self.assertEqual(prefix["degenerate_object_count"], 2)
+        self.assertEqual(prefix["coverage_s"], 30.0)
+        self.assertTrue(prefix["terminal_collapse"])
+        self.assertEqual([item["degenerate"] for item in prefix["segments"]], [False, True, False])
+        self.assertTrue(prefix["raw_text"].startswith("[{"))
+        self.assertTrue(prefix["raw_text"].endswith("]"))
+        self.assertEqual(len(json.loads(prefix["raw_text"])), 3)
+
+    def test_prefix_recovery_stops_at_the_first_unusable_object(self) -> None:
+        text = "[" + ",".join([
+            self.transcript_object(0.0, 10.0, "first"),
+            self.transcript_object(10.0, 999.0, "beyond the chunk"),
+            self.transcript_object(20.0, 30.0, "never reached"),
+        ]) + "]"
+
+        prefix = runner.recover_vibevoice_prefix(text, 60.0)
+
+        self.assertEqual(prefix["complete_object_count"], 3)
+        self.assertEqual(prefix["validated_object_count"], 1)
+        self.assertEqual(prefix["promoted_object_count"], 1)
+        self.assertEqual(prefix["coverage_s"], 10.0)
+        self.assertFalse(prefix["terminal_collapse"])
+
+    def test_vibevoice_terminal_collapse_is_typed_apart_from_the_token_cap(self) -> None:
+        collapsed = "ok, " * 40
+        text = (
+            "[" + self.transcript_object(0.0, 0.6, "clean opening")
+            + ',{"Start":0.6,"End":1.0,"Speaker":0,"Content":"' + collapsed
+        )
+        result, _ = self.run_vibevoice_stub(
+            generated_tokens=5,
+            max_tokens=5,
+            raw_json=json.dumps({"text": text, "segments": []}, ensure_ascii=False),
+        )
+
+        self.assertEqual(result["outcome"], "limit")
+        self.assertEqual(result["stop_reason"], "repetitionDegeneration")
+        self.assertEqual(result["raw_text"], "")
+        self.assertEqual(result["segments"], [])
+        prefix = result["partial_prefix"]
+        self.assertTrue(prefix["terminal_collapse"])
+        self.assertEqual(prefix["promoted_object_count"], 1)
+        self.assertAlmostEqual(prefix["coverage_s"], 0.6)
+        self.assertGreaterEqual(prefix["tail_repetition_run"], runner.VIBEVOICE_REPETITION_RUN_THRESHOLD)
+
+    def test_vibevoice_cap_hit_without_collapse_keeps_maximum_tokens(self) -> None:
+        text = (
+            "[" + self.transcript_object(0.0, 0.6, "clean opening")
+            + ',{"Start":0.6,"End":1.0,"Speaker":0,"Content":"still describing new content'
+        )
+        result, _ = self.run_vibevoice_stub(
+            generated_tokens=5,
+            max_tokens=5,
+            raw_json=json.dumps({"text": text, "segments": []}, ensure_ascii=False),
+        )
+
+        self.assertEqual(result["outcome"], "limit")
+        self.assertEqual(result["stop_reason"], "maximumTokens")
+        prefix = result["partial_prefix"]
+        self.assertFalse(prefix["terminal_collapse"])
+        self.assertEqual(prefix["promoted_object_count"], 1)
+
+    def test_vibevoice_end_of_sequence_with_a_collapsed_tail_is_not_complete(self) -> None:
+        collapsed = "ok, " * 40
+        raw_json = json.dumps({
+            "text": "[" + ",".join([
+                self.transcript_object(0.0, 0.6, "clean opening"),
+                self.transcript_object(0.6, 1.0, collapsed),
+            ]) + "]",
+            "segments": [
+                {"start": 0.0, "end": 0.6, "text": "clean opening", "speaker_id": 0},
+                {"start": 0.6, "end": 1.0, "text": collapsed, "speaker_id": 0},
+            ],
+        }, ensure_ascii=False)
+
+        result, _ = self.run_vibevoice_stub(generated_tokens=4, max_tokens=5, raw_json=raw_json)
+
+        self.assertEqual(result["outcome"], "limit")
+        self.assertEqual(result["stop_reason"], "repetitionDegeneration")
+        self.assertEqual(result["segments"], [])
+        self.assertEqual(result["partial_prefix"]["promoted_object_count"], 1)
+        self.assertAlmostEqual(result["partial_prefix"]["coverage_s"], 0.6)
+
+    def test_vibevoice_end_of_sequence_below_the_threshold_stays_complete(self) -> None:
+        mild = "ok, " * (runner.VIBEVOICE_REPETITION_RUN_THRESHOLD - 1)
+        raw_json = json.dumps({
+            "text": "[" + self.transcript_object(0.0, 1.0, mild) + "]",
+            "segments": [{"start": 0.0, "end": 1.0, "text": mild, "speaker_id": 0}],
+        }, ensure_ascii=False)
+
+        result, _ = self.run_vibevoice_stub(generated_tokens=4, max_tokens=5, raw_json=raw_json)
+
+        self.assertEqual(result["outcome"], "complete")
+        self.assertEqual(result["stop_reason"], "endOfSequence")
+        self.assertNotIn("degenerate", result["segments"][0])
+
     def test_unverified_evidence_exits_nonzero(self) -> None:
         document = {
             "outcome": "unverified",

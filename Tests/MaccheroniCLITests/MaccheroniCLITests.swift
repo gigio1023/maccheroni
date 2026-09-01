@@ -43,6 +43,7 @@ struct MaccheroniCLITests {
             "diarization/timeline.json",
             "diarization/backend.raw.json",
             "diarization/normalization-warnings.json",
+            "diarization/order-normalizations.json",
             "merged/segments.json",
             "merged/conflicts.json",
             "primary/chunks/0/audio.wav",
@@ -118,6 +119,10 @@ struct MaccheroniCLITests {
         #expect(timeline.map(\.speaker) == ["S0", "S0"])
         #expect(merged.segments.map(\.speaker) == ["S0", "S0"])
         #expect(conflicts.isEmpty)
+        #expect(try jsonArray(
+            "diarization/order-normalizations.json",
+            in: run
+        ).isEmpty)
         #expect(abs(try audioDuration(
             run.appendingPathComponent("primary/chunks/0/audio.wav")
         ) - 1) < 0.01)
@@ -133,7 +138,281 @@ struct MaccheroniCLITests {
     }
 
     @Test
-    func secondChunkFailureLeavesAuditablePartialRun() async throws {
+    func diarizationOrderTieBreakIsWrittenAndRegistered() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "input.wav")
+        _ = try glossaryFile(in: root)
+        let profiles = try profileFile(
+            in: root,
+            glossaryPath: "terms.txt"
+        )
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        var dependencies = testDependencies()
+        dependencies.diarize = { _, _ in
+            let emitted = [
+                TimelineSegment(speaker: "S0", startS: 0.031, endS: 2.005),
+                TimelineSegment(speaker: "S1", startS: 0.031, endS: 1.005),
+            ]
+            return DiarizationTimelineResult(
+                timeline: Timeline(segments: [emitted[1], emitted[0]]),
+                rawJSON: try JSONEncoder().encode(emitted),
+                normalizationWarnings: [],
+                orderNormalizations: [
+                    DiarizationOrderNormalization(
+                        emittedIndex: 1,
+                        normalizedIndex: 0,
+                        speaker: "S1",
+                        startS: 0.031,
+                        endS: 1.005
+                    ),
+                    DiarizationOrderNormalization(
+                        emittedIndex: 0,
+                        normalizedIndex: 1,
+                        speaker: "S0",
+                        startS: 0.031,
+                        endS: 2.005
+                    ),
+                ]
+            )
+        }
+        let app = testApplication(runID: "order", dependencies: dependencies)
+
+        let runPath = try await app.execute(arguments: [
+            "run", input.path,
+            "--profile", "ko-meeting",
+            "--profiles", profiles.path,
+            "--output-root", outputRoot.path,
+        ])
+        let run = URL(fileURLWithPath: runPath, isDirectory: true)
+
+        let records = try jsonArray(
+            "diarization/order-normalizations.json",
+            in: run
+        )
+        #expect(records.count == 2)
+        #expect(records.allSatisfy {
+            Set($0.keys) == [
+                "emitted_index",
+                "normalized_index",
+                "speaker",
+                "start_s",
+                "end_s",
+            ]
+        })
+        #expect(records.map { $0["emitted_index"] as? Int } == [1, 0])
+        #expect(records.map { $0["normalized_index"] as? Int } == [0, 1])
+        #expect(records.map { $0["speaker"] as? String } == ["S1", "S0"])
+        #expect(records.map { $0["start_s"] as? Double } == [0.031, 0.031])
+        #expect(records.map { $0["end_s"] as? Double } == [1.005, 2.005])
+
+        let manifest: Manifest = try decode("manifest.json", in: run)
+        #expect(manifest.status == .succeeded)
+        let artifact = try #require(manifest.artifacts.first {
+            $0.path == "diarization/order-normalizations.json"
+        })
+        #expect(artifact.kind == "diarization_order_normalizations")
+        #expect(try AudioPreprocessor.sha256(
+            of: run.appendingPathComponent(artifact.path)
+        ) == artifact.sha256)
+    }
+
+    @Test
+    func rejectedDiarizationTimelineIsPreservedInTheRunAndRegistered() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "input.wav")
+        let profiles = try profileFile(in: root)
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        // Stands in for the adapter's quarantine file under
+        // `$TMPDIR/Maccheroni/diarization/rejected/`, which the OS may sweep
+        // before anyone reads it.
+        let quarantine = root.appendingPathComponent("quarantined.json")
+        let emitted = Data(
+            #"{"segments":[{"speaker":"S0","start":1.5,"end":2.0}],"num_speakers":1}"#
+                .utf8
+        )
+        try emitted.write(to: quarantine)
+        var dependencies = testDependencies()
+        dependencies.diarize = { _, _ in
+            throw DiarizationError.rejectedOutput(
+                reason: .outputUnordered(
+                    segment: 1,
+                    startS: 0.5,
+                    previousStartS: 1.5
+                ),
+                rawOutputPath: quarantine.path
+            )
+        }
+        let app = testApplication(runID: "rejected", dependencies: dependencies)
+
+        do {
+            _ = try await app.execute(arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--output-root", outputRoot.path,
+            ])
+            Issue.record("expected the rejected timeline to fail the run")
+        } catch let error as CLIError {
+            let message = try #require(error.errorDescription)
+            // The failure names the copy the run owns, not the temporary file
+            // that may already be gone by the time anyone reads it.
+            #expect(message.contains("diarization/rejected-backend.raw.json"))
+            #expect(!message.contains(quarantine.path))
+            #expect(message.contains("segment 1 starts at 0.5 seconds"))
+        }
+
+        let run = outputRoot.appendingPathComponent("rejected", isDirectory: true)
+        let preserved = run.appendingPathComponent(
+            "diarization/rejected-backend.raw.json"
+        )
+        #expect(try Data(contentsOf: preserved) == emitted)
+        // The temporary copy is free to stay; what the acceptance requires is
+        // that the run directory alone is enough.
+        #expect(try Data(contentsOf: quarantine) == emitted)
+
+        let manifest: Manifest = try decode("manifest.json", in: run)
+        #expect(manifest.status == .failed)
+        #expect(manifest.failure?.code == "DIARIZATION_ERROR")
+        let failureMessage = try #require(manifest.failure?.message)
+        #expect(failureMessage.contains("diarization/rejected-backend.raw.json"))
+        let artifact = try #require(manifest.artifacts.first {
+            $0.path == "diarization/rejected-backend.raw.json"
+        })
+        #expect(artifact.kind == "diarization_rejected_backend_raw")
+        #expect(try AudioPreprocessor.sha256(of: preserved) == artifact.sha256)
+        // The run stopped at diarization, so the accepted-path artifacts must
+        // not exist to be confused with the rejected bytes.
+        #expect(!manifest.artifacts.contains {
+            $0.path == "diarization/backend.raw.json"
+                || $0.path == "diarization/timeline.json"
+        })
+        #expect(Set(manifest.artifacts.map(\.path)) ==
+            (try regularRelativePaths(in: run)).subtracting(["manifest.json"]))
+    }
+
+    @Test
+    func realBackendRejectionLandsInTheRunDirectoryAndTheManifest() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "input.wav")
+        let profiles = try profileFile(in: root)
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        // A backend that emits its second turn before its first. This is the
+        // whole rejection path as it really runs: the adapter quarantines the
+        // bytes under `$TMPDIR` and names them in the error, and the run
+        // directory is what has to end up carrying them.
+        let emitted = #"{"segments":[{"speaker":"S0","start":1.0,"end":1.5},"#
+            + #"{"speaker":"S1","start":0.2,"end":0.9}]}"#
+        let stub = try writeExecutable(
+            "#!/bin/sh\nprintf '%s' '\(emitted)'\n",
+            in: root
+        )
+        let quarantineRoot = DiarizationWorkspace.rejectedOutputRootURL()
+        let before = quarantinedFileNames(in: quarantineRoot)
+        var dependencies = testDependencies()
+        dependencies.diarize = { _, request in
+            try await Community1Diarizer(configuration: .init(
+                executableURL: stub,
+                hfHomeURL: root,
+                timeoutS: 30,
+                validatesPinnedModel: false
+            )).diarizeWithEvidence(request)
+        }
+        let app = testApplication(runID: "backend", dependencies: dependencies)
+
+        do {
+            _ = try await app.execute(arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--output-root", outputRoot.path,
+            ])
+            Issue.record("expected the out-of-order timeline to fail the run")
+        } catch let error as CLIError {
+            let message = try #require(error.errorDescription)
+            #expect(message.contains("diarization/rejected-backend.raw.json"))
+            #expect(!message.contains(quarantineRoot.path))
+        }
+        let quarantined = quarantinedFileNames(in: quarantineRoot)
+            .subtracting(before)
+        defer {
+            for name in quarantined {
+                try? FileManager.default.removeItem(
+                    at: quarantineRoot.appendingPathComponent(name)
+                )
+            }
+        }
+
+        let run = outputRoot.appendingPathComponent("backend", isDirectory: true)
+        let preserved = run.appendingPathComponent(
+            "diarization/rejected-backend.raw.json"
+        )
+        #expect(try String(contentsOf: preserved, encoding: .utf8) == emitted)
+        let manifest: Manifest = try decode("manifest.json", in: run)
+        #expect(manifest.failure?.code == "DIARIZATION_ERROR")
+        let artifact = try #require(manifest.artifacts.first {
+            $0.path == "diarization/rejected-backend.raw.json"
+        })
+        #expect(artifact.kind == "diarization_rejected_backend_raw")
+        #expect(try AudioPreprocessor.sha256(of: preserved) == artifact.sha256)
+    }
+
+    @Test
+    func rejectedDiarizationWithoutSurvivingBytesKeepsItsOriginalDiagnosis() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "input.wav")
+        let profiles = try profileFile(in: root)
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        // The sweep already happened: there is nothing left to copy.
+        let swept = root.appendingPathComponent("swept.json")
+        var dependencies = testDependencies()
+        dependencies.diarize = { _, _ in
+            throw DiarizationError.rejectedOutput(
+                reason: .duplicateOnset(
+                    segment: 3,
+                    speaker: "S1",
+                    startS: 4.25
+                ),
+                rawOutputPath: swept.path
+            )
+        }
+        let app = testApplication(runID: "swept", dependencies: dependencies)
+
+        do {
+            _ = try await app.execute(arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--output-root", outputRoot.path,
+            ])
+            Issue.record("expected the rejected timeline to fail the run")
+        } catch let error as CLIError {
+            let message = try #require(error.errorDescription)
+            // Losing the bytes must not lose the diagnosis with them.
+            #expect(message.contains(
+                "segments 2 and 3 both start speaker S1 at 4.25 seconds"
+            ))
+            #expect(!message.contains("diarization/rejected-backend.raw.json"))
+        }
+
+        let run = outputRoot.appendingPathComponent("swept", isDirectory: true)
+        #expect(!FileManager.default.fileExists(
+            atPath: run.appendingPathComponent(
+                "diarization/rejected-backend.raw.json"
+            ).path
+        ))
+        let manifest: Manifest = try decode("manifest.json", in: run)
+        #expect(manifest.failure?.code == "DIARIZATION_ERROR")
+        #expect(!manifest.artifacts.contains {
+            $0.path == "diarization/rejected-backend.raw.json"
+        })
+    }
+
+    @Test
+    func secondChunkFailureLeavesAnAuditableFailedRunWithNoFalseCoverage() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let input = try makeWAV(in: root, name: "input.wav")
@@ -159,10 +438,12 @@ struct MaccheroniCLITests {
 
         let run = outputRoot.appendingPathComponent("partial", isDirectory: true)
         let manifest: Manifest = try decode("manifest.json", in: run)
-        #expect(manifest.status == .partial)
+        // The run aborted before promotion, so no transcript exists anywhere.
+        // `partial` would claim one second was transcribed when nothing was.
+        #expect(manifest.status == .failed)
         #expect(manifest.failure?.code == "RUN_ERROR")
         #expect(manifest.coverage.truncated)
-        #expect(abs(manifest.coverage.processedDurationS - 1) < 0.01)
+        #expect(manifest.coverage.processedDurationS == 0)
         #expect(manifest.chunkBoundaries.map(\.status) == [.succeeded, .failed])
         #expect(manifest.artifacts.contains {
             $0.path == "primary/chunks/0/backend.raw"
@@ -2224,7 +2505,7 @@ struct MaccheroniCLITests {
     }
 
     @Test
-    func MOSSDepthExhaustionFailsExplicitlyAndPreservesSuccessfulSiblings() async throws {
+    func MOSSDepthExhaustionFailsExplicitlyAndPromotesSuccessfulSiblings() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let input = try makeWAV(
@@ -2256,37 +2537,40 @@ struct MaccheroniCLITests {
             )
         )
 
-        do {
-            _ = try await app.execute(arguments: [
-                "run", input.path,
-                "--profile", "ko-meeting",
-                "--profiles", profiles.path,
-                "--output-root", outputRoot.path,
-            ])
-            Issue.record("expected bounded MOSS recovery to exhaust")
-        } catch let error as CLIError {
-            #expect(error.code == "MOSS_LIMIT_EXHAUSTED")
-        }
+        let runPath = try await app.execute(arguments: [
+            "run", input.path,
+            "--profile", "ko-meeting",
+            "--profiles", profiles.path,
+            "--output-root", outputRoot.path,
+        ])
 
-        let run = outputRoot.appendingPathComponent(
-            "moss-depth",
-            isDirectory: true
-        )
+        let run = URL(fileURLWithPath: runPath, isDirectory: true)
         let manifest: Manifest = try decode("manifest.json", in: run)
-        #expect(manifest.status == .failed)
+        // The depth-exhausted 0-30 s range still fails explicitly and still
+        // carries the MOSS code.  What changed is that its successful siblings
+        // are now promoted rather than merely left on disk: losing one leaf no
+        // longer discards the transcript the run already has.
+        #expect(manifest.status == .partial)
         #expect(manifest.failure?.code == "MOSS_LIMIT_EXHAUSTED")
-        #expect(manifest.coverage.chunksCompleted == 0)
         #expect(manifest.coverage.truncated)
-        #expect(recorder.calls.count == 5)
+        #expect(manifest.coverage.strategy == .backendTruncated)
+        #expect(abs(manifest.coverage.processedDurationS - 210) < 0.01)
+        #expect(manifest.failure?.message.contains("[0.000, 30.000) s") == true)
         #expect(recorder.calls.allSatisfy { $0.endS - $0.startS <= 120 })
         #expect(recorder.diarizationCalls == 1)
         #expect(try AudioPreprocessor.sha256(of: input) == inputHash)
-        #expect(!FileManager.default.fileExists(
+        #expect(FileManager.default.fileExists(
             atPath: run.appendingPathComponent("primary/raw.txt").path
         ))
-        #expect(!FileManager.default.fileExists(
+        #expect(FileManager.default.fileExists(
             atPath: run.appendingPathComponent("merged/segments.json").path
         ))
+        let partial = try jsonObject("primary/partial-coverage.json", in: run)
+        let missing = try #require(partial["missing"] as? [[String: Any]])
+        #expect(missing.count == 1)
+        #expect(missing[0]["attempt_id"] as? String == "chunk-0000-root-l-l")
+        #expect(missing[0]["failure_code"] as? String == "MOSS_LIMIT_EXHAUSTED")
+        #expect(missing[0]["stop_reason"] as? String == "maximumTokens")
         #expect(FileManager.default.fileExists(
             atPath: run.appendingPathComponent(
                 "primary/attempts/chunk-0000-root-r/result.json"
@@ -2698,6 +2982,938 @@ struct MaccheroniCLITests {
         #expect(forced.maximumTokens == 1_024)
     }
 
+    @Test
+    func runCompletesWhenTheOutputRootIsSpelledThroughPrivate() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let privateRoot = try privateSpellingTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: privateRoot) }
+        let input = try makeWAV(in: root, name: "input.wav")
+        let profiles = try profileFile(in: root)
+        let outputRoot = privateRoot.appendingPathComponent(
+            "runs",
+            isDirectory: true
+        )
+        #expect(outputRoot.path.hasPrefix("/private/"))
+        let app = testApplication(runID: "private-root")
+
+        let runPath = try await app.execute(arguments: [
+            "run", input.path,
+            "--profile", "ko-meeting",
+            "--profiles", profiles.path,
+            "--output-root", outputRoot.path,
+        ])
+
+        let run = URL(fileURLWithPath: runPath, isDirectory: true)
+        let manifest: Manifest = try decode("manifest.json", in: run)
+        #expect(manifest.status == .succeeded)
+        #expect(manifest.failure == nil)
+        #expect(!manifest.artifacts.isEmpty)
+        for artifact in manifest.artifacts {
+            #expect(!artifact.path.hasPrefix("/"))
+            #expect(!artifact.path.contains("private"))
+        }
+        #expect(FileManager.default.fileExists(
+            atPath: run.appendingPathComponent("merged/segments.json").path
+        ))
+    }
+
+    @Test
+    func runRejectsAPreprocessedArtifactOutsideTheRunDirectory() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "input.wav")
+        let profiles = try profileFile(in: root)
+        let outside = root.appendingPathComponent("outside", isDirectory: true)
+        var dependencies = testDependencies()
+        dependencies.preprocess = { audio, _ in
+            try AudioPreprocessor().preprocess(
+                inputURL: audio,
+                outputDirectory: outside
+            )
+        }
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        let app = testApplication(runID: "outside", dependencies: dependencies)
+
+        do {
+            _ = try await app.execute(arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--output-root", outputRoot.path,
+            ])
+            Issue.record("expected an artifact outside the run directory to fail")
+        } catch let error as CLIError {
+            #expect(error.code == "RUN_ERROR")
+            let description = try #require(error.errorDescription)
+            #expect(description.contains("artifact is outside the run directory"))
+        }
+        let manifest: Manifest = try decode(
+            "manifest.json",
+            in: outputRoot.appendingPathComponent("outside", isDirectory: true)
+        )
+        #expect(manifest.status == .failed)
+    }
+
+    @Test
+    func runRejectsAnArtifactReachedThroughASymlinkOutOfTheRunDirectory() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(in: root, name: "input.wav")
+        let profiles = try profileFile(in: root)
+        let outside = root.appendingPathComponent("outside", isDirectory: true)
+        var dependencies = testDependencies()
+        dependencies.preprocess = { audio, directory in
+            let preprocessed = try AudioPreprocessor().preprocess(
+                inputURL: audio,
+                outputDirectory: outside
+            )
+            let escape = directory
+                .deletingLastPathComponent()
+                .appendingPathComponent("escape", isDirectory: true)
+            try FileManager.default.createSymbolicLink(
+                at: escape,
+                withDestinationURL: outside
+            )
+            var relocated = preprocessed
+            relocated.artifactURL = escape.appendingPathComponent(
+                preprocessed.artifactURL.lastPathComponent
+            )
+            return relocated
+        }
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        let run = outputRoot.appendingPathComponent(
+            "symlink-escape",
+            isDirectory: true
+        )
+        let app = testApplication(
+            runID: "symlink-escape",
+            dependencies: dependencies
+        )
+
+        do {
+            _ = try await app.execute(arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--output-root", outputRoot.path,
+            ])
+            Issue.record("expected a symlinked artifact escape to be rejected")
+        } catch let error as CLIError {
+            #expect(error.code == "RUN_ERROR")
+            let description = try #require(error.errorDescription)
+            #expect(description.contains("artifact is outside the run directory"))
+        }
+        // The rejected artifact is spelled inside the run directory and only
+        // resolves outside it, so the check has to resolve the path rather than
+        // compare the two spellings.
+        let escape = run.appendingPathComponent("escape", isDirectory: true)
+        #expect(escape.path.hasPrefix(run.path + "/"))
+        #expect(!escape.resolvingSymlinksInPath().path.hasPrefix(run.path + "/"))
+        let manifest: Manifest = try decode("manifest.json", in: run)
+        #expect(manifest.status == .failed)
+    }
+
+    @Test
+    func vibeVoiceLeafPolicyIsBoundedBelowAtAndAboveItsMeasuredMaximum() throws {
+        let policy = CLIASRInferencePolicy.policy(for: .vibeVoice)
+        #expect(policy.minimumInitialDurationS == 60)
+        #expect(policy.preferredInitialDurationS == 120)
+        #expect(policy.maximumInitialDurationS == 120)
+        #expect(policy.minimumRecoveryDurationS == 30)
+        #expect(policy.maximumRecoveryDepth == 2)
+        #expect(policy.maximumTokens == 5_120)
+        #expect(policy.audioContextTokensPerSecond == 7.5)
+        // Falsified at 7.61 by an accepted 31.87 s leaf carrying 22 segments.
+        #expect(policy.observedGeneratedTokensPerSecond == 23.34)
+        // The MOSS policy is untouched by the VibeVoice re-derivation.
+        let moss = CLIASRInferencePolicy.policy(for: .moss)
+        #expect(moss.maximumInitialDurationS == 120)
+        #expect(moss.maximumRecoveryDepth == 3)
+        #expect(moss.maximumTokens == 5_120)
+
+        let rate = Double(policy.sampleRateHz)
+        let planner = InferenceLeafPlanner()
+        for (label, durationS, expectedLeaves) in [
+            ("below", 120 - 1.0 / rate, 1),
+            ("at", 120.0, 1),
+            ("above", 120 + 1.0 / rate, 2),
+        ] {
+            let totalSamples = Int64((durationS * rate).rounded())
+            let map = try VoiceActivityMap(
+                durationS: durationS,
+                regions: [
+                    VoiceActivityRegion(
+                        startS: 0,
+                        endS: durationS,
+                        kind: .speech
+                    ),
+                ]
+            )
+            let leaves = try planner.proposeInitialLeaves(
+                totalSamples: totalSamples,
+                activityMap: map,
+                configuration: policy.planningConfiguration
+            )
+            #expect(leaves.count == expectedLeaves, "\(label) the maximum")
+            #expect(leaves.allSatisfy {
+                Double($0.sampleCount) / rate
+                    <= policy.maximumInitialDurationS + 0.000_1
+            })
+            #expect(leaves.first?.startSample == 0)
+            #expect(leaves.last?.endSample == totalSamples)
+        }
+    }
+
+    @Test
+    func vibeVoiceCollapseSplitsAndRecoversInsteadOfKillingTheRun() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(
+            in: root,
+            name: "vibevoice-recovery.wav",
+            durationS: 120
+        )
+        let profiles = try profileFile(
+            in: root,
+            fileName: "vibevoice.json",
+            asrBackend: "vibevoice",
+            languagePin: "ko"
+        )
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        let recorder = MOSSAttemptRecorder()
+        let app = testApplication(
+            runID: "vibevoice-recovery",
+            dependencies: vibeVoiceTestDependencies(
+                recorder: recorder,
+                // Only the whole 120 s leaf collapses; both halves are clean.
+                collapseAt: { startS, endS in
+                    abs(startS) < 0.000_001 && abs(endS - 120) < 0.000_001
+                }
+            )
+        )
+
+        let runPath = try await app.execute(arguments: [
+            "run", input.path,
+            "--profile", "ko-meeting",
+            "--profiles", profiles.path,
+            "--output-root", outputRoot.path,
+        ])
+        let run = URL(fileURLWithPath: runPath, isDirectory: true)
+        let manifest: Manifest = try decode("manifest.json", in: run)
+
+        #expect(manifest.status == .succeeded)
+        #expect(manifest.failure == nil)
+        #expect(!manifest.coverage.truncated)
+        #expect(abs(manifest.coverage.processedDurationS - 120) < 0.01)
+        #expect(recorder.calls.count == 3)
+        let parent = try jsonObject(
+            "primary/attempts/chunk-0000-root/outcome.json",
+            in: run
+        )
+        #expect(parent["status"] as? String == "limit_isolated")
+        #expect(parent["stop_reason"] as? String == "repetitionDegeneration")
+        #expect(parent["error_code"] == nil)
+        for child in ["chunk-0000-root-l", "chunk-0000-root-r"] {
+            let outcome = try jsonObject(
+                "primary/attempts/\(child)/outcome.json",
+                in: run
+            )
+            #expect(outcome["status"] as? String == "eos_complete")
+        }
+        let constraints = try jsonObject(
+            "preprocess/asr-constraints.json",
+            in: run
+        )
+        #expect(constraints["maximum_attempt_count"] as? Int == 7)
+        #expect(!FileManager.default.fileExists(
+            atPath: run.appendingPathComponent(
+                "primary/partial-coverage.json"
+            ).path
+        ))
+    }
+
+    @Test
+    func vibeVoiceCollapseAtTheRecoveryFloorPromotesTheValidPrefix() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(
+            in: root,
+            name: "vibevoice-prefix.wav",
+            durationS: 120
+        )
+        let inputHash = try AudioPreprocessor.sha256(of: input)
+        let profiles = try profileFile(
+            in: root,
+            fileName: "vibevoice-prefix.json",
+            asrBackend: "vibevoice",
+            languagePin: "ko"
+        )
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        let recorder = MOSSAttemptRecorder()
+        let app = testApplication(
+            runID: "vibevoice-prefix",
+            dependencies: vibeVoiceTestDependencies(
+                recorder: recorder,
+                // Every leaf in the left half collapses, so recovery reaches
+                // the 30 s floor and the prefix is all that is left.
+                collapseAt: { startS, _ in startS < 60 },
+                prefixShare: 0.75
+            )
+        )
+
+        let runPath = try await app.execute(arguments: [
+            "run", input.path,
+            "--profile", "ko-meeting",
+            "--profiles", profiles.path,
+            "--output-root", outputRoot.path,
+        ])
+        let run = URL(fileURLWithPath: runPath, isDirectory: true)
+        let manifest: Manifest = try decode("manifest.json", in: run)
+
+        #expect(manifest.status == .partial)
+        #expect(manifest.failure?.code == "ASR_REPETITION_DEGENERATION")
+        #expect(manifest.failure?.code != "MOSS_LIMIT_EXHAUSTED")
+        #expect(manifest.coverage.truncated)
+        #expect(manifest.coverage.strategy == .backendTruncated)
+        // 22.5 s promoted from each of the two 30 s floor leaves, plus the
+        // clean 60 s second half.
+        #expect(abs(manifest.coverage.processedDurationS - 105) < 0.01)
+        #expect(manifest.failure?.message.contains("promoted") == true)
+        #expect(try AudioPreprocessor.sha256(of: input) == inputHash)
+
+        let promoted = try jsonObject(
+            "primary/attempts/chunk-0000-root-l-l/outcome.json",
+            in: run
+        )
+        #expect(promoted["status"] as? String == "partial_prefix_promoted")
+        #expect(promoted["stop_reason"] as? String == "repetitionDegeneration")
+        #expect(promoted["error_code"] as? String
+            == "ASR_REPETITION_DEGENERATION")
+        #expect(promoted["result_path"] as? String != nil)
+        #expect(promoted["canonical_promoted"] as? Bool == false)
+
+        let partial = try jsonObject("primary/partial-coverage.json", in: run)
+        let missing = try #require(partial["missing"] as? [[String: Any]])
+        #expect(missing.count == 2)
+        #expect(missing.allSatisfy {
+            $0["stop_reason"] as? String == "repetitionDegeneration"
+        })
+        #expect(missing.allSatisfy {
+            ($0["end_s"] as? Double ?? 0) > ($0["start_s"] as? Double ?? 0)
+        })
+        let partialIDs = partial["partial_attempt_ids"] as? [String]
+        #expect(partialIDs?.count == 2)
+        let promotion = try jsonObject("primary/promotion.json", in: run)
+        #expect((promotion["partial_prefix_attempt_ids"] as? [String])?.count
+            == 2)
+        #expect((promotion["eos_leaf_attempt_ids"] as? [String])?
+            .contains("chunk-0000-root-l-l") == false)
+
+        // The promoted prefix still reaches the canonical merged transcript.
+        let merged: SegmentsDocument = try decode(
+            "merged/segments.json",
+            in: run
+        )
+        #expect(merged.segments.contains { $0.text.contains("prefix") })
+        #expect(Set(manifest.artifacts.map(\.path)) ==
+            (try regularRelativePaths(in: run)).subtracting(["manifest.json"]))
+    }
+
+    @Test
+    func oneUnrecoverableChunkDoesNotDiscardTheChunksAroundIt() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(
+            in: root,
+            name: "one-lost-chunk.wav",
+            durationS: 360
+        )
+        let inputHash = try AudioPreprocessor.sha256(of: input)
+        let profiles = try profileFile(
+            in: root,
+            fileName: "one-lost-chunk.json",
+            asrBackend: "vibevoice",
+            languagePin: "ko"
+        )
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        let recorder = MOSSAttemptRecorder()
+        let app = testApplication(
+            runID: "one-lost-chunk",
+            dependencies: vibeVoiceTestDependencies(
+                recorder: recorder,
+                // The whole middle chunk collapses at every depth and recovers
+                // nothing, so 120 s of 360 s is genuinely unrecoverable.
+                collapseAt: { startS, _ in startS >= 120 && startS < 240 },
+                prefixShare: 0
+            )
+        )
+
+        let runPath = try await app.execute(arguments: [
+            "run", input.path,
+            "--profile", "ko-meeting",
+            "--profiles", profiles.path,
+            "--output-root", outputRoot.path,
+        ])
+        let run = URL(fileURLWithPath: runPath, isDirectory: true)
+        let manifest: Manifest = try decode("manifest.json", in: run)
+
+        // The run keeps everything it transcribed.
+        #expect(manifest.status == .partial)
+        #expect(manifest.failure?.code == "ASR_REPETITION_DEGENERATION")
+        #expect(manifest.coverage.truncated)
+        #expect(manifest.coverage.strategy == .backendTruncated)
+        #expect(abs(manifest.coverage.processedDurationS - 240) < 0.01)
+        #expect(manifest.chunkBoundaries.map(\.status)
+            == [.succeeded, .failed, .succeeded])
+        #expect(try AudioPreprocessor.sha256(of: input) == inputHash)
+
+        // Canonical artifacts exist and carry the surviving chunks.
+        let merged: SegmentsDocument = try decode("merged/segments.json", in: run)
+        #expect(merged.segments.count == 2)
+        #expect(merged.segments.contains { $0.startS < 120 })
+        #expect(merged.segments.contains { $0.startS >= 240 })
+        #expect(merged.segments.allSatisfy { !($0.startS >= 120 && $0.startS < 240) })
+        #expect(FileManager.default.fileExists(
+            atPath: run.appendingPathComponent("primary/raw.txt").path
+        ))
+
+        // The lost range is named rather than inferred from the shortfall.
+        let partial = try jsonObject("primary/partial-coverage.json", in: run)
+        #expect(abs((partial["promoted_duration_s"] as? Double ?? 0) - 240) < 0.01)
+        #expect(abs((partial["missing_duration_s"] as? Double ?? 0) - 120) < 0.01)
+        let missing = try #require(partial["missing"] as? [[String: Any]])
+        #expect(missing.count == 4)
+        #expect(missing.allSatisfy {
+            $0["failure_code"] as? String == "ASR_REPETITION_DEGENERATION"
+        })
+        #expect(missing.allSatisfy {
+            ($0["start_s"] as? Double ?? -1) >= 120
+                && ($0["end_s"] as? Double ?? 0) <= 240.01
+        })
+        #expect(missing.map { $0["start_s"] as? Double ?? -1 }
+            == [120, 150, 180, 210])
+
+        // A promoted complete leaf stays distinguishable from a promoted
+        // prefix, which the done criteria depend on.
+        let promotion = try jsonObject("primary/promotion.json", in: run)
+        #expect((promotion["eos_leaf_attempt_ids"] as? [String])?.count == 2)
+        #expect((promotion["partial_prefix_attempt_ids"] as? [String])?.isEmpty
+            == true)
+        #expect(Set(manifest.artifacts.map(\.path)) ==
+            (try regularRelativePaths(in: run)).subtracting(["manifest.json"]))
+    }
+
+    @Test
+    func vibeVoiceCollapseWithNoPrefixFailsWithItsOwnCode() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try makeWAV(
+            in: root,
+            name: "vibevoice-no-prefix.wav",
+            durationS: 120
+        )
+        let profiles = try profileFile(
+            in: root,
+            fileName: "vibevoice-no-prefix.json",
+            asrBackend: "vibevoice",
+            languagePin: "ko"
+        )
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        let app = testApplication(
+            runID: "vibevoice-no-prefix",
+            dependencies: vibeVoiceTestDependencies(
+                recorder: MOSSAttemptRecorder(),
+                collapseAt: { _, _ in true },
+                prefixShare: 0
+            )
+        )
+
+        do {
+            _ = try await app.execute(arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--output-root", outputRoot.path,
+            ])
+            Issue.record("expected an unrecoverable degeneration failure")
+        } catch let error as CLIError {
+            #expect(error.code == "ASR_REPETITION_DEGENERATION")
+        }
+
+        let run = outputRoot.appendingPathComponent(
+            "vibevoice-no-prefix",
+            isDirectory: true
+        )
+        let manifest: Manifest = try decode("manifest.json", in: run)
+        #expect(manifest.status == .failed)
+        #expect(manifest.failure?.code == "ASR_REPETITION_DEGENERATION")
+        let exhausted = try jsonObject(
+            "primary/attempts/chunk-0000-root-l-l/outcome.json",
+            in: run
+        )
+        #expect(exhausted["status"] as? String == "repetition_degeneration")
+        #expect(exhausted["error_code"] as? String
+            == "ASR_REPETITION_DEGENERATION")
+        #expect(exhausted["result_path"] == nil)
+    }
+
+    // MARK: - Derived speaker proposal
+
+    /// Produce a source run whose second segment two speakers hold in an exact
+    /// tie, which is the shape the real recording is full of.
+    private func speakerProposalSourceRun(
+        in root: URL,
+        runID: String,
+        dependencies: CLIDependencies,
+        postprocess: String = "none"
+    ) async throws -> URL {
+        let input = try makeWAV(in: root, name: "input.wav")
+        let profiles = try profileFile(
+            in: root,
+            fileName: "speaker-proposal-profiles.json",
+            postprocess: postprocess
+        )
+        // The proposal is a separate operation with its own profile: the source
+        // run here was made without any post-processing backend at all.
+        _ = try profileFile(
+            in: root,
+            fileName: "speaker-proposal-codex.json",
+            postprocess: "codex"
+        )
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        let app = testApplication(runID: runID, dependencies: dependencies)
+        let runPath = try await app.execute(arguments: [
+            "run", input.path,
+            "--profile", "ko-meeting",
+            "--profiles", profiles.path,
+            "--output-root", outputRoot.path,
+        ])
+        return URL(fileURLWithPath: runPath, isDirectory: true)
+    }
+
+    private func fileHashes(under root: URL) throws -> [String: String] {
+        var hashes: [String: String] = [:]
+        let prefix = root.standardizedFileURL.path + "/"
+        let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey]
+        )!
+        while let url = enumerator.nextObject() as? URL {
+            guard try url.resourceValues(
+                forKeys: [.isRegularFileKey]
+            ).isRegularFile == true else { continue }
+            let relative = String(
+                url.standardizedFileURL.path.dropFirst(prefix.count)
+            )
+            guard !relative.hasPrefix("derived/") else { continue }
+            hashes[relative] = try AudioPreprocessor.sha256(of: url)
+        }
+        return hashes
+    }
+
+    @Test
+    func speakerProposalMarksItselfAndLeavesEverySourceByteAlone() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let run = try await speakerProposalSourceRun(
+            in: root,
+            runID: "proposal-source",
+            dependencies: speakerProposalDependencies()
+        )
+        let before = try fileHashes(under: run)
+        let merged: SegmentsDocument = try decode("merged/segments.json", in: run)
+        let unattributed = merged.segments.indices.filter {
+            UnattributedSpeaker.isUnattributed(merged.segments[$0].speaker)
+        }
+        #expect(unattributed == [1])
+
+        let app = testApplication(
+            runID: "proposal-derived",
+            dependencies: speakerProposalDependencies()
+        )
+        let output = try await app.executeProposeSpeakers(
+            runPath: run.path,
+            profileName: "ko-meeting",
+            profilesPath: root.appendingPathComponent(
+                "speaker-proposal-codex.json"
+            ).path
+        )
+        let lines = output.split(separator: "\n").map(String.init)
+        #expect(lines.count == 3)
+        #expect(lines[1] == "unattributed=1 proposed=1 declined=0")
+        #expect(lines[2].hasPrefix("source_coverage=complete"))
+        let derived = URL(fileURLWithPath: lines[0], isDirectory: true)
+
+        #expect(try fileHashes(under: run) == before)
+
+        let manifest: DerivedManifest = try decode("manifest.json", in: derived)
+        #expect(manifest.status == .succeeded)
+        #expect(manifest.failure == nil)
+        #expect(manifest.operation.kind == .speakerProposal)
+        #expect(manifest.operation.sourceCoverageComplete)
+        #expect(manifest.operation.sourceCoverage?.missingDurationS == 0)
+        #expect(manifest.source.segmentsPath == "merged/segments.json")
+        #expect(manifest.source.segmentsSHA256 == before["merged/segments.json"])
+        #expect(manifest.artifacts.map(\.kind) == ["speaker_proposals"])
+        #expect(manifest.artifacts.map(\.path) == ["speaker/proposals.json"])
+        // D25 and D29: the model that produced the proposal is named in the
+        // manifest, and it received text only.
+        #expect(manifest.postprocess?.inputMode == .textOnly)
+        #expect(manifest.postprocess?.modelID == CodexPostprocessBackend.modelName)
+        #expect(
+            manifest.postprocess?.sourceSegmentsSHA256
+                == manifest.source.segmentsSHA256
+        )
+
+        let document: SpeakerProposalDocument = try decode(
+            "speaker/proposals.json",
+            in: derived
+        )
+        #expect(document.layer == "speaker-proposal")
+        #expect(document.sourceCoverage.complete)
+        #expect(document.sourceCoverage.inputDurationS == 2)
+        #expect(document.unattributedSpeakers == ["UNASSIGNED", "UNKNOWN"])
+        #expect(document.proposals.map(\.segmentIndex) == [1])
+        #expect(document.declined.isEmpty)
+        let proposal = try #require(document.proposals.first)
+        #expect(proposal.proposedSpeaker == "S0")
+        #expect(proposal.acousticOutcome == "no_dominant_speaker")
+        #expect(proposal.acousticCandidates.map(\.speaker) == ["S0", "S1"])
+        #expect(proposal.acousticCandidates.allSatisfy { $0.share == 0.5 })
+        #expect(proposal.acousticCandidates.allSatisfy { $0.overlapS > 0 })
+        #expect(!proposal.reason.isEmpty)
+
+        // The proposal is named as a proposal in the bytes themselves, and the
+        // word "speaker" alone never carries it.
+        let raw = try jsonObject("speaker/proposals.json", in: derived)
+        let rawProposals = try #require(raw["proposals"] as? [[String: Any]])
+        #expect(Set(rawProposals[0].keys) == [
+            "segment_index",
+            "proposed_speaker",
+            "reason",
+            "acoustic_outcome",
+            "acoustic_timeline_coverage",
+            "acoustic_candidates",
+        ])
+    }
+
+    @Test
+    func speakerProposalRefusesToTouchAnAcousticallyAssignedSegment() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let run = try await speakerProposalSourceRun(
+            in: root,
+            runID: "proposal-override-source",
+            dependencies: speakerProposalDependencies()
+        )
+        let before = try fileHashes(under: run)
+        // A proposer that answers about segment 0, which the acoustics assigned.
+        let overriding = speakerProposalDependencies { backend, request in
+            var result = try speakerProposalFixture(backend, request)
+            result.document.proposals.append(SpeakerProposal(
+                segmentIndex: 0,
+                proposedSpeaker: "S1",
+                reason: "invented",
+                acousticOutcome: "attributed",
+                acousticTimelineCoverage: 1,
+                acousticCandidates: []
+            ))
+            return result
+        }
+        let app = testApplication(
+            runID: "proposal-override",
+            dependencies: overriding
+        )
+        await #expect(throws: CLIError.self) {
+            _ = try await app.executeProposeSpeakers(
+                runPath: run.path,
+                profileName: "ko-meeting",
+                profilesPath: root.appendingPathComponent(
+                    "speaker-proposal-codex.json"
+                ).path
+            )
+        }
+        #expect(try fileHashes(under: run) == before)
+        let derived = run.appendingPathComponent(
+            "derived/proposal-override",
+            isDirectory: true
+        )
+        let manifest: DerivedManifest = try decode("manifest.json", in: derived)
+        #expect(manifest.status == .failed)
+        #expect(manifest.failure?.code == "POSTPROCESS_ERROR")
+        #expect(!FileManager.default.fileExists(
+            atPath: derived.appendingPathComponent("speaker/proposals.json").path
+        ))
+    }
+
+    @Test
+    func speakerProposalRefusesASpeakerTheAcousticsNeverOffered() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let run = try await speakerProposalSourceRun(
+            in: root,
+            runID: "proposal-invented-source",
+            dependencies: speakerProposalDependencies()
+        )
+        let inventing = speakerProposalDependencies { backend, request in
+            try speakerProposalFixture(
+                backend,
+                request,
+                override: [1: ("S9", "a speaker no turn ever held")]
+            )
+        }
+        let app = testApplication(
+            runID: "proposal-invented",
+            dependencies: inventing
+        )
+        await #expect(throws: CLIError.self) {
+            _ = try await app.executeProposeSpeakers(
+                runPath: run.path,
+                profileName: "ko-meeting",
+                profilesPath: root.appendingPathComponent(
+                    "speaker-proposal-codex.json"
+                ).path
+            )
+        }
+    }
+
+    @Test
+    func aSilentProposerStillAccountsForEveryUnattributedSegment() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let run = try await speakerProposalSourceRun(
+            in: root,
+            runID: "proposal-silent-source",
+            dependencies: speakerProposalDependencies()
+        )
+        let silent = speakerProposalDependencies { backend, request in
+            try speakerProposalFixture(
+                backend,
+                request,
+                dropDecisionsFor: Set(request.evidence.map(\.segmentIndex))
+            )
+        }
+        let app = testApplication(runID: "proposal-silent", dependencies: silent)
+        let output = try await app.executeProposeSpeakers(
+            runPath: run.path,
+            profileName: "ko-meeting",
+            profilesPath: root.appendingPathComponent(
+                "speaker-proposal-codex.json"
+            ).path
+        )
+        let lines = output.split(separator: "\n").map(String.init)
+        #expect(lines[1] == "unattributed=1 proposed=0 declined=1")
+        let derived = URL(fileURLWithPath: lines[0], isDirectory: true)
+        let document: SpeakerProposalDocument = try decode(
+            "speaker/proposals.json",
+            in: derived
+        )
+        #expect(document.proposals.isEmpty)
+        #expect(document.declined.map(\.segmentIndex) == [1])
+        // Nothing was proposed, and the file still says which segment was
+        // looked at, what the acoustics held, and why it was left alone.
+        #expect(!document.declined[0].reason.isEmpty)
+        #expect(document.declined[0].acousticCandidates.count == 2)
+    }
+
+    @Test
+    func speakerProposalDerivesFromAPartialRunThatCorrectionRefuses() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        var dependencies = speakerProposalDependencies()
+        dependencies.postprocess = { _, _ in
+            throw PostprocessError.backendFailed("synthetic postprocess failure")
+        }
+        let outputRoot = root.appendingPathComponent("runs", isDirectory: true)
+        let input = try makeWAV(in: root, name: "input.wav")
+        let profiles = try profileFile(
+            in: root,
+            fileName: "speaker-proposal-profiles.json",
+            postprocess: "local"
+        )
+        let app = testApplication(
+            runID: "proposal-partial-source",
+            dependencies: dependencies
+        )
+        await #expect(throws: CLIError.self) {
+            _ = try await app.execute(arguments: [
+                "run", input.path,
+                "--profile", "ko-meeting",
+                "--profiles", profiles.path,
+                "--output-root", outputRoot.path,
+            ])
+        }
+        let run = outputRoot.appendingPathComponent(
+            "proposal-partial-source",
+            isDirectory: true
+        )
+        let sourceManifest: Manifest = try decode("manifest.json", in: run)
+        #expect(sourceManifest.status == .partial)
+
+        // Correction and translation still refuse a source that is not a
+        // complete run; only the proposal path accepts it, and it records that
+        // the source was partial.
+        #expect(throws: RunIntegrityError.sourceRunNotComplete) {
+            _ = try RunIntegrityVerifier.verifyCompletedRun(at: run)
+        }
+        let derivedApp = testApplication(
+            runID: "proposal-partial",
+            dependencies: speakerProposalDependencies()
+        )
+        await #expect(throws: CLIError.self) {
+            _ = try await derivedApp.executePostprocess(
+                runPath: run.path,
+                profileName: "ko-meeting",
+                profilesPath: profiles.path,
+                glossaryPath: nil
+            )
+        }
+        let output = try await derivedApp.executeProposeSpeakers(
+            runPath: run.path,
+            profileName: "ko-meeting",
+            profilesPath: profiles.path
+        )
+        let derived = URL(
+            fileURLWithPath: output.split(separator: "\n").map(String.init)[0],
+            isDirectory: true
+        )
+        let manifest: DerivedManifest = try decode("manifest.json", in: derived)
+        #expect(manifest.status == .succeeded)
+        #expect(manifest.operation.kind == .speakerProposal)
+        #expect(!manifest.operation.sourceCoverageComplete)
+        let coverage = try #require(manifest.operation.sourceCoverage)
+        #expect(coverage.inputDurationS == sourceManifest.coverage.inputDurationS)
+        #expect(
+            coverage.processedDurationS
+                == sourceManifest.coverage.processedDurationS
+        )
+        // A proposal over an incomplete transcript says so in the artifact that
+        // carries the proposals, not only in the manifest beside it.
+        let document: SpeakerProposalDocument = try decode(
+            "speaker/proposals.json",
+            in: derived
+        )
+        #expect(document.sourceCoverage == coverage)
+        #expect(!document.sourceCoverage.complete)
+        #expect(output.split(separator: "\n").map(String.init)[2]
+            .hasPrefix("source_coverage=partial"))
+    }
+
+    /// Drive the real proposal path, with the real backend, against a run this
+    /// repository never sees. Opt-in, because it needs a model and a network,
+    /// and because the only run worth pointing it at is private.
+    ///
+    ///     MACCHERONI_RUN_SPEAKER_PROPOSAL_INTEGRATION=1 \
+    ///     MACCHERONI_SPEAKER_PROPOSAL_RUN=<run directory> \
+    ///     MACCHERONI_SPEAKER_PROPOSAL_PROFILES=<profiles.json> \
+    ///     swift test --filter actualSpeakerProposalDerivesFromAPreservedRun
+    @Test(.enabled(if: ProcessInfo.processInfo.environment[
+        "MACCHERONI_RUN_SPEAKER_PROPOSAL_INTEGRATION"
+    ] == "1"))
+    func actualSpeakerProposalDerivesFromAPreservedRun() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        let runPath = try #require(
+            environment["MACCHERONI_SPEAKER_PROPOSAL_RUN"]
+        )
+        let profilesPath = try #require(
+            environment["MACCHERONI_SPEAKER_PROPOSAL_PROFILES"]
+        )
+        let run = URL(fileURLWithPath: runPath, isDirectory: true)
+        let before = try fileHashes(under: run)
+        let merged: SegmentsDocument = try decode("merged/segments.json", in: run)
+        let unattributed = merged.segments.indices.filter {
+            UnattributedSpeaker.isUnattributed(merged.segments[$0].speaker)
+        }
+
+        let output = try await CLIApplication().executeProposeSpeakers(
+            runPath: runPath,
+            profileName: environment["MACCHERONI_SPEAKER_PROPOSAL_PROFILE"]
+                ?? "ko-meeting",
+            profilesPath: profilesPath
+        )
+        let lines = output.split(separator: "\n").map(String.init)
+        print("[speaker-proposal] \(lines.joined(separator: " | "))")
+
+        // The source run is byte-identical afterwards, including the manifest.
+        #expect(try fileHashes(under: run) == before)
+
+        let derived = URL(fileURLWithPath: lines[0], isDirectory: true)
+        let manifest: DerivedManifest = try decode("manifest.json", in: derived)
+        #expect(manifest.status == .succeeded)
+        #expect(manifest.operation.kind == .speakerProposal)
+        #expect(manifest.source.segmentsSHA256 == before["merged/segments.json"])
+        #expect(manifest.artifacts.map(\.kind) == ["speaker_proposals"])
+        let coverage = try #require(manifest.operation.sourceCoverage)
+        print(
+            "[speaker-proposal] source_coverage complete=\(coverage.complete)"
+                + " processed_s=\(coverage.processedDurationS)"
+                + " input_s=\(coverage.inputDurationS)"
+                + " missing_s=\(coverage.missingDurationS)"
+        )
+        print(
+            "[speaker-proposal] backend="
+                + "\(manifest.postprocess?.backend.name ?? "?")"
+                + "@\(manifest.postprocess?.backend.version ?? "?")"
+                + " model=\(manifest.postprocess?.modelID ?? "?")"
+                + " batches=\(manifest.postprocess?.batching?.batchesPlanned ?? -1)"
+                + " source_coverage_complete="
+                + "\(manifest.operation.sourceCoverageComplete)"
+        )
+
+        let document: SpeakerProposalDocument = try decode(
+            "speaker/proposals.json",
+            in: derived
+        )
+        #expect(document.sourceCoverage == coverage)
+        let covered = Set(document.proposals.map(\.segmentIndex))
+            .union(document.declined.map(\.segmentIndex))
+        #expect(covered == Set(unattributed))
+        #expect(
+            document.proposals.count + document.declined.count
+                == unattributed.count
+        )
+        for proposal in document.proposals {
+            #expect(UnattributedSpeaker.isUnattributed(
+                merged.segments[proposal.segmentIndex].speaker
+            ))
+            if !proposal.acousticCandidates.isEmpty {
+                #expect(proposal.acousticCandidates.map(\.speaker)
+                    .contains(proposal.proposedSpeaker))
+            }
+        }
+        let withCandidates = document.proposals
+            .filter { !$0.acousticCandidates.isEmpty }
+        print(
+            "[speaker-proposal] unattributed=\(unattributed.count)"
+                + " proposed=\(document.proposals.count)"
+                + " declined=\(document.declined.count)"
+                + " proposals_with_candidates=\(withCandidates.count)"
+        )
+        var outcomes: [String: Int] = [:]
+        for record in document.proposals { outcomes[record.acousticOutcome, default: 0] += 1 }
+        var declinedOutcomes: [String: Int] = [:]
+        for record in document.declined { declinedOutcomes[record.acousticOutcome, default: 0] += 1 }
+        print("[speaker-proposal] proposed outcomes=\(outcomes.sorted { $0.key < $1.key })")
+        print("[speaker-proposal] declined outcomes=\(declinedOutcomes.sorted { $0.key < $1.key })")
+    }
+
+    @Test
+    func proposeSpeakersTakesNoGlossaryOptionsAndNeedsAProfile() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = testApplication(runID: "proposal-usage")
+        await #expect(throws: CLIError.self) {
+            _ = try await app.execute(arguments: [
+                "propose-speakers", root.path, "--profile", "ko-meeting",
+                "--glossary", "terms.txt",
+            ])
+        }
+        await #expect(throws: CLIError.self) {
+            _ = try await app.execute(arguments: ["propose-speakers", root.path])
+        }
+    }
+
     private func testApplication(
         runID: String,
         dependencies: CLIDependencies? = nil,
@@ -3072,6 +4288,14 @@ private func testDependencies(
                 manifestPostprocess: provenance
             )
         },
+        proposeSpeakers: { backend, request in
+            if postprocessFailure {
+                throw PostprocessError.backendFailed(
+                    "synthetic speaker proposal failure"
+                )
+            }
+            return try speakerProposalFixture(backend, request)
+        },
         glossaryRevisionStoreRoot: cliTestGlossaryRevisionStoreRoot,
         postprocessDoctor: { backend in
             [
@@ -3135,6 +4359,184 @@ private func postprocessOnlyDependencies(
         return try await translate(backend, request)
     }
     return dependencies
+}
+
+private func vibeVoiceTestDependencies(
+    recorder: MOSSAttemptRecorder,
+    collapseAt: @escaping @Sendable (Double, Double) -> Bool,
+    prefixShare: Double = 0.75
+) -> CLIDependencies {
+    CLIDependencies(
+        inputSHA256: { try AudioPreprocessor.sha256(of: $0) },
+        inferencePolicy: { CLIASRInferencePolicy.policy(for: $0) },
+        preprocess: { input, directory in
+            try AudioPreprocessor().preprocess(
+                inputURL: input,
+                outputDirectory: directory
+            )
+        },
+        vad: { url in
+            let duration = try audioDuration(url)
+            return try VoiceActivityMap(
+                durationS: duration,
+                regions: [
+                    VoiceActivityRegion(
+                        startS: 0,
+                        endS: duration,
+                        kind: .silence
+                    ),
+                ]
+            )
+        },
+        plan: { map, policy, totalSamples in
+            try InferenceLeafPlanner().proposeInitialLeaves(
+                totalSamples: totalSamples,
+                activityMap: map,
+                configuration: policy.planningConfiguration
+            )
+        },
+        expectedHelperFingerprint: { _ in nil },
+        mossContextPlan: { _, _, _, _, _ in nil },
+        diarize: { _, request in
+            recorder.recordDiarization()
+            let duration = try audioDuration(request.audioURL)
+            let segments = [
+                TimelineSegment(speaker: "S0", startS: 0, endS: duration),
+            ]
+            return DiarizationTimelineResult(
+                timeline: Timeline(segments: segments),
+                rawJSON: try JSONEncoder().encode(segments),
+                normalizationWarnings: []
+            )
+        },
+        asr: { selected, request, _, maximumTokens in
+            guard selected == .vibeVoice else {
+                throw CLIError.run(
+                    "synthetic dependency only supports VibeVoice"
+                )
+            }
+            recorder.record(startS: request.startS, endS: request.endS)
+            let evidence = try vibeVoiceAttemptEvidence(
+                request: request,
+                maximumTokens: maximumTokens,
+                collapsed: collapseAt(request.startS, request.endS)
+            )
+            guard collapseAt(request.startS, request.endS) else {
+                return .complete(CLIASRExecution(
+                    result: ASRResult(
+                        rawText: "EOS-\(request.startS)-\(request.endS)",
+                        segments: [
+                            Segment(
+                                speaker: "UNASSIGNED",
+                                startS: request.startS + 0.1,
+                                endS: request.endS - 0.1,
+                                text: "complete \(request.startS)",
+                                language: "ko"
+                            ),
+                        ],
+                        glossaryApplied: request.glossary != nil
+                    ),
+                    evidence: evidence
+                ))
+            }
+            let coverageS = (request.endS - request.startS) * prefixShare
+            let prefix = coverageS <= 0 ? nil : ASRPartialPrefix(
+                coverageS: coverageS,
+                rawText: "[{\"prefix\":true}]",
+                segments: [
+                    Segment(
+                        speaker: "UNASSIGNED",
+                        startS: request.startS,
+                        endS: request.startS + coverageS,
+                        text: "recovered prefix \(request.startS)",
+                        language: "ko",
+                        flags: ["repetition_degenerate"]
+                    ),
+                ],
+                completeObjectCount: 3,
+                promotedObjectCount: 1,
+                degenerateObjectCount: 2,
+                repetitionRunThreshold: 12,
+                repetitionRunMaximum: 2,
+                tailRepetitionRun: 900,
+                terminalCollapse: true
+            )
+            return .limit(CLIASRLimit(
+                stopReason: .repetitionDegeneration,
+                evidence: evidence,
+                partialPrefix: prefix
+            ))
+        },
+        postprocess: { _, _ in
+            throw CLIError.run("synthetic VibeVoice postprocess was not expected")
+        },
+        translate: { _, _ in
+            throw CLIError.run("synthetic VibeVoice translation was not expected")
+        },
+        proposeSpeakers: { _, _ in
+            throw CLIError.run("synthetic VibeVoice speaker proposal was not expected")
+        },
+        glossaryRevisionStoreRoot: cliTestGlossaryRevisionStoreRoot,
+        postprocessDoctor: { _ in ["check.postprocess=true"] },
+        doctor: { _, _ in ["check.asr_doctor=true"] }
+    )
+}
+
+private func vibeVoiceAttemptEvidence(
+    request: ASRRequest,
+    maximumTokens: Int,
+    collapsed: Bool
+) throws -> CLIASRAttemptEvidence {
+    let inputSHA256 = try AudioPreprocessor.sha256(of: request.audioURL)
+    let instructionSHA256 = String(repeating: "c", count: 64)
+    let language: String
+    switch request.language {
+    case .automatic: language = "auto"
+    case let .fixed(value): language = value
+    }
+    return CLIASRAttemptEvidence(
+        glossary: request.glossary.map {
+            ManifestGlossary(
+                provided: true,
+                sha256: $0.sha256,
+                itemCount: $0.entries.count,
+                injectionMode: request.injectionMode,
+                applied: true
+            )
+        } ?? .absent,
+        rawEvidence: Data(
+            "vibevoice raw \(request.startS)-\(request.endS)".utf8
+        ),
+        runnerRecordEvidence: Data(
+            "{\"outcome\":\"\(collapsed ? "limit" : "complete")\"}\n".utf8
+        ),
+        glossaryPayloadSHA256: request.glossary == nil ? nil : instructionSHA256,
+        glossaryPayloadEntryCount: request.glossary?.entries.count ?? 0,
+        metrics: ASRAttemptMetrics(
+            preprocessingS: nil,
+            audioEncoderS: nil,
+            decoderPrefillS: nil,
+            tokenDecodeS: nil,
+            promptTokens: 42,
+            generatedTokens: collapsed ? maximumTokens : 128,
+            maxTokens: maximumTokens,
+            contextHardCapTokens: nil,
+            audioDurationS: request.endS - request.startS,
+            totalS: 0,
+            modelLoadS: nil,
+            runnerWallTimeS: 0,
+            peakRSSBytes: nil,
+            unavailable: ["context_hard_cap_tokens": "not exposed"]
+        ),
+        language: ASRLanguageEvidence(
+            requested: language,
+            instructionSHA256: instructionSHA256,
+            promptGuidanceApplied: false
+        ),
+        helperFingerprint: nil,
+        inputSHA256: inputSHA256,
+        command: ["mlx_audio.stt.generate"]
+    )
 }
 
 private final class MOSSAttemptRecorder: @unchecked Sendable {
@@ -3318,6 +4720,9 @@ private func mossTestDependencies(
         translate: { _, _ in
             throw CLIError.run("synthetic MOSS translation was not expected")
         },
+        proposeSpeakers: { _, _ in
+            throw CLIError.run("synthetic MOSS speaker proposal was not expected")
+        },
         glossaryRevisionStoreRoot: cliTestGlossaryRevisionStoreRoot,
         postprocessDoctor: { _ in ["check.postprocess=true"] },
         doctor: { _, _ in ["check.asr_doctor=true"] }
@@ -3463,6 +4868,32 @@ private func testMOSSFingerprint() -> ASRHelperFingerprint {
     )
 }
 
+/// The system temporary directory reached through its `/private` spelling, the
+/// shape a `--output-root` under `/private/tmp` hands the run writer.  The
+/// directory is created because Foundation folds `/private` away only for a
+/// path that already exists, which is exactly the asymmetry the containment
+/// check has to survive.
+private func privateSpellingTemporaryDirectory() throws -> URL {
+    let system = FileManager.default.temporaryDirectory
+    let spelled = system.path.hasPrefix("/private/")
+        ? system
+        : URL(fileURLWithPath: "/private" + system.path, isDirectory: true)
+    let url = spelled.appendingPathComponent(
+        "MaccheroniCLITests-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(
+        at: url,
+        withIntermediateDirectories: false
+    )
+    guard url.standardizedFileURL.path != url.path else {
+        throw CLIError.run(
+            "the temporary directory does not fold through /private"
+        )
+    }
+    return url
+}
+
 private func temporaryDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(
         "MaccheroniCLITests-\(UUID().uuidString)",
@@ -3545,6 +4976,26 @@ private func glossaryFile(in directory: URL) throws -> URL {
     return url
 }
 
+/// A stub backend executable, so a rejection can be reproduced through the real
+/// adapter without a model.
+private func writeExecutable(_ script: String, in directory: URL) throws -> URL {
+    let url = directory.appendingPathComponent("backend-stub.sh")
+    try Data(script.utf8).write(to: url, options: .withoutOverwriting)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: url.path
+    )
+    return url
+}
+
+/// The adapter's quarantine directory is shared, so a test names only the files
+/// its own run added there and leaves the rest alone.
+private func quarantinedFileNames(in root: URL) -> Set<String> {
+    Set(
+        (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+    )
+}
+
 private func audioDuration(_ url: URL) throws -> Double {
     let audio = try AVAudioFile(forReading: url)
     return Double(audio.length) / audio.processingFormat.sampleRate
@@ -3568,6 +5019,19 @@ private func jsonObject(
         throw CLIError.run("test JSON object is malformed: \(path)")
     }
     return object
+}
+
+private func jsonArray(
+    _ path: String,
+    in root: URL
+) throws -> [[String: Any]] {
+    let value = try JSONSerialization.jsonObject(
+        with: Data(contentsOf: root.appendingPathComponent(path))
+    )
+    guard let array = value as? [[String: Any]] else {
+        throw CLIError.run("test JSON array is malformed: \(path)")
+    }
+    return array
 }
 
 private func manifestSchemaFailureCodes() throws -> Set<String> {
@@ -3634,4 +5098,164 @@ private func relativePath(of entry: URL, in root: URL) throws -> String {
         throw CLIError.run("test artifact is outside its run root")
     }
     return components.dropFirst(base.count).joined(separator: "/")
+}
+
+// MARK: - Speaker proposal fixtures
+
+/// A proposer that names the leading acoustic candidate for the first
+/// unattributed segment and declines the rest. Enough to exercise the derived
+/// run without a model, and shaped so every unattributed segment is accounted
+/// for the way the real proposer accounts for them.
+func speakerProposalFixture(
+    _ backend: PostprocessBackendID,
+    _ request: SpeakerProposalRequest,
+    override: [Int: (speaker: String?, reason: String)] = [:],
+    dropDecisionsFor: Set<Int> = []
+) throws -> SpeakerProposalResult {
+    let policy = switch backend {
+    case .codex: CodexPostprocessBackend.defaultBatchPolicy
+    case .local: LocalPostprocessBackend.defaultBatchPolicy
+    }
+    var proposals: [SpeakerProposal] = []
+    var declined: [SpeakerProposalDeclination] = []
+    for (offset, record) in request.evidence.enumerated() {
+        if dropDecisionsFor.contains(record.segmentIndex) {
+            declined.append(SpeakerProposalDeclination(
+                segmentIndex: record.segmentIndex,
+                reason: "the proposer returned no decision for this segment",
+                acousticOutcome: record.outcome,
+                acousticTimelineCoverage: record.timelineCoverage,
+                acousticCandidates: record.candidates
+            ))
+            continue
+        }
+        let chosen: String?
+        let reason: String
+        if let forced = override[record.segmentIndex] {
+            chosen = forced.speaker
+            reason = forced.reason
+        } else if offset == 0 {
+            chosen = record.candidates.first?.speaker
+            reason = "the previous turn asks this speaker a direct question"
+        } else {
+            chosen = nil
+            reason = "the surrounding turns do not prefer either candidate"
+        }
+        if let chosen {
+            proposals.append(SpeakerProposal(
+                segmentIndex: record.segmentIndex,
+                proposedSpeaker: chosen,
+                reason: reason,
+                acousticOutcome: record.outcome,
+                acousticTimelineCoverage: record.timelineCoverage,
+                acousticCandidates: record.candidates
+            ))
+        } else {
+            declined.append(SpeakerProposalDeclination(
+                segmentIndex: record.segmentIndex,
+                reason: reason,
+                acousticOutcome: record.outcome,
+                acousticTimelineCoverage: record.timelineCoverage,
+                acousticCandidates: record.candidates
+            ))
+        }
+    }
+    let outputTextUTF8Bytes = proposals.reduce(0) {
+        $0 + $1.proposedSpeaker.utf8.count + $1.reason.utf8.count
+    } + declined.reduce(0) { $0 + $1.reason.utf8.count }
+    let responseUTF8Bytes = outputTextUTF8Bytes + 64
+    let inputTextUTF8Bytes = request.document.segments.reduce(0) {
+        $0 + $1.text.utf8.count
+    }
+    let batching = policy.manifest(
+        batchesPlanned: 1,
+        maximumObservedPromptUTF8Bytes: min(100, policy.maximumPromptUTF8Bytes),
+        maximumObservedInputTextUTF8Bytes: inputTextUTF8Bytes,
+        maximumObservedEstimatedOutputTokens: policy.estimatedOutputTokens(
+            inputTextUTF8Bytes: inputTextUTF8Bytes,
+            segmentCount: request.document.segments.count
+        ),
+        maximumObservedOutputTextUTF8Bytes: outputTextUTF8Bytes,
+        maximumObservedResponseUTF8Bytes: responseUTF8Bytes,
+        maximumObservedAcceptedOutputTokenUpperBound:
+            policy.acceptedOutputTokenUpperBound(
+                responseUTF8Bytes: responseUTF8Bytes,
+                segmentCount: request.evidence.count
+            )
+    )
+    let provenance: ManifestPostprocess
+    switch backend {
+    case .codex:
+        provenance = ManifestPostprocess(
+            backend: BackendDescriptor(
+                name: "codex-app-server",
+                version: "codex-cli test"
+            ),
+            modelID: CodexPostprocessBackend.modelName,
+            sourceSegmentsSHA256: request.sourceSegmentsSHA256,
+            batching: batching
+        )
+    case .local:
+        let pinned = LocalPostprocessBackend.pinnedModel
+        provenance = ManifestPostprocess(
+            backend: LocalPostprocessBackend.descriptor,
+            modelID: pinned.hfModelID,
+            modelRevision: pinned.revision,
+            quantization: pinned.quantization,
+            sourceSegmentsSHA256: request.sourceSegmentsSHA256,
+            batching: batching
+        )
+    }
+    return SpeakerProposalResult(
+        document: SpeakerProposalDocument(
+            sourceSegmentsSHA256: request.sourceSegmentsSHA256,
+            sourceCoverage: request.sourceCoverage,
+            proposals: proposals,
+            declined: declined,
+            batches: [TranslationBatchRecord(
+                batchIndex: 0,
+                segmentIndices: request.evidence.map(\.segmentIndex),
+                promptUTF8Bytes: min(100, policy.maximumPromptUTF8Bytes),
+                inputTextUTF8Bytes: inputTextUTF8Bytes,
+                estimatedOutputTokens: policy.estimatedOutputTokens(
+                    inputTextUTF8Bytes: inputTextUTF8Bytes,
+                    segmentCount: request.document.segments.count
+                ),
+                outputTextUTF8Bytes: outputTextUTF8Bytes,
+                responseUTF8Bytes: responseUTF8Bytes,
+                acceptedOutputTokenUpperBound:
+                    policy.acceptedOutputTokenUpperBound(
+                        responseUTF8Bytes: responseUTF8Bytes,
+                        segmentCount: request.evidence.count
+                    )
+            )]
+        ),
+        manifestPostprocess: provenance
+    )
+}
+
+/// The stub run leaves one segment attributed and one unattributed: two
+/// speakers hold the second segment in an exact tie, which is the case the real
+/// 20.7-minute recording is full of.
+func speakerProposalDependencies(
+    proposal: @escaping @Sendable (
+        PostprocessBackendID,
+        SpeakerProposalRequest
+    ) async throws -> SpeakerProposalResult = { try speakerProposalFixture($0, $1) }
+) -> CLIDependencies {
+    var dependencies = testDependencies()
+    dependencies.diarize = { _, _ in
+        let segments = [
+            TimelineSegment(speaker: "S0", startS: 0, endS: 1),
+            TimelineSegment(speaker: "S0", startS: 1, endS: 2),
+            TimelineSegment(speaker: "S1", startS: 1, endS: 2),
+        ]
+        return DiarizationTimelineResult(
+            timeline: Timeline(segments: segments),
+            rawJSON: try JSONEncoder().encode(segments),
+            normalizationWarnings: []
+        )
+    }
+    dependencies.proposeSpeakers = proposal
+    return dependencies
 }
