@@ -28,6 +28,231 @@ enum RunLoadIssue: Equatable {
     }
 }
 
+/// A user-facing dependency the capture screen can name when a profile cannot run.
+///
+/// Each group folds a family of `doctor` `check.*` keys, or one capture permission,
+/// into one sentence. Raw check keys never reach the screen.
+enum ProfileReadinessGroup: String, CaseIterable, Identifiable, Sendable {
+    case speechModel
+    case speakerSeparation
+    case voiceActivity
+    case speechRuntime
+    case storage
+    case otherDependency
+    case microphonePermission
+    case systemAudioPermission
+
+    var id: String { rawValue }
+
+    /// Groups the `doctor` report can report on, in display order.
+    static let dependencyGroups: [ProfileReadinessGroup] = [
+        .speechModel,
+        .speakerSeparation,
+        .voiceActivity,
+        .speechRuntime,
+        .storage,
+        .otherDependency,
+    ]
+
+    /// Maps one failed `doctor` check key onto the group that names it in user language.
+    static func group(forFailedCheck key: String) -> ProfileReadinessGroup? {
+        guard key.hasPrefix("check.") else { return nil }
+        let name = String(key.dropFirst("check.".count))
+        if name.hasPrefix("asr") || name.hasPrefix("moss_release_helper") {
+            return .speechModel
+        }
+        if name.hasPrefix("diarization") { return .speakerSeparation }
+        if name.hasPrefix("vad") { return .voiceActivity }
+        if name.hasPrefix("offline_speech_runtime") || name == "afconvert_executable" {
+            return .speechRuntime
+        }
+        if name == "storage" { return .storage }
+        return .otherDependency
+    }
+
+    /// A missing local dependency makes any run fail, so it blocks capture too.
+    /// A denied microphone only makes a new recording fail; an existing audio file
+    /// still transcribes.
+    var blocksRecording: Bool {
+        self != .systemAudioPermission
+    }
+
+    var blocksAudioImport: Bool {
+        switch self {
+        case .microphonePermission, .systemAudioPermission: false
+        default: true
+        }
+    }
+
+    var reason: LocalizedStringResource {
+        switch self {
+        case .speechModel:
+            appLocalized("The speech recognition model this profile needs is not installed on this Mac.")
+        case .speakerSeparation:
+            appLocalized("The speaker separation model this profile needs is not installed on this Mac.")
+        case .voiceActivity:
+            appLocalized("The voice activity model this profile needs is not installed on this Mac.")
+        case .speechRuntime:
+            appLocalized("The local speech runtime this profile needs is missing or does not match its pinned version.")
+        case .storage:
+            appLocalized("The folder Maccheroni saves recordings and runs in cannot be reached.")
+        case .otherDependency:
+            appLocalized("Another local component this profile needs is not ready.")
+        case .microphonePermission:
+            appLocalized("Maccheroni cannot use the microphone. Turn Maccheroni on in System Settings > Privacy & Security > Microphone.")
+        case .systemAudioPermission:
+            appLocalized("System audio is not recordable yet. Turn Maccheroni on in System Settings > Privacy & Security > Screen & System Audio Recording.")
+        }
+    }
+}
+
+/// Why the readiness answer itself is missing, as opposed to a dependency being absent.
+enum ProfileReadinessProbeIssue: Equatable, Sendable {
+    case engineMissing
+    case engineFailed(String)
+    case reportUnreadable
+
+    /// An absent engine is positive evidence that no run can happen: every run launches
+    /// this same binary. A report that did not arrive, or did not parse, is absence of
+    /// evidence about the machine and does not take a control away.
+    var blocksRun: Bool {
+        self == .engineMissing
+    }
+
+    var message: LocalizedStringResource {
+        switch self {
+        case .engineMissing:
+            appLocalized("The Maccheroni command-line engine is missing.")
+        case let .engineFailed(detail):
+            appLocalized("Maccheroni could not check whether this profile is ready: \(detail)")
+        case .reportUnreadable:
+            appLocalized("Maccheroni could not read the readiness report from its command-line engine.")
+        }
+    }
+}
+
+/// The `doctor` schema 1.1.0 readiness envelope, as the app consumes it.
+struct ProfileReadinessReport: Equatable, Sendable {
+    var ready: Bool
+    var schemaVersion: String
+    var values: [String: String]
+
+    var failedCheckKeys: [String] {
+        values.filter { $0.key.hasPrefix("check.") && $0.value == "false" }
+            .keys
+            .sorted()
+    }
+}
+
+enum ProfileReadinessProbeOutcome: Equatable, Sendable {
+    case report(ProfileReadinessReport)
+    case issue(ProfileReadinessProbeIssue)
+}
+
+protocol ProfileReadinessProbing: Sendable {
+    func probe(_ profile: AppProfile) async -> ProfileReadinessProbeOutcome
+}
+
+enum CapturePermissionState: Equatable, Sendable {
+    case granted
+    case denied
+    case undetermined
+}
+
+/// Microphone and screen-recording states, read without prompting the user.
+struct CapturePermissions: Equatable, Sendable {
+    var microphone: CapturePermissionState
+    var systemAudio: CapturePermissionState
+
+    static let unknown = CapturePermissions(
+        microphone: .undetermined,
+        systemAudio: .undetermined
+    )
+
+    /// `undetermined` never blocks: macOS asks for the permission on first capture,
+    /// and blocking would put the request itself out of reach. Screen recording has
+    /// no API that separates "never asked" from "denied", so it is reported without
+    /// blocking and only the microphone can withhold the record button.
+    var blockingGroups: [ProfileReadinessGroup] {
+        var groups: [ProfileReadinessGroup] = []
+        if microphone == .denied { groups.append(.microphonePermission) }
+        if systemAudio != .granted { groups.append(.systemAudioPermission) }
+        return groups
+    }
+
+    static func current() -> CapturePermissions {
+        let microphone: CapturePermissionState = switch AVCaptureDevice
+            .authorizationStatus(for: .audio)
+        {
+        case .authorized: .granted
+        case .denied, .restricted: .denied
+        default: .undetermined
+        }
+        return CapturePermissions(
+            microphone: microphone,
+            systemAudio: CGPreflightScreenCaptureAccess() ? .granted : .undetermined
+        )
+    }
+}
+
+/// What the capture screen states about the selected profile before a run starts.
+struct ProfileReadiness: Equatable, Sendable {
+    var profileID: AppProfileID
+    var asrBackend: String = ""
+    var blockingGroups: [ProfileReadinessGroup] = []
+    var probeIssue: ProfileReadinessProbeIssue?
+    var hasResult = false
+    var isEvaluating = false
+
+    var isReady: Bool {
+        hasResult && blockingGroups.isEmpty && probeIssue == nil
+    }
+
+    /// A ready profile adds no chrome; only an obstruction or an unanswered check shows.
+    var showsNotice: Bool {
+        !blockingGroups.isEmpty || probeIssue != nil
+    }
+
+    var blocksRecording: Bool {
+        probeIssue?.blocksRun == true || blockingGroups.contains(where: \.blocksRecording)
+    }
+
+    var blocksAudioImport: Bool {
+        probeIssue?.blocksRun == true || blockingGroups.contains(where: \.blocksAudioImport)
+    }
+
+    /// Whether the screen takes a run control away, and so owes the user a headline.
+    var isObstructed: Bool {
+        blocksRecording || blocksAudioImport
+    }
+
+    /// Whether the provisioning command actually installs what is missing. Offering it
+    /// for a dependency the script does not fetch would repeat the defect this surface
+    /// exists to fix: pointing the user at an action that cannot work.
+    var needsProvisioning: Bool {
+        blockingGroups.contains { group in
+            switch group {
+            case .speechModel:
+                Self.scriptProvisionedASRBackends.contains(asrBackend)
+            case .speakerSeparation, .voiceActivity, .speechRuntime, .otherDependency:
+                true
+            case .storage, .microphonePermission, .systemAudioPermission:
+                false
+            }
+        }
+    }
+
+    /// The command that provisions the local speech dependencies. The script accepts
+    /// only `ko-meeting`, and the assets it installs are shared by every app profile.
+    static let provisioningCommand =
+        "zsh scripts/setup-transcription-runtime.zsh --profile ko-meeting"
+
+    /// ASR backends `scripts/setup-transcription-runtime.zsh` installs. It fetches the
+    /// VibeVoice, Pyannote Community-1 and Silero assets; the MOSS model is not among
+    /// them, so an it-dialogue speech model is named without offering that command.
+    static let scriptProvisionedASRBackends: Set<String> = ["vibevoice"]
+}
+
 @MainActor
 @Observable
 final class MaccheroniAppModel {
@@ -45,12 +270,21 @@ final class MaccheroniAppModel {
     private(set) var codexAvailability: CodexAvailability
     private(set) var activeExistingRunPostprocess: ActiveExistingRunPostprocess?
     private(set) var existingRunPostprocessFailures: [UUID: String] = [:]
+    private(set) var profileReadiness: ProfileReadiness
 
     var selection: AppSelection = .capture {
         didSet { refreshSelectedRun() }
     }
     var selectedProfileID: AppProfileID {
-        didSet { defaults.set(selectedProfileID.rawValue, forKey: "selectedProfile") }
+        didSet {
+            defaults.set(selectedProfileID.rawValue, forKey: "selectedProfile")
+            guard selectedProfileID != oldValue else { return }
+            profileReadiness = ProfileReadiness(
+                profileID: selectedProfileID,
+                asrBackend: selectedProfile.asrBackend
+            )
+            evaluateProfileReadiness()
+        }
     }
     var selectedPostprocess: PostprocessChoice {
         didSet { defaults.set(selectedPostprocess.rawValue, forKey: "selectedPostprocess") }
@@ -77,6 +311,14 @@ final class MaccheroniAppModel {
     private let recorder: any RecordingControlling
     private let defaults: UserDefaults
     private let recordSaver: ([LibraryRecord]) throws -> Void
+    private let readinessProbe: any ProfileReadinessProbing
+    private let capturePermissions: @Sendable () -> CapturePermissions
+    /// How long a run started before the first readiness answer waits for it. Kept well
+    /// under the probe's own timeout: the legitimate answer arrives within about four
+    /// seconds, and the record button is already disabled while this wait runs, so a
+    /// longer budget would only stare back at the user.
+    private let readinessWaitBudget: Duration
+    private var readinessTask: Task<Void, Never>?
     private var activeTask: Task<Void, Never>?
     private var captureTimer: Task<Void, Never>?
     private var player: AVPlayer?
@@ -93,7 +335,11 @@ final class MaccheroniAppModel {
         recorder: any RecordingControlling,
         defaults: UserDefaults = .standard,
         codexAvailability: CodexAvailability = .unavailable,
-        recordSaver: (([LibraryRecord]) throws -> Void)? = nil
+        recordSaver: (([LibraryRecord]) throws -> Void)? = nil,
+        readinessProbe: (any ProfileReadinessProbing)? = nil,
+        capturePermissions: @escaping @Sendable () -> CapturePermissions =
+            CapturePermissions.current,
+        readinessWaitBudget: Duration = .seconds(10)
     ) throws {
         self.repository = repository
         self.profiles = profiles
@@ -102,6 +348,9 @@ final class MaccheroniAppModel {
         self.defaults = defaults
         self.codexAvailability = codexAvailability
         self.recordSaver = recordSaver ?? repository.saveRecords
+        self.readinessProbe = readinessProbe ?? ProcessProfileReadinessProbe()
+        self.capturePermissions = capturePermissions
+        self.readinessWaitBudget = readinessWaitBudget
         let storedProfile = defaults.string(forKey: "selectedProfile")
             .flatMap(AppProfileID.init(rawValue:))
         let storedPostprocess = defaults.string(forKey: "selectedPostprocess")
@@ -120,6 +369,11 @@ final class MaccheroniAppModel {
             : (storedTranslationTarget ?? .english)
         let initialProfile = storedProfile ?? .koreanITMeeting
         selectedProfileID = initialProfile
+        profileReadiness = ProfileReadiness(
+            profileID: initialProfile,
+            asrBackend: profiles.first(where: { $0.id == initialProfile })?.asrBackend
+                ?? profiles[0].asrBackend
+        )
         selectedPostprocess = initialPostprocess
         selectedPostprocessMode = initialPostprocessMode
         selectedTranslationTarget = initialTranslationTarget
@@ -178,6 +432,7 @@ final class MaccheroniAppModel {
 
     func shutdown() {
         activeTask?.cancel()
+        readinessTask?.cancel()
         captureTimer?.cancel()
         stopPlayback()
         activeRecordingSelection = nil
@@ -200,9 +455,15 @@ final class MaccheroniAppModel {
 
     var isTranscribing: Bool { activeRecordID != nil && activeTask != nil }
     var canCancelActiveOperation: Bool { activeTask != nil }
-    var canImportAudio: Bool { !isRecording && activeTask == nil }
+    var canImportAudio: Bool {
+        !isRecording && activeTask == nil && !profileReadiness.blocksAudioImport
+    }
+
     var canStartTranscription: Bool { !isRecording && activeTask == nil }
-    var canStartRecording: Bool { !isRecording && activeTask == nil }
+
+    var canStartRecording: Bool {
+        !isRecording && activeTask == nil && !profileReadiness.blocksRecording
+    }
 
     func canPostprocess(_ record: LibraryRecord) -> Bool {
         canStartTranscription
@@ -258,6 +519,84 @@ final class MaccheroniAppModel {
         errorMessage = nil
     }
 
+    /// Re-asks `doctor` and the capture permissions whether the selected profile can run.
+    /// The capture screen calls this when it appears and when the user asks again; the
+    /// profile picker calls it through `selectedProfileID`.
+    func evaluateProfileReadiness() {
+        let profile = selectedProfile
+        readinessTask?.cancel()
+        profileReadiness.profileID = profile.id
+        profileReadiness.isEvaluating = true
+        let probe = readinessProbe
+        let permissions = capturePermissions
+        readinessTask = Task { [weak self] in
+            let outcome = await probe.probe(profile)
+            let observedPermissions = permissions()
+            guard !Task.isCancelled else { return }
+            self?.applyProfileReadiness(
+                profileID: profile.id,
+                outcome: outcome,
+                permissions: observedPermissions
+            )
+        }
+    }
+
+    /// Closes the window between the capture screen appearing and the first readiness
+    /// answer arriving. The synchronous guards see `blocks… == false` while no result
+    /// exists yet, so a run started inside that window waits for the answer it was
+    /// about to race, and is refused with the reason if the profile turns out not ready.
+    ///
+    /// The wait is bounded and gives up quietly. A budget that expires leaves
+    /// `hasResult` false, so nothing blocks and the run proceeds: a readiness answer
+    /// that did not arrive is a fact about one attempt, not about the machine. Polling
+    /// rather than awaiting `readinessTask.value` is deliberate — a `Task<Void, Never>`
+    /// does not return early on cancellation, so awaiting it is exactly the wedge this
+    /// budget exists to prevent. Cancelling the run's own task ends the wait at once;
+    /// `readinessTask` is not cancelled with it, because the capture screen still owns
+    /// that evaluation and needs its answer.
+    private func awaitPendingProfileReadiness() async {
+        guard !profileReadiness.hasResult, readinessTask != nil else { return }
+        let deadline = ContinuousClock.now.advanced(by: readinessWaitBudget)
+        while !profileReadiness.hasResult,
+              !Task.isCancelled,
+              ContinuousClock.now < deadline
+        {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    func applyProfileReadiness(
+        profileID: AppProfileID,
+        outcome: ProfileReadinessProbeOutcome,
+        permissions: CapturePermissions
+    ) {
+        guard profileID == selectedProfileID else { return }
+        let profile = selectedProfile
+        var groups: [ProfileReadinessGroup] = []
+        var issue: ProfileReadinessProbeIssue?
+        switch outcome {
+        case let .report(report):
+            let failed = Set(report.failedCheckKeys.compactMap(
+                ProfileReadinessGroup.group(forFailedCheck:)
+            ))
+            groups = ProfileReadinessGroup.dependencyGroups.filter(failed.contains)
+            if groups.isEmpty, !report.ready {
+                groups = [.otherDependency]
+            }
+        case let .issue(probeIssue):
+            issue = probeIssue
+        }
+        groups += permissions.blockingGroups
+        profileReadiness = ProfileReadiness(
+            profileID: profileID,
+            asrBackend: profile.asrBackend,
+            blockingGroups: groups,
+            probeIssue: issue,
+            hasResult: true,
+            isEvaluating: false
+        )
+    }
+
     func refreshCodexAvailability() async {
         codexAvailability = await Task.detached(priority: .utility) {
             await CodexPostprocessBackend.detectAvailability()
@@ -296,9 +635,18 @@ final class MaccheroniAppModel {
             errorMessage = appString("Wait for the active transcription to finish.")
             return
         }
+        guard !profileReadiness.blocksAudioImport else {
+            errorMessage = appString("This profile is not ready to run.")
+            return
+        }
         activeTask = Task { [weak self] in
             guard let self else { return }
             defer { finishActiveTranscription() }
+            await awaitPendingProfileReadiness()
+            guard !profileReadiness.blocksAudioImport else {
+                errorMessage = appString("This profile is not ready to run.")
+                return
+            }
             var pendingRecordIDs: [UUID] = []
             var failures: [String] = []
             for url in urls {
@@ -353,7 +701,9 @@ final class MaccheroniAppModel {
     }
 
     func startRecording() {
-        guard !isRecording, activeTask == nil else { return }
+        guard !isRecording, activeTask == nil, !profileReadiness.blocksRecording else {
+            return
+        }
         errorMessage = nil
         activeRecordingSelection = RecordingSelection(
             profileID: selectedProfileID,
@@ -365,6 +715,12 @@ final class MaccheroniAppModel {
             guard let self else { return }
             var captureStarted = false
             do {
+                await awaitPendingProfileReadiness()
+                guard !profileReadiness.blocksRecording else {
+                    throw TranscriptionRunnerError.pipelineFailed(
+                        appString("This profile is not ready to run.")
+                    )
+                }
                 activeRecordingStorageAccess = try repository
                     .beginAccessingRecordingsRoot()
                 let session = try await recorder.start(in: repository.recordingsRoot)
@@ -1205,4 +1561,196 @@ private struct RecordingSelection {
     let postprocess: PostprocessChoice
     let postprocessMode: PostprocessOperationChoice
     let translationTarget: AppLanguage
+}
+
+/// Asks the shipped command-line engine `maccheroni doctor --json` about the selected
+/// profile. The engine owns the readiness contract; the app only reads its answer.
+///
+/// The profile is handed over as a one-profile registry, the same way a run does, because
+/// the app's profile names are not in the engine's bundled registry. Post-processing is
+/// pinned to `none` here: this surface answers whether the transcription pipeline can run,
+/// and the post-processing backend keeps its own notice next to its picker.
+struct ProcessProfileReadinessProbe: ProfileReadinessProbing {
+    /// Accepted `schema_version` major component of the doctor envelope.
+    static let supportedSchemaMajorVersion = "1"
+
+    /// How long `doctor` may take before the probe stops waiting for it. Measured cost
+    /// is 0.49 s against an empty cache, which fails before reaching Python, and 3.91 s
+    /// against a provisioned one, where the Python import dominates; a partly
+    /// provisioned cache fails late and lands near the top of that range. Thirty
+    /// seconds leaves roughly 7x headroom over the slowest legitimate case, so reaching
+    /// it means the engine is stuck rather than slow.
+    var timeout: Duration = .seconds(30)
+
+    var executableResolver: @Sendable () -> URL? = ProcessProfileReadinessProbe.resolveExecutable
+
+    func probe(_ profile: AppProfile) async -> ProfileReadinessProbeOutcome {
+        guard let executableURL = executableResolver(),
+              FileManager.default.isExecutableFile(atPath: executableURL.path)
+        else {
+            return .issue(.engineMissing)
+        }
+        return await Task.detached(priority: .userInitiated) {
+            let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "maccheroni-readiness-\(UUID().uuidString.lowercased())",
+                isDirectory: true
+            )
+            defer { try? FileManager.default.removeItem(at: scratch) }
+            let profilesURL = scratch.appendingPathComponent("profiles.json")
+            let stdoutURL = scratch.appendingPathComponent("stdout")
+            let stderrURL = scratch.appendingPathComponent("stderr")
+            do {
+                try FileManager.default.createDirectory(
+                    at: scratch,
+                    withIntermediateDirectories: false
+                )
+                try Self.registryDocument(for: profile).write(to: profilesURL)
+                guard FileManager.default.createFile(atPath: stdoutURL.path, contents: nil),
+                      FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
+                else {
+                    return .issue(.engineFailed(
+                        "could not create readiness output capture files"
+                    ))
+                }
+            } catch {
+                return .issue(.engineFailed(error.localizedDescription))
+            }
+            let stdout = try? FileHandle(forWritingTo: stdoutURL)
+            let stderr = try? FileHandle(forWritingTo: stderrURL)
+            defer {
+                try? stdout?.close()
+                try? stderr?.close()
+            }
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = [
+                "doctor",
+                "--profile", profile.cliProfile,
+                "--profiles", profilesURL.path,
+                "--json",
+            ]
+            process.environment = ProcessInfo.processInfo.environment.merging([
+                "HF_HUB_OFFLINE": "1",
+            ]) { current, _ in current }
+            process.standardOutput = stdout
+            process.standardError = stderr
+            do {
+                try process.run()
+            } catch {
+                return .issue(.engineFailed(error.localizedDescription))
+            }
+            // A hung `doctor` must not hold the readiness answer open forever: the
+            // capture screen waits on it before starting a run. The watchdog signals
+            // the process by pid rather than capturing the non-Sendable `Process`.
+            let startedAt = ContinuousClock.now
+            let pid = process.processIdentifier
+            let watchdog = Task {
+                try? await Task.sleep(for: timeout)
+                guard !Task.isCancelled else { return }
+                kill(pid, SIGTERM)
+            }
+            process.waitUntilExit()
+            watchdog.cancel()
+            try? stdout?.synchronize()
+            if process.terminationReason == .uncaughtSignal,
+               startedAt.duration(to: .now) >= timeout
+            {
+                return .issue(.engineFailed(
+                    "the readiness check did not finish within \(timeout.components.seconds) seconds"
+                ))
+            }
+            // `doctor` exits nonzero when the profile is not ready and still writes the
+            // envelope, so the exit status is not read: the envelope is the answer.
+            guard let data = try? Data(contentsOf: stdoutURL) else {
+                return .issue(.reportUnreadable)
+            }
+            return Self.decode(data)
+        }.value
+    }
+
+    static func decode(_ data: Data) -> ProfileReadinessProbeOutcome {
+        struct Envelope: Decodable {
+            var ready: Bool
+            var schemaVersion: String
+            var values: [String: String]
+
+            enum CodingKeys: String, CodingKey {
+                case ready, values
+                case schemaVersion = "schema_version"
+            }
+        }
+        guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
+              envelope.schemaVersion.split(separator: ".").first.map(String.init)
+              == supportedSchemaMajorVersion
+        else {
+            return .issue(.reportUnreadable)
+        }
+        return .report(ProfileReadinessReport(
+            ready: envelope.ready,
+            schemaVersion: envelope.schemaVersion,
+            values: envelope.values
+        ))
+    }
+
+    static func registryDocument(for profile: AppProfile) throws -> Data {
+        struct Diarization: Encodable {
+            var enabled = true
+            var backend: String
+        }
+        struct Profile: Encodable {
+            var name: String
+            var asrBackend: String
+            var languagePin: String
+            var diarization: Diarization
+            var postprocess = "none"
+
+            enum CodingKeys: String, CodingKey {
+                case name, diarization, postprocess
+                case asrBackend = "asr_backend"
+                case languagePin = "language_pin"
+            }
+        }
+        struct Document: Encodable {
+            var schemaVersion = "1.0.0"
+            var profiles: [Profile]
+
+            enum CodingKeys: String, CodingKey {
+                case profiles
+                case schemaVersion = "schema_version"
+            }
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(Document(profiles: [Profile(
+            name: profile.cliProfile,
+            asrBackend: profile.asrBackend,
+            languagePin: profile.languagePin,
+            diarization: Diarization(backend: profile.diarizationBackend)
+        )]))
+    }
+
+    /// Mirrors the lookup order `ProcessTranscriptionRunner.resolveExecutable` uses, so
+    /// readiness is answered by the same engine binary a run would launch.
+    static func resolveExecutable() -> URL? {
+        let environment = ProcessInfo.processInfo.environment
+        if let override = environment["MACCHERONI_CLI_PATH"], !override.isEmpty {
+            return URL(fileURLWithPath: override)
+        }
+        if let current = Bundle.main.executableURL {
+            let sibling = current.deletingLastPathComponent()
+                .appendingPathComponent("maccheroni")
+            if FileManager.default.isExecutableFile(atPath: sibling.path) { return sibling }
+        }
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        for path in [".build/release/maccheroni", ".build/debug/maccheroni"] {
+            let candidate = repository.appendingPathComponent(path)
+            if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
+    }
 }

@@ -1224,3 +1224,528 @@ struct LibraryRepository: Sendable {
         return VerifiedArtifactData(url: url, data: data)
     }
 }
+
+// MARK: - Failed and partial run diagnosis
+
+/// What one finished run's own records say happened to it.
+///
+/// `partial` and `failed` are told apart by `manifest.status` alone. The chunk
+/// status vocabulary has no partial value, so a chunk whose inference leaf
+/// promoted only a recovered prefix is still recorded `succeeded`, and
+/// `chunks_completed` can equal `chunks_planned` on a run that never covered
+/// its input (`docs/engineering-constraint-policy.md`, the promotion block).
+/// Nothing in this diagnosis reads a chunk count.
+enum RunDisposition: Hashable, Sendable {
+    case succeeded
+    case partial
+    case failed
+    case canceled
+    /// The run directory is on disk but its manifest cannot be read.
+    case unreadable
+}
+
+/// The cause a failed or partial run is presented under.
+///
+/// Deliberately coarser than the engine's error codes: one case per sentence
+/// the screen is able to say. It carries no raw value, so an engine identifier
+/// cannot reach the screen by being printed.
+enum RunFailureCause: Hashable, CaseIterable, Sendable {
+    /// The decoder stopped producing new content and repeated itself to the
+    /// end of its output budget.
+    case repetitionDegeneration
+    /// A limit outcome on a non-MOSS backend that recovery could not clear.
+    case asrLimitExhausted
+    /// The MOSS recovery tree was spent. Kept apart because the screen offers
+    /// a different next step for it.
+    case mossLimitExhausted
+    case asrTimedOut
+    case asrOutputUnusable
+    case modelIdentityMismatch
+    case diarizationRejectedTimeline
+    case audioNotPreparable
+    case mergeRejected
+    case postprocessFailed
+    case glossaryRejected
+    case profileRejected
+    case missingDependency
+    case missingFile
+    case integrityMismatch
+    case unreadableRunRecord
+    case canceled
+    case unspecified
+}
+
+extension RunFailureCause {
+    /// Classify one manifest failure.
+    ///
+    /// `failure.code` is the primary signal and always wins. A few codes bundle
+    /// conditions the screen has to keep apart — a missing helper, a missing
+    /// input file and a rejected timeline all arrive as `DIARIZATION_ERROR` —
+    /// so those codes are sub-divided by markers taken from the engine's own
+    /// English messages (`DiarizationError` in
+    /// `Sources/MaccheroniDiarize/DiarizationAdapters.swift`, `ASRAdapterError`
+    /// in `Sources/MaccheroniASR/ASRAdapters.swift`). Markers only ever narrow
+    /// a code; they never override one.
+    static func classify(code: String, message: String) -> RunFailureCause {
+        switch code {
+        case "ASR_REPETITION_DEGENERATION": return .repetitionDegeneration
+        case "ASR_LIMIT_EXHAUSTED": return .asrLimitExhausted
+        case "MOSS_LIMIT_EXHAUSTED": return .mossLimitExhausted
+        case "SOURCE_INTEGRITY_ERROR": return .integrityMismatch
+        case "MERGE_ERROR": return .mergeRejected
+        case "POSTPROCESS_ERROR": return .postprocessFailed
+        case "GLOSSARY_ERROR": return .glossaryRejected
+        case "CANCELED": return .canceled
+        case "asr_timeout": return .asrTimedOut
+        case "asr_model_identity_mismatch": return .modelIdentityMismatch
+        case "asr_malformed_output", "asr_evidence_unavailable",
+             "asr_coverage_shortfall", "invalid_eos_output",
+             "limit_isolated", "backend_failed":
+            return narrowed(message, fallback: .asrOutputUnusable)
+        case "ASR_ERROR":
+            return narrowed(message, fallback: .asrOutputUnusable)
+        case "DIARIZATION_ERROR":
+            return narrowed(message, fallback: .diarizationRejectedTimeline)
+        case "PREPROCESS_ERROR", "VAD_ERROR", "CHUNK_PLAN_ERROR":
+            return narrowed(message, fallback: .audioNotPreparable)
+        case "PROFILE_ERROR", "USAGE_ERROR":
+            return narrowed(message, fallback: .profileRejected)
+        default:
+            return narrowed(message, fallback: .unspecified)
+        }
+    }
+
+    /// Markers, most specific first. Order matters: `required exact model
+    /// snapshot is missing` and `input audio is missing` both contain the word
+    /// missing, and they are different sentences on the screen.
+    private static let markers: [(needle: String, cause: RunFailureCause)] = [
+        ("model identity mismatch", .modelIdentityMismatch),
+        ("did not prove the pinned model identity", .modelIdentityMismatch),
+        ("input audio is missing", .missingFile),
+        ("input audio cannot be read", .missingFile),
+        ("no such file", .missingFile),
+        ("is no longer available", .missingFile),
+        ("executable is missing", .missingDependency),
+        ("is missing or not executable", .missingDependency),
+        ("runner is missing", .missingDependency),
+        ("model snapshot is missing", .missingDependency),
+        ("runtime is missing", .missingDependency),
+        ("is not installed", .missingDependency),
+        ("command-line engine is missing", .missingDependency),
+        ("could not start", .missingDependency),
+        ("integrity check", .integrityMismatch),
+        ("hash mismatch", .integrityMismatch),
+        ("hash changed", .integrityMismatch),
+        ("sha256 mismatch", .integrityMismatch),
+        ("limit outcome", .asrLimitExhausted),
+    ]
+
+    private static func narrowed(
+        _ message: String,
+        fallback: RunFailureCause
+    ) -> RunFailureCause {
+        let haystack = message.lowercased()
+        for marker in markers where haystack.contains(marker.needle) {
+            return marker.cause
+        }
+        return fallback
+    }
+}
+
+/// How one pipeline stage of a finished run reads in the checklist.
+enum RunStageStatus: Hashable, Sendable {
+    case finished
+    /// The stage produced output, but not for the whole planned input.
+    case incomplete
+    case failed
+    case notReached
+}
+
+/// One source range that produced no transcript. `stopReason` is the engine's
+/// own `stop_reason` string, kept so the range list is complete and
+/// deliberately never rendered.
+struct RunMissingRange: Decodable, Equatable, Sendable {
+    var startS: Double
+    var endS: Double
+    var stopReason: String
+
+    enum CodingKeys: String, CodingKey {
+        case startS = "start_s"
+        case endS = "end_s"
+        case stopReason = "stop_reason"
+    }
+}
+
+/// `primary/partial-coverage.json`, the run's own statement of what it
+/// promoted and what it did not.
+struct RunPartialCoverage: Decodable, Equatable, Sendable {
+    var inputDurationS: Double
+    var promotedDurationS: Double
+    var missingDurationS: Double
+    var missing: [RunMissingRange]
+
+    enum CodingKeys: String, CodingKey {
+        case missing
+        case inputDurationS = "input_duration_s"
+        case promotedDurationS = "promoted_duration_s"
+        case missingDurationS = "missing_duration_s"
+    }
+}
+
+/// How much of the input a run actually transcribed.
+///
+/// Every value here comes from `coverage` and `primary/partial-coverage.json`.
+/// `chunks_planned` and `chunks_completed` are deliberately absent.
+struct RunCoverageSummary: Equatable, Sendable {
+    var inputDurationS: Double
+    var processedDurationS: Double
+    var truncated: Bool
+    var isBackendTruncated: Bool
+    var missingRanges: [RunMissingRange]
+    var missingDurationS: Double?
+
+    var coveredFraction: Double {
+        guard inputDurationS > 0 else { return 0 }
+        return min(1, max(0, processedDurationS / inputDurationS))
+    }
+
+    /// True when the run promoted some transcript but not for the whole input.
+    var isShortOfInput: Bool {
+        truncated || isBackendTruncated
+            || processedDurationS < inputDurationS - 0.05
+    }
+
+    var promotedAnyAudio: Bool { processedDurationS > 0 }
+}
+
+/// The failure screen's whole input: what happened, where it stopped, how far
+/// the checklist got, and how much audio was transcribed.
+struct RunOutcome: Equatable, Sendable {
+    var disposition: RunDisposition
+    var cause: RunFailureCause?
+    var failedStage: PipelineStage?
+    var stageStatuses: [PipelineStage: RunStageStatus]
+    var coverage: RunCoverageSummary?
+    /// The engine's own message, sanitized. English, diagnostic, secondary to
+    /// the localized sentence the cause produces.
+    var detail: String?
+
+    var isFailureLike: Bool {
+        disposition == .failed || disposition == .partial
+            || disposition == .unreadable
+    }
+
+    func status(of stage: PipelineStage) -> RunStageStatus {
+        stageStatuses[stage] ?? .notReached
+    }
+}
+
+extension RunOutcome {
+    /// Stage order the checklist walks. `.preparing` is included so a run that
+    /// never reached preprocessing has a row to fail on instead of marking a
+    /// stage that did not run.
+    static func stageOrder(includesPostprocess: Bool) -> [PipelineStage] {
+        var stages: [PipelineStage] = [
+            .preparing, .preprocessing, .diarization, .asr, .merge,
+        ]
+        if includesPostprocess { stages.append(.postprocess) }
+        return stages
+    }
+
+    /// The artifact kind whose presence proves a stage finished.
+    private static let completionEvidence: [(PipelineStage, String)] = [
+        (.preprocessing, "preprocessed_audio"),
+        (.diarization, "diarization_timeline"),
+        (.asr, "primary_segments"),
+        (.merge, "merged_segments"),
+        (.postprocess, "postprocess_segments"),
+    ]
+
+    /// The stage a failure code names outright. `nil` means the code says
+    /// nothing about the stage and the artifact evidence has to decide.
+    private static func namedStage(for cause: RunFailureCause) -> PipelineStage? {
+        switch cause {
+        case .audioNotPreparable: .preprocessing
+        case .diarizationRejectedTimeline: .diarization
+        case .repetitionDegeneration, .asrLimitExhausted, .mossLimitExhausted,
+             .asrTimedOut, .asrOutputUnusable, .modelIdentityMismatch:
+            .asr
+        case .mergeRejected: .merge
+        case .postprocessFailed: .postprocess
+        case .missingDependency, .missingFile, .integrityMismatch,
+             .glossaryRejected, .profileRejected, .unreadableRunRecord,
+             .canceled, .unspecified:
+            nil
+        }
+    }
+
+    /// Build the diagnosis from a run's own records.
+    ///
+    /// - Parameters:
+    ///   - manifest: the run manifest, or `nil` when it is absent or unreadable.
+    ///   - partialCoverage: `primary/partial-coverage.json` when it exists.
+    ///   - runDirectoryExists: whether the run directory is still on disk.
+    ///   - recordState: the library entry's state, used only when no manifest
+    ///     was ever written.
+    ///   - recordFailureMessage: the app-side error text for the same case.
+    ///   - postprocessRequested: whether the checklist shows a post-processing
+    ///     row.
+    static func make(
+        manifest: Manifest?,
+        partialCoverage: RunPartialCoverage? = nil,
+        runDirectoryExists: Bool,
+        recordState: LibraryItemState,
+        recordFailureMessage: String? = nil,
+        postprocessRequested: Bool = false
+    ) -> RunOutcome {
+        let stages = stageOrder(includesPostprocess: postprocessRequested)
+        guard let manifest else {
+            return withoutManifest(
+                runDirectoryExists: runDirectoryExists,
+                recordState: recordState,
+                recordFailureMessage: recordFailureMessage,
+                stages: stages
+            )
+        }
+
+        let kinds = Set(manifest.artifacts.map(\.kind))
+        var completed: Set<PipelineStage> = [.preparing]
+        for (stage, kind) in completionEvidence where kinds.contains(kind) {
+            completed.insert(stage)
+        }
+
+        let coverage = RunCoverageSummary(
+            inputDurationS: manifest.coverage.inputDurationS,
+            processedDurationS: manifest.coverage.processedDurationS,
+            truncated: manifest.coverage.truncated,
+            isBackendTruncated: manifest.coverage.strategy == .backendTruncated,
+            missingRanges: partialCoverage?.missing ?? [],
+            missingDurationS: partialCoverage?.missingDurationS
+        )
+
+        let disposition: RunDisposition = switch manifest.status {
+        case .succeeded: .succeeded
+        case .partial: .partial
+        case .canceled: .canceled
+        case .failed: .failed
+        }
+
+        guard disposition != .succeeded else {
+            var statuses: [PipelineStage: RunStageStatus] = [:]
+            for stage in stages {
+                statuses[stage] = completed.contains(stage) ? .finished : .notReached
+            }
+            return RunOutcome(
+                disposition: .succeeded,
+                cause: nil,
+                failedStage: nil,
+                stageStatuses: statuses,
+                coverage: coverage,
+                detail: nil
+            )
+        }
+
+        let cause: RunFailureCause? = manifest.failure.map {
+            classify(disposition: disposition, failure: $0)
+        }
+        let failedStage = resolveFailedStage(
+            cause: cause,
+            completed: completed,
+            stages: stages,
+            disposition: disposition
+        )
+        let statuses = stageStatuses(
+            stages: stages,
+            completed: completed,
+            failedStage: failedStage,
+            disposition: disposition,
+            coverage: coverage
+        )
+        return RunOutcome(
+            disposition: disposition,
+            cause: cause,
+            failedStage: failedStage,
+            stageStatuses: statuses,
+            coverage: coverage,
+            detail: sanitizedDetail(manifest.failure?.message)
+        )
+    }
+
+    private static func classify(
+        disposition: RunDisposition,
+        failure: Failure
+    ) -> RunFailureCause {
+        disposition == .canceled
+            ? .canceled
+            : RunFailureCause.classify(code: failure.code, message: failure.message)
+    }
+
+    private static func resolveFailedStage(
+        cause: RunFailureCause?,
+        completed: Set<PipelineStage>,
+        stages: [PipelineStage],
+        disposition: RunDisposition
+    ) -> PipelineStage? {
+        guard disposition != .canceled else { return nil }
+        if let cause, let named = namedStage(for: cause), stages.contains(named) {
+            return named
+        }
+        return stages.first { !completed.contains($0) }
+    }
+
+    private static func stageStatuses(
+        stages: [PipelineStage],
+        completed: Set<PipelineStage>,
+        failedStage: PipelineStage?,
+        disposition: RunDisposition,
+        coverage: RunCoverageSummary?
+    ) -> [PipelineStage: RunStageStatus] {
+        var statuses: [PipelineStage: RunStageStatus] = [:]
+        let failedIndex = failedStage.flatMap { stages.firstIndex(of: $0) }
+        for (index, stage) in stages.enumerated() {
+            if let failedIndex, index == failedIndex {
+                statuses[stage] = disposition == .partial ? .incomplete : .failed
+            } else if completed.contains(stage) {
+                let short = disposition == .partial
+                    && stage == .asr
+                    && coverage?.isShortOfInput == true
+                statuses[stage] = short ? .incomplete : .finished
+            } else if let failedIndex, index < failedIndex {
+                statuses[stage] = .finished
+            } else {
+                statuses[stage] = .notReached
+            }
+        }
+        return statuses
+    }
+
+    private static func withoutManifest(
+        runDirectoryExists: Bool,
+        recordState: LibraryItemState,
+        recordFailureMessage: String?,
+        stages: [PipelineStage]
+    ) -> RunOutcome {
+        var statuses: [PipelineStage: RunStageStatus] = [:]
+        for stage in stages { statuses[stage] = .notReached }
+        // A run the operator stopped, or one the app was quit out from under,
+        // has a known ending. Nothing here should invent a failure for it.
+        guard recordState != .cancelled, recordState != .interrupted else {
+            return RunOutcome(
+                disposition: .canceled,
+                cause: nil,
+                failedStage: nil,
+                stageStatuses: statuses,
+                coverage: nil,
+                detail: nil
+            )
+        }
+        // The engine never wrote a manifest, so the structure of the run
+        // directory decides the cause. The app-side message is English only
+        // when it comes from the engine, so it may narrow the cause but never
+        // sets it on its own.
+        let narrowed = recordFailureMessage
+            .flatMap { message -> RunFailureCause? in
+                guard !message.isEmpty else { return nil }
+                let cause = RunFailureCause.classify(code: "", message: message)
+                return cause == .unspecified ? nil : cause
+            }
+        statuses[.preparing] = .failed
+        return RunOutcome(
+            disposition: runDirectoryExists ? .unreadable : .failed,
+            cause: narrowed
+                ?? (runDirectoryExists ? .unreadableRunRecord : .missingFile),
+            failedStage: .preparing,
+            stageStatuses: statuses,
+            coverage: nil,
+            detail: sanitizedDetail(recordFailureMessage)
+        )
+    }
+
+    private static var runIDPattern: Regex<Substring> {
+        /[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}/
+    }
+
+    private static var hexTokenPattern: Regex<Substring> {
+        /\b[0-9a-f]{32,}\b/
+    }
+
+    private static var runAnnotationPattern: Regex<Substring> {
+        /\ *\[run: [^\]]*\]/
+    }
+
+    /// Strip the identifiers the failure screen must never show: the run
+    /// directory the engine appends to a thrown error, run IDs, and any
+    /// SHA-256 or revision hex token.
+    static func sanitizedDetail(_ message: String?) -> String? {
+        guard let message else { return nil }
+        var text = message.replacing(runAnnotationPattern, with: "")
+        text = text.replacing(runIDPattern, with: "…")
+        text = text.replacing(hexTokenPattern, with: "…")
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+}
+
+extension RunOutcome {
+    /// Read a run directory's own account of its outcome. Reading only: it
+    /// opens `manifest.json` and `primary/partial-coverage.json` and changes
+    /// nothing in a preserved run.
+    static func load(
+        runURL: URL?,
+        recordState: LibraryItemState,
+        recordFailureMessage: String? = nil,
+        postprocessRequested: Bool = false
+    ) -> RunOutcome {
+        guard let runURL else {
+            return make(
+                manifest: nil,
+                runDirectoryExists: false,
+                recordState: recordState,
+                recordFailureMessage: recordFailureMessage,
+                postprocessRequested: postprocessRequested
+            )
+        }
+        return make(
+            manifest: LibraryRepository.readManifest(at: runURL),
+            partialCoverage: LibraryRepository.readPartialCoverage(at: runURL),
+            runDirectoryExists: FileManager.default.fileExists(atPath: runURL.path),
+            recordState: recordState,
+            recordFailureMessage: recordFailureMessage,
+            postprocessRequested: postprocessRequested
+        )
+    }
+}
+
+extension LibraryRepository {
+    /// The same reading, inside this library's security-scoped access to its
+    /// runs root.
+    func runOutcome(
+        at runURL: URL,
+        recordState: LibraryItemState,
+        recordFailureMessage: String? = nil,
+        postprocessRequested: Bool = false
+    ) -> RunOutcome {
+        let access = (try? beginAccessingRunsRoot()) ?? nil
+        defer { access?.end() }
+        return RunOutcome.load(
+            runURL: runURL,
+            recordState: recordState,
+            recordFailureMessage: recordFailureMessage,
+            postprocessRequested: postprocessRequested
+        )
+    }
+
+    static func readManifest(at runURL: URL) -> Manifest? {
+        guard let data = try? Data(
+            contentsOf: runURL.appendingPathComponent("manifest.json")
+        ) else { return nil }
+        return try? JSONDecoder().decode(Manifest.self, from: data)
+    }
+
+    static func readPartialCoverage(at runURL: URL) -> RunPartialCoverage? {
+        guard let data = try? Data(
+            contentsOf: runURL.appendingPathComponent("primary/partial-coverage.json")
+        ) else { return nil }
+        return try? JSONDecoder().decode(RunPartialCoverage.self, from: data)
+    }
+}

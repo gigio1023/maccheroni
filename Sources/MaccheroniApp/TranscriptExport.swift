@@ -1,5 +1,6 @@
 import Foundation
 import MaccheroniCore
+import MaccheroniPostprocess
 
 enum TranscriptExportError: Error, Equatable, LocalizedError {
     case emptySpeakerName(segmentIndex: Int)
@@ -18,12 +19,32 @@ enum TranscriptExportError: Error, Equatable, LocalizedError {
     }
 }
 
-enum TranscriptDisplayLayer: Equatable, Sendable {
-    case speakerLabelled
+enum TranscriptDisplayLayer: String, Equatable, Sendable, CaseIterable, Identifiable {
+    /// The immutable merged transcript: what the speech model said, joined to
+    /// the acoustic speaker timeline. The rest of the tree calls this raw.
+    case speakerLabelled = "speaker-labelled"
     case corrected
     case translated
+    /// D46's marked non-acoustic speaker proposal, carried by a derived run.
+    /// The case exists ahead of its producer so adding the producer changes
+    /// only `TranscriptLayerCatalog.options`, not the switching around it.
+    case proposed
 
+    var id: String { rawValue }
+
+    /// Which layer a loaded result is showing.
+    ///
+    /// `kind` decides this, never `mode`. A speaker-proposal derived run keeps
+    /// `mode == .correction` for a structural reason in the manifest contract,
+    /// so reading `mode` would report a proposal run as a corrected transcript
+    /// and show text that was never corrected.
     static func displayed(in run: LoadedRun) -> TranscriptDisplayLayer {
+        if run.resultOperation?.kind == .speakerProposal {
+            // Deliberately not `.proposed`: a non-acoustic proposal is never
+            // what a reader is shown first. D46 leaves whether it may ever be
+            // the default open, and this is not the place to close it.
+            return .speakerLabelled
+        }
         let operation = run.resultOperation?.mode ?? run.effectivePostprocess?.mode
         return switch operation {
         case .correction: .corrected
@@ -37,6 +58,7 @@ enum TranscriptDisplayLayer: Equatable, Sendable {
         case .speakerLabelled: appLocalized("Speaker-labelled")
         case .corrected: appLocalized("Corrected")
         case .translated: appLocalized("Translated")
+        case .proposed: appLocalized("Proposed")
         }
     }
 
@@ -45,6 +67,138 @@ enum TranscriptDisplayLayer: Equatable, Sendable {
         case .speakerLabelled: appString("Transcript layer: Speaker-labelled", locale: locale)
         case .corrected: appString("Transcript layer: Corrected", locale: locale)
         case .translated: appString("Transcript layer: Translated", locale: locale)
+        case .proposed: appString("Transcript layer: Proposed", locale: locale)
+        }
+    }
+}
+
+/// Why a layer this product can produce is not selectable for this run. Kept as
+/// data rather than as an absence, because the layer bar states the reason
+/// instead of hiding the layer.
+enum TranscriptLayerUnavailability: Equatable, Sendable {
+    /// This run produced no such result.
+    case notProduced
+    /// A translation result replaces the source text in the loaded run, so the
+    /// source-language transcript is not in memory beside it. This is a
+    /// property of how the run is loaded, not of the run on disk: the source
+    /// `merged/segments.json` is intact and is re-read whenever the reader
+    /// selects a different result.
+    case sourceTextNotLoadedWithTranslation
+    /// This run has no speaker-proposal derived result.
+    case proposalNotYetProduced
+
+    func sentence(locale: Locale? = nil) -> String {
+        switch self {
+        case .notProduced:
+            appString("This run has not produced this layer.", locale: locale)
+        case .sourceTextNotLoadedWithTranslation:
+            appString(
+                "The source-language transcript is not loaded beside a translation. It is unchanged on disk.",
+                locale: locale
+            )
+        case .proposalNotYetProduced:
+            appString(
+                "A proposed speaker layer would come from a derived run. None has been produced.",
+                locale: locale
+            )
+        }
+    }
+}
+
+struct TranscriptLayerOption: Equatable, Identifiable, Sendable {
+    var layer: TranscriptDisplayLayer
+    var unavailability: TranscriptLayerUnavailability?
+
+    var isAvailable: Bool { unavailability == nil }
+    var id: String { layer.id }
+}
+
+/// Which layers this run can show, and what each layer's text is. Every layer
+/// reads from what is already loaded; none of them writes anything.
+enum TranscriptLayerCatalog {
+    static func options(
+        run: LoadedRun,
+        record: LibraryRecord,
+        proposal: SpeakerProposalDocument? = nil
+    ) -> [TranscriptLayerOption] {
+        let isTranslation = run.isTranslation
+        return TranscriptDisplayLayer.allCases.map { layer in
+            TranscriptLayerOption(
+                layer: layer,
+                unavailability: unavailability(
+                    of: layer,
+                    run: run,
+                    record: record,
+                    isTranslation: isTranslation,
+                    proposal: proposal
+                )
+            )
+        }
+    }
+
+    /// Never `.proposed`. A marked non-acoustic proposal is something a reader
+    /// asks to see, not something they are handed, and this plan's scope
+    /// leaves whether that can ever change to the maintainer.
+    static func defaultLayer(
+        run: LoadedRun,
+        record: LibraryRecord,
+        proposal: SpeakerProposalDocument? = nil
+    ) -> TranscriptDisplayLayer {
+        let options = options(run: run, record: record, proposal: proposal)
+            .filter { $0.layer != .proposed }
+        let preferred = TranscriptDisplayLayer.displayed(in: run)
+        if options.contains(where: { $0.layer == preferred && $0.isAvailable }) {
+            return preferred
+        }
+        return options.first(where: \.isAvailable)?.layer ?? .speakerLabelled
+    }
+
+    /// The text one segment carries in one layer. `speakerLabelled` is the
+    /// immutable text and never picks up a correction; that is the whole point
+    /// of being able to switch back to it.
+    static func text(
+        _ layer: TranscriptDisplayLayer,
+        for item: TranscriptSegment,
+        run: LoadedRun,
+        record: LibraryRecord
+    ) -> String {
+        switch layer {
+        case .speakerLabelled, .translated, .proposed:
+            item.segment.text
+        case .corrected:
+            run.correctionResolution(at: item.index, record: record)
+                ?? item.segment.text
+        }
+    }
+
+    private static func unavailability(
+        of layer: TranscriptDisplayLayer,
+        run: LoadedRun,
+        record: LibraryRecord,
+        isTranslation: Bool,
+        proposal: SpeakerProposalDocument?
+    ) -> TranscriptLayerUnavailability? {
+        // A speaker proposal changes no text, so `mode` says nothing here and
+        // must not be read; see `TranscriptDisplayLayer.displayed(in:)`.
+        let isTextResult = run.resultOperation.map {
+            $0.kind == .textPostprocess
+        } ?? true
+        switch layer {
+        case .speakerLabelled:
+            return isTranslation ? .sourceTextNotLoadedWithTranslation : nil
+        case .corrected:
+            guard !isTranslation else { return .notProduced }
+            let hasCorrectionResult = isTextResult
+                && (run.resultOperation?.mode == .correction
+                    || run.effectivePostprocess?.mode == .correction)
+            let hasAcceptedCorrection = run.transcript.segments.indices.contains {
+                run.correctionResolution(at: $0, record: record) != nil
+            }
+            return hasCorrectionResult || hasAcceptedCorrection ? nil : .notProduced
+        case .translated:
+            return isTranslation ? nil : .notProduced
+        case .proposed:
+            return proposal == nil ? .proposalNotYetProduced : nil
         }
     }
 }
@@ -54,7 +208,20 @@ enum TranscriptExporter {
         run: LoadedRun,
         record: LibraryRecord
     ) throws -> SegmentsDocument {
+        try segmentsDocument(layer: nil, run: run, record: record)
+    }
+
+    /// The document a given layer would show. `speakerLabelled` deliberately
+    /// leaves accepted corrections out, so copying while the raw layer is
+    /// displayed copies the raw text. `nil` keeps the export behaviour that
+    /// predates layer switching: apply accepted corrections.
+    static func segmentsDocument(
+        layer: TranscriptDisplayLayer?,
+        run: LoadedRun,
+        record: LibraryRecord
+    ) throws -> SegmentsDocument {
         let allowsConflictResolution = !run.isTranslation
+            && layer != .speakerLabelled
         let correctedSegments = try run.transcript.segments.enumerated().map { index, segment in
             let speaker = record.speakerNames[segment.speaker] ?? segment.speaker
             let text = allowsConflictResolution
@@ -115,9 +282,10 @@ enum TranscriptExporter {
         run: LoadedRun,
         record: LibraryRecord,
         selectedSegmentIndices: Set<Int>,
-        locale: Locale? = nil
+        locale: Locale? = nil,
+        layer: TranscriptDisplayLayer? = nil
     ) throws -> String {
-        let document = try correctedSegmentsDocument(run: run, record: record)
+        let document = try segmentsDocument(layer: layer, run: run, record: record)
         let selectedIndices = selectedSegmentIndices.isEmpty
             ? nil
             : selectedSegmentIndices
@@ -127,7 +295,8 @@ enum TranscriptExporter {
             record: record,
             selectedSegmentIndices: selectedIndices
         )
-        let header = TranscriptDisplayLayer.displayed(in: run).copyHeader(locale: locale)
+        let header = (layer ?? TranscriptDisplayLayer.displayed(in: run))
+            .copyHeader(locale: locale)
         return body.isEmpty ? header + "\n" : header + "\n\n" + body
     }
 

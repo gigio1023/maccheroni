@@ -39,7 +39,7 @@ private struct LibraryRecordRow: View {
     let isPostprocessing: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.small + 2) {
             Group {
                 if isPostprocessing {
                     ProgressView().controlSize(.small)
@@ -48,9 +48,9 @@ private struct LibraryRecordRow: View {
                 }
             }
             .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.tight) {
                 Text(record.displayName)
-                    .font(.body)
+                    .font(AppTheme.Typography.body)
                     .lineLimit(1)
                 HStack(spacing: 5) {
                     Text(record.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
@@ -58,16 +58,16 @@ private struct LibraryRecordRow: View {
                         .accessibilityHidden(true)
                     Text(Duration.seconds(record.durationS), format: .time(pattern: .minuteSecond))
                 }
-                .font(.caption)
+                .font(AppTheme.Typography.meta)
                 .foregroundStyle(.secondary)
-                HStack(spacing: 6) {
+                HStack(spacing: AppTheme.Spacing.tight + 2) {
                     Text(record.profileID.title)
                     Text(record.state.title)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(.quaternary, in: Capsule())
                 }
-                .font(.caption2)
+                .font(AppTheme.Typography.meta)
                 .foregroundStyle(.secondary)
             }
         }

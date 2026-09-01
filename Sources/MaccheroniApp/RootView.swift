@@ -112,17 +112,43 @@ private struct RunUnavailableView: View {
     let issue: RunLoadIssue
     let reveal: () -> Void
 
+    /// The same cause vocabulary the failure screen uses, so a missing file, an
+    /// unreadable record, and a fingerprint mismatch read the same way whether
+    /// the run failed or merely could not be opened.
+    private var cause: RunFailureCause {
+        switch issue {
+        case .missing, .missingArtifact: .missingFile
+        case .decoding: .unreadableRunRecord
+        case .integrity: .integrityMismatch
+        }
+    }
+
+    private var detail: String? {
+        switch issue {
+        case .missing:
+            nil
+        case let .missingArtifact(message), let .decoding(message),
+             let .integrity(message):
+            RunOutcome.sanitizedDetail(message)
+        }
+    }
+
     var body: some View {
         ContentUnavailableView {
             Label(appLocalized("Run Could Not Be Opened"), systemImage: "exclamationmark.triangle")
         } description: {
-            switch issue {
-            case .missing:
-                Text(appLocalized("Recording Not Found"))
-            case let .missingArtifact(message), let .decoding(message):
-                Text(verbatim: message)
-            case .integrity:
-                Text(appLocalized("The raw run remains on disk, but one or more required artifacts failed an integrity check."))
+            VStack(spacing: 8) {
+                Text(cause.sentence())
+                if cause == .integrityMismatch {
+                    Text(appLocalized("The raw run remains on disk, but one or more required artifacts failed an integrity check."))
+                        .foregroundStyle(.secondary)
+                }
+                if let detail {
+                    Text(verbatim: detail)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
             }
         } actions: {
             if record.runURL != nil, issue.canReveal {

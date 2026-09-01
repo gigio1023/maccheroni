@@ -14,6 +14,12 @@ struct CaptureView: View {
                     RecordingProfileSummary(profile: model.selectedProfile)
                 } else {
                     CaptureControls(model: model, glossaryProfile: $glossaryProfile)
+                    if model.profileReadiness.showsNotice {
+                        ProfileReadinessNotice(
+                            readiness: model.profileReadiness,
+                            recheck: model.evaluateProfileReadiness
+                        )
+                    }
                 }
                 RecordingControl(model: model)
                 if !model.isRecording {
@@ -30,6 +36,7 @@ struct CaptureView: View {
             .frame(maxWidth: .infinity)
         }
         .navigationTitle(appLocalized("New Recording"))
+        .task { model.evaluateProfileReadiness() }
         .dropDestination(for: URL.self) { urls, _ in
             guard model.canImportAudio else { return false }
             model.importAudio(urls)
@@ -200,6 +207,55 @@ private struct CodexReadinessNotice: View {
     }
 }
 
+/// States whether the selected profile can run before the user starts one.
+/// Absent from a ready profile, so a working setup carries no extra chrome.
+private struct ProfileReadinessNotice: View {
+    let readiness: ProfileReadiness
+    let recheck: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: readiness.isObstructed
+                ? "exclamationmark.triangle.fill"
+                : "questionmark.circle.fill")
+                .foregroundStyle(readiness.isObstructed ? Color.orange : Color.secondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                if readiness.isObstructed {
+                    Text(appLocalized("This profile is not ready to run."))
+                        .font(.headline)
+                }
+                ForEach(readiness.blockingGroups) { group in
+                    Text(group.reason)
+                }
+                if let issue = readiness.probeIssue {
+                    Text(issue.message)
+                }
+                if readiness.needsProvisioning {
+                    Text(appLocalized("Install the missing components by running this in Terminal from the Maccheroni repository, then check again:"))
+                        .foregroundStyle(.secondary)
+                    Text(verbatim: ProfileReadiness.provisioningCommand)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+                if readiness.isEvaluating {
+                    Text(appLocalized("Checking availability…"))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button(appLocalized("Check Again"), action: recheck)
+                        .buttonStyle(.link)
+                }
+            }
+            .font(.caption)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(.background.secondary, in: .rect(cornerRadius: 12))
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct ProfileBenchmarkSummary: View {
     let profile: AppProfile
 
@@ -310,12 +366,20 @@ private struct RecordingControl: View {
             .tint(model.isRecording ? .red : .accentColor)
             .disabled(!model.isRecording && !model.canStartRecording)
             .keyboardShortcut(.space, modifiers: [])
-            .accessibilityHint(model.isRecording
-                ? appLocalized("Stops capture and begins transcription.")
-                : appLocalized("Starts separate microphone and system audio capture."))
+            .accessibilityHint(recordingHint)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
+    }
+
+    private var recordingHint: LocalizedStringResource {
+        if model.isRecording {
+            return appLocalized("Stops capture and begins transcription.")
+        }
+        if model.profileReadiness.blocksRecording {
+            return appLocalized("This profile is not ready to run.")
+        }
+        return appLocalized("Starts separate microphone and system audio capture.")
     }
 }
 

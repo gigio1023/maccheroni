@@ -2,80 +2,108 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>Speaker-labelled</key>
-	<string>С обозначением говорящих</string>
-	<key>Corrected</key>
-	<string>Исправленная</string>
-	<key>Translated</key>
-	<string>Переведённая</string>
-	<key>Transcript layer: Speaker-labelled</key>
-	<string>Слой расшифровки: С обозначением говорящих</string>
-	<key>Transcript layer: Corrected</key>
-	<string>Слой расшифровки: Исправленная</string>
-	<key>Transcript layer: Translated</key>
-	<string>Слой расшифровки: Переведённая</string>
-	<key>Copy Transcript</key>
-	<string>Копировать расшифровку</string>
-	<key>Copy Selection</key>
-	<string>Копировать выбранное</string>
-	<key>The transcript could not be copied.</key>
-	<string>Не удалось скопировать расшифровку.</string>
-	<key>Select this segment for copying.</key>
-	<string>Выбрать этот сегмент для копирования.</string>
-	<key>Remove this segment from the copy selection.</key>
-	<string>Удалить этот сегмент из выбранного для копирования.</string>
-	<key>Copied the speaker-labelled transcript.</key>
-	<string>Расшифровка с обозначением говорящих скопирована.</string>
-	<key>Copied the corrected transcript.</key>
-	<string>Исправленная расшифровка скопирована.</string>
-	<key>Copied the translated transcript.</key>
-	<string>Переведённая расшифровка скопирована.</string>
-	<key>Copied the speaker-labelled selection.</key>
-	<string>Выбранные фрагменты слоя с обозначением говорящих скопированы.</string>
-	<key>Copied the corrected selection.</key>
-	<string>Выбранные фрагменты исправленного слоя скопированы.</string>
-	<key>Copied the translated selection.</key>
-	<string>Выбранные фрагменты переведённого слоя скопированы.</string>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
+	<key>%@ of %@ (%@)</key>
+	<string>%1$@ из %2$@ (%3$@)</string>
+	<key>%@ of speech</key>
+	<string>%@ речи</string>
+	<key>%@ of this recording produced no transcript, so these proposals cover %@ of %@.</key>
+	<string>%@ этой записи не дали расшифровки, поэтому предложения охватывают %@ из %@.</string>
 	<key>%@, %@</key>
 	<string>%@, %@</string>
+	<key>%lld bytes</key>
+	<string>%lld байт</string>
+	<key>%lld matching</key>
+	<string>Совпадений: %lld</string>
+	<key>%lld of %lld to review</key>
+	<string>%lld из %lld на проверку</string>
 	<key>%lld percent</key>
 	<string>%lld процентов</string>
+	<key>%lld proposed, %lld declined. Not acoustic evidence, and not measured.</key>
+	<string>Предложено %lld, отклонено %lld. Это не акустические данные и не измерение.</string>
+	<key>%lld segments · %lld speakers · %lld without a speaker · %lld to review</key>
+	<string>%lld сегментов · %lld говорящих · %lld без говорящего · %lld на проверку</string>
 	<key>%lld segments, %lld speakers</key>
 	<string>%lld сегментов, %lld говорящих</string>
+	<key>%lld to review</key>
+	<string>%lld на проверку</string>
 	<key>%lld unresolved</key>
 	<string>%lld не решено</string>
+	<key>%lld, %lld without a speaker</key>
+	<string>%lld, из них %lld без говорящего</string>
 	<key>%lld/%lld chunks</key>
 	<string>%lld/%lld фрагментов</string>
 	<key>+</key>
 	<string>+</string>
+	<key>A component this profile needs is not installed on this Mac, so the run never got started.</key>
+	<string>Компонент, необходимый этому профилю, не установлен на этом Mac, поэтому запуск не начался.</string>
+	<key>A configured storage folder is no longer available. Choose the folder again in Settings.</key>
+	<string>Настроенная папка хранилища больше недоступна. Выберите её снова в настройках.</string>
+	<key>A derived result does not match its source run: %@</key>
+	<string>Производный результат не соответствует исходному запуску: %@</string>
+	<key>A derived result manifest is invalid: %@</key>
+	<string>Манифест производного результата недействителен: %@</string>
+	<key>A file this run depends on no longer matches the fingerprint recorded for it, so Maccheroni stopped rather than trust it.</key>
+	<string>Файл, от которого зависит этот запуск, больше не совпадает с записанным отпечатком, поэтому Maccheroni остановился, а не доверился ему.</string>
+	<key>A file this run needs is no longer where Maccheroni left it.</key>
+	<string>Файл, нужный этому запуску, больше не находится там, где его оставил Maccheroni.</string>
+	<key>A new setup selects Codex only when its CLI is signed in; otherwise it selects Local. Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio never leaves this Mac.</key>
+	<string>Новая настройка выбирает Codex только при входе в CLI; иначе выбирается Local. Codex получает ограниченный текст расшифровки, полный глоссарий активного профиля и его хеш, инструкции по постобработке и, при переводе, целевой язык. Аудио никогда не покидает этот Mac.</string>
+	<key>A new setup selects Codex only when its CLI is signed in; otherwise it selects Local. Codex receives transcript text only. Audio never leaves this Mac.</key>
+	<string>Новая настройка выбирает Codex только при входе в CLI; иначе выбирается Local. Codex получает только текст расшифровки. Аудио никогда не покидает этот Mac.</string>
+	<key>A proposed speaker layer would come from a derived run. None has been produced.</key>
+	<string>Слой предложенных говорящих создаётся производным запуском. Он не создан.</string>
 	<key>A recording is already in progress.</key>
 	<string>Запись уже идет.</string>
 	<key>A run artifact failed its integrity check: %@</key>
 	<string>Артефакт выполнения не прошел проверку целостности: %@</string>
 	<key>A run artifact is missing: %@</key>
 	<string>Артефакт выполнения отсутствует: %@</string>
+	<key>ASR Model Cache</key>
+	<string>Кэш модели ASR</string>
 	<key>Add</key>
 	<string>Добавлять</string>
 	<key>Add a name, term, or place</key>
 	<string>Добавьте имя, термин или место</string>
+	<key>Alignment</key>
+	<string>Выравнивание</string>
 	<key>Ambiguous Speaker</key>
 	<string>Неоднозначный спикер</string>
 	<key>An identical retry is disabled because it would use the same model, glossary, and chunk policy.</key>
 	<string>Повтор с теми же настройками отключён, так как использовал бы ту же модель, глоссарий и политику разбиения на фрагменты.</string>
+	<key>Another local component this profile needs is not ready.</key>
+	<string>Другой локальный компонент, необходимый этому профилю, не готов.</string>
 	<key>App Language</key>
 	<string>Язык приложения</string>
 	<key>Applied</key>
 	<string>Применяемый</string>
+	<key>As a decoder vocabulary</key>
+	<string>Как словарь декодера</string>
+	<key>As a hotword instruction</key>
+	<string>Как инструкция с ключевыми словами</string>
+	<key>Audio Enhancement</key>
+	<string>Улучшение звука</string>
+	<key>Audio Preparation</key>
+	<string>Подготовка аудио</string>
 	<key>Audio never leaves this Mac.</key>
 	<string>Звук никогда не покидает этот Mac.</string>
+	<key>Audio stays on this Mac. Transcription runs locally; Codex receives transcript text only during post-processing.</key>
+	<string>Аудио остаётся на этом Mac. Расшифровка выполняется локально; Codex получает текст расшифровки только во время постобработки.</string>
+	<key>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</key>
+	<string>Аудио остаётся на этом Mac. Расшифровка выполняется локально; во время постобработки Codex получает ограниченный текст расшифровки, полный глоссарий активного профиля и его хеш, инструкции по постобработке и, при переводе, целевой язык.</string>
 	<key>Automatic</key>
 	<string>Автоматический</string>
+	<key>Available</key>
+	<string>Доступно</string>
 	<key>Backchannels</key>
 	<string>Реплики подтверждения</string>
 	<key>Backend</key>
 	<string>Бэкэнд</string>
+	<key>Batches Planned</key>
+	<string>Запланированные пакеты</string>
+	<key>Bookmark Unavailable</key>
+	<string>Закладка недоступна</string>
 	<key>Both recording channels were empty; the combined recording was retained but cannot be transcribed.</key>
 	<string>Оба канала записи были пусты; объединенная запись была сохранена, но не может быть расшифрована.</string>
 	<key>Cancel</key>
@@ -94,18 +122,72 @@
 	<string>Категория</string>
 	<key>Channels</key>
 	<string>Каналы</string>
+	<key>Check Again</key>
+	<string>Проверить снова</string>
+	<key>Checking availability…</key>
+	<string>Проверка доступности…</string>
 	<key>Chinese, Simplified</key>
 	<string>Китайский, Упрощенный</string>
 	<key>Choose Audio File…</key>
 	<string>Выберите аудиофайл…</string>
+	<key>Choose Folder…</key>
+	<string>Выбрать папку…</string>
+	<key>Choose an M4A, WAV, or MP3 audio file.</key>
+	<string>Выберите аудиофайл M4A, WAV или MP3.</string>
+	<key>Chooses the language the transcript is translated into.</key>
+	<string>Выбирает язык, на который будет переведена расшифровка.</string>
 	<key>Chunk %lld of %lld</key>
 	<string>Чанк %lld из %lld</string>
+	<key>Chunks</key>
+	<string>Блоки</string>
+	<key>Clear the search</key>
+	<string>Очистить поиск</string>
+	<key>Close</key>
+	<string>Закрыть</string>
 	<key>Codex</key>
 	<string>Codex</string>
+	<key>Codex CLI</key>
+	<string>CLI Codex</string>
+	<key>Codex CLI was not found. Install it and run codex login in Terminal, or select Local meanwhile.</key>
+	<string>CLI Codex не найден. Установите его и выполните codex login в Терминале или пока выберите Local.</string>
+	<key>Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile.</key>
+	<string>Codex установлен, но вход не выполнен. Выполните codex login в Терминале или пока выберите Local.</string>
+	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
+	<string>Codex установлен, но не удалось проверить состояние входа. Повторите попытку или пока выберите Local.</string>
+	<key>Codex is signed in and ready.</key>
+	<string>В Codex выполнен вход, всё готово.</string>
 	<key>Codex post-processing sends transcript text only. The original audio and raw transcript stay unchanged.</key>
 	<string>Постобработка через Codex отправляет только текст расшифровки. Исходная аудиозапись и необработанная расшифровка остаются без изменений.</string>
+	<key>Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio and source artifacts stay on this Mac unchanged.</key>
+	<string>Codex получает ограниченный текст расшифровки, полный глоссарий активного профиля и его хеш, инструкции по постобработке и, при переводе, целевой язык. Аудио и исходные артефакты остаются на этом Mac без изменений.</string>
 	<key>Complete</key>
 	<string>Завершено</string>
+	<key>Completed</key>
+	<string>Завершено</string>
+	<key>Copied the corrected selection.</key>
+	<string>Выбранные фрагменты исправленного слоя скопированы.</string>
+	<key>Copied the corrected transcript.</key>
+	<string>Исправленная расшифровка скопирована.</string>
+	<key>Copied the proposed selection.</key>
+	<string>Предложенный фрагмент скопирован.</string>
+	<key>Copied the proposed transcript.</key>
+	<string>Предложенная расшифровка скопирована.</string>
+	<key>Copied the speaker-labelled selection.</key>
+	<string>Выбранные фрагменты слоя с обозначением говорящих скопированы.</string>
+	<key>Copied the speaker-labelled transcript.</key>
+	<string>Расшифровка с обозначением говорящих скопирована.</string>
+	<key>Copied the translated selection.</key>
+	<string>Выбранные фрагменты переведённого слоя скопированы.</string>
+	<key>Copied the translated transcript.</key>
+	<string>Переведённая расшифровка скопирована.</string>
+	<key>Copy Selection</key>
+	<string>Копировать выбранное</string>
+	<key>Copy Transcript</key>
+	<string>Копировать расшифровку</string>
+	<key>Correct</key>
+	<string>Исправить</string>
+	<key>Corrected</key>
+	<string>Исправленная</string>
 	<key>Could not access captured audio samples (status %lld).</key>
 	<string>Не удалось получить доступ к захваченным аудиосэмплам (статус %lld).</string>
 	<key>Could not allocate canonical PCM buffer.</key>
@@ -124,18 +206,32 @@
 	<string>Не удалось прочитать артефакт записи %@.</string>
 	<key>Coverage</key>
 	<string>Покрытие</string>
+	<key>Current Derived Post-processing</key>
+	<string>Текущая производная постобработка</string>
+	<key>Current Derived Result</key>
+	<string>Текущий производный результат</string>
 	<key>Current Model</key>
 	<string>Текущая модель</string>
 	<key>Default Post-processing</key>
 	<string>Постобработка по умолчанию</string>
+	<key>Derived Glossary SHA-256</key>
+	<string>SHA-256 производного глоссария</string>
+	<key>Derived Result ID</key>
+	<string>ID производного результата</string>
+	<key>Derived Results</key>
+	<string>Производные результаты</string>
+	<key>Diarization Model Cache</key>
+	<string>Кэш модели диаризации</string>
+	<key>Directory choices apply the next time Maccheroni launches. Existing recordings and run artifacts stay where they are.</key>
+	<string>Выбор каталогов будет применён при следующем запуске Maccheroni. Существующие записи и артефакты запуска останутся на своих местах.</string>
 	<key>Disk Use</key>
 	<string>Использование диска</string>
 	<key>Done</key>
 	<string>Готово</string>
-	<key>Download Pinned Model…</key>
-	<string>Загрузить закрепленную модель…</string>
 	<key>Download Pinned Model</key>
 	<string>Загрузить закрепленную модель</string>
+	<key>Download Pinned Model…</key>
+	<string>Загрузить закрепленную модель…</string>
 	<key>Drop an audio file here</key>
 	<string>Скиньте сюда аудиофайл</string>
 	<key>Edit Glossary</key>
@@ -150,12 +246,16 @@
 	<string>Английский используется по умолчанию. Ручной выбор применяется к Maccheroni без изменения языка системы Mac.</string>
 	<key>Enhancement</key>
 	<string>Улучшение</string>
+	<key>Exact Identities</key>
+	<string>Точные идентификаторы</string>
 	<key>Export</key>
 	<string>Экспорт</string>
 	<key>Failed</key>
 	<string>Ошибка</string>
 	<key>Failure Details</key>
 	<string>Сведения об ошибке</string>
+	<key>Free Space</key>
+	<string>Свободное место</string>
 	<key>French</key>
 	<string>Французский</string>
 	<key>General</key>
@@ -168,22 +268,50 @@
 	<string>Глоссарий</string>
 	<key>Glossary Could Not Be Saved</key>
 	<string>Глоссарий не удалось сохранить</string>
+	<key>Glossary SHA-256</key>
+	<string>SHA-256 глоссария</string>
+	<key>Glossary Semantics</key>
+	<string>Семантика глоссария</string>
+	<key>Glossary Terms</key>
+	<string>Записи глоссария</string>
+	<key>Glossary Used</key>
+	<string>Использованный глоссарий</string>
+	<key>Go to the next segment to review</key>
+	<string>К следующему сегменту на проверку</string>
+	<key>Go to the previous segment to review</key>
+	<string>К предыдущему сегменту на проверку</string>
 	<key>Has Conflicts</key>
 	<string>Имеет конфликты</string>
+	<key>How</key>
+	<string>Как</string>
 	<key>Import Audio</key>
 	<string>Импорт аудио</string>
 	<key>Import Audio…</key>
 	<string>Импортировать аудио…</string>
 	<key>Import an audio file for transcription.</key>
 	<string>Импортируйте аудиофайл для транскрипции.</string>
+	<key>In the model's context prompt</key>
+	<string>В контекстном запросе модели</string>
 	<key>Injection Mode</key>
 	<string>Режим инъекции</string>
 	<key>Input Integrity</key>
 	<string>Целостность ввода</string>
+	<key>Input Mode</key>
+	<string>Режим ввода</string>
 	<key>Inspect the preserved run. For a new attempt, choose a different profile or transcribe a shorter copy. The original recording stays unchanged.</key>
 	<string>Просмотрите сохранённый запуск. Для новой попытки выберите другой профиль или расшифруйте более короткую копию. Исходная запись останется без изменений.</string>
+	<key>Install the missing components by running this in Terminal from the Maccheroni repository, then check again:</key>
+	<string>Установите недостающие компоненты, выполнив эту команду в Терминале в репозитории Maccheroni, затем проверьте снова:</string>
 	<key>Installed</key>
 	<string>Установлено</string>
+	<key>Installed and signed in</key>
+	<string>Установлен, вход выполнен</string>
+	<key>Installed, but sign-in status could not be checked.</key>
+	<string>Установлен, но не удалось проверить состояние входа.</string>
+	<key>Installed, not signed in. Run codex login in Terminal.</key>
+	<string>Установлен, вход не выполнен. Выполните codex login в Терминале.</string>
+	<key>Interrupted</key>
+	<string>Прервано</string>
 	<key>Italian</key>
 	<string>итальянский</string>
 	<key>Italian Dialogue</key>
@@ -200,32 +328,66 @@
 	<string>Язык</string>
 	<key>Languages</key>
 	<string>Языки</string>
+	<key>Largest Accepted Output Bound</key>
+	<string>Наибольшая допустимая граница вывода</string>
+	<key>Largest Batch Estimate</key>
+	<string>Наибольшая оценка пакета</string>
+	<key>Largest Batch Input</key>
+	<string>Наибольший входной пакет</string>
+	<key>Largest Raw Response</key>
+	<string>Наибольший необработанный ответ</string>
 	<key>Leave Unresolved</key>
 	<string>Оставить нерешенным</string>
 	<key>Library</key>
 	<string>Библиотека</string>
+	<key>Library Metadata</key>
+	<string>Метаданные библиотеки</string>
 	<key>Local</key>
 	<string>Локально</string>
 	<key>Local Library</key>
 	<string>Локальная библиотека</string>
+	<key>MACCHERONI_LIBRARY_ROOT controls the recording and run paths for this launch.</key>
+	<string>MACCHERONI_LIBRARY_ROOT управляет путями для записей и запусков в этом сеансе.</string>
 	<key>Maccheroni Could Not Start</key>
 	<string>Maccheroni не удалось запустить</string>
 	<key>Maccheroni Needs Attention</key>
 	<string>Maccheroni требует внимания</string>
+	<key>Maccheroni cannot use the microphone. Turn Maccheroni on in System Settings &gt; Privacy &amp; Security &gt; Microphone.</key>
+	<string>Maccheroni не может использовать микрофон. Включите Maccheroni в разделе «Системные настройки &gt; Конфиденциальность и безопасность &gt; Микрофон».</string>
+	<key>Maccheroni could not check whether this profile is ready: %@</key>
+	<string>Maccheroni не удалось проверить готовность этого профиля: %@</string>
 	<key>Maccheroni could not find a display whose system audio can be captured.</key>
 	<string>Maccheroni не удалось найти дисплей, с которого можно записать системный звук.</string>
+	<key>Maccheroni could not join the transcript with the speaker timeline.</key>
+	<string>Maccheroni не смог объединить расшифровку с таймлайном говорящих.</string>
+	<key>Maccheroni could not prepare this audio for transcription.</key>
+	<string>Maccheroni не смог подготовить это аудио к транскрипции.</string>
+	<key>Maccheroni could not read the readiness report from its command-line engine.</key>
+	<string>Maccheroni не удалось прочитать отчёт о готовности от механизма командной строки.</string>
 	<key>Maccheroni is processing the full recording locally.</key>
 	<string>Maccheroni обрабатывает всю запись локально.</string>
 	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Model removal uses the macOS Trash.</key>
 	<string>Maccheroni никогда не удаляет и не перезаписывает записи, необработанные расшифровки или артефакты завершенного запуска. Для удаления модели используется корзина macOS.</string>
+	<key>Maccheroni stopped this run and its record does not name a more specific cause.</key>
+	<string>Maccheroni остановил этот запуск, и в записи нет более конкретной причины.</string>
+	<key>Maccheroni will not assign a speaker without acoustic evidence, so this stays as it is.</key>
+	<string>Maccheroni не назначает говорящего без акустических данных, поэтому здесь ничего не меняется.</string>
 	<key>Maccheroni will not overwrite an existing recording artifact: %@.</key>
 	<string>Maccheroni не будет перезаписывать существующий артефакт записи: %@.</string>
+	<key>Mark Reviewed</key>
+	<string>Отметить проверенным</string>
 	<key>Markdown</key>
 	<string>Markdown</string>
 	<key>Merging</key>
 	<string>Слияние</string>
 	<key>Microphone</key>
 	<string>Микрофон</string>
+	<key>Model</key>
+	<string>Модель</string>
+	<key>Model Cache on %@</key>
+	<string>Кэш модели на %@</string>
+	<key>Model ID</key>
+	<string>ID модели</string>
 	<key>Models</key>
 	<string>Модели</string>
 	<key>Move Model to Trash</key>
@@ -238,10 +400,28 @@
 	<string>По умолчанию облачный сервис не выбран. Звук никогда не покидает этот Mac; Codex получает текст расшифровки только при явном выборе.</string>
 	<key>No local benchmark is available for this profile yet.</key>
 	<string>Для этого профиля пока не доступен локальный тест.</string>
+	<key>No segment matches this search.</key>
+	<string>Ни один сегмент не соответствует этому запросу.</string>
+	<key>No speaker held %@ of this segment's speech, so none was named.</key>
+	<string>Ни один говорящий не набрал %@ речи этого сегмента, поэтому никто не назван.</string>
+	<key>No speaker held enough of this segment's speech, so none was named.</key>
+	<string>Ни один говорящий не набрал достаточной доли речи этого сегмента, поэтому никто не назван.</string>
+	<key>No speaker proposed</key>
+	<string>Говорящий не предложен</string>
+	<key>No speaker was active on the speaker timeline during this segment.</key>
+	<string>В этом сегменте на шкале говорящих никто не был активен.</string>
 	<key>None</key>
 	<string>Нет</string>
+	<key>Not Created</key>
+	<string>Ещё не создано</string>
 	<key>Not Installed</key>
 	<string>Не установлено</string>
+	<key>Not Transcribed</key>
+	<string>Не расшифровано</string>
+	<key>Not passed to the model</key>
+	<string>Не передано модели</string>
+	<key>Nothing left to review</key>
+	<string>Проверять нечего</string>
 	<key>OK</key>
 	<string>ХОРОШО</string>
 	<key>Off</key>
@@ -250,10 +430,30 @@
 	<string>Вкл.</string>
 	<key>Open the capture view.</key>
 	<string>Откройте вид захвата.</string>
+	<key>Operation</key>
+	<string>Операция</string>
 	<key>Original File</key>
 	<string>Исходный файл</string>
+	<key>Other markers</key>
+	<string>Другие метки</string>
+	<key>Outcome</key>
+	<string>Итог</string>
+	<key>Output Estimate Formula</key>
+	<string>Формула оценки вывода</string>
+	<key>Output Planning Budget</key>
+	<string>Бюджет планирования вывода</string>
+	<key>Output Token Limit</key>
+	<string>Лимит выходных токенов</string>
 	<key>Overlapping Speech</key>
 	<string>Перекрывающаяся речь</string>
+	<key>Part of this recording was transcribed and the rest produced no text.</key>
+	<string>Часть этой записи расшифрована, остальное не дало текста.</string>
+	<key>Partial</key>
+	<string>Частично</string>
+	<key>Partial Transcript</key>
+	<string>Частичная расшифровка</string>
+	<key>Pause playback</key>
+	<string>Приостановить воспроизведение</string>
 	<key>Peak Normalization</key>
 	<string>Пиковая нормализация</string>
 	<key>People</key>
@@ -262,10 +462,28 @@
 	<string>Конвейер обработки</string>
 	<key>Places</key>
 	<string>Места</string>
+	<key>Planned Model</key>
+	<string>Планируемая модель</string>
+	<key>Play the recording</key>
+	<string>Воспроизвести запись</string>
+	<key>Play the recording from this segment.</key>
+	<string>Воспроизвести запись с этого сегмента.</string>
+	<key>Play this segment from the source audio.</key>
+	<string>Воспроизведите этот сегмент из исходного звука.</string>
+	<key>Playhead</key>
+	<string>Позиция воспроизведения</string>
 	<key>Portuguese</key>
 	<string>португальский</string>
 	<key>Post-processing</key>
 	<string>Постобработка</string>
+	<key>Post-processing Backend</key>
+	<string>Бэкенд постобработки</string>
+	<key>Post-processing Model Cache</key>
+	<string>Кэш модели постобработки</string>
+	<key>Post-processing could not start for this completed run.</key>
+	<string>Не удалось запустить постобработку для этого завершённого запуска.</string>
+	<key>Post-processing did not finish. The speaker-labelled transcript is unaffected.</key>
+	<string>Постобработка не завершилась. Расшифровка с обозначением говорящих не изменилась.</string>
 	<key>Preparing</key>
 	<string>Подготовка</string>
 	<key>Preparing Maccheroni…</key>
@@ -276,10 +494,18 @@
 	<string>Основная модель</string>
 	<key>Profile</key>
 	<string>Профиль</string>
+	<key>Prompt Limit</key>
+	<string>Лимит запроса</string>
+	<key>Proposed</key>
+	<string>Предложено</string>
+	<key>Proposed, not measured</key>
+	<string>Предложено, не измерено</string>
 	<key>Provided</key>
 	<string>Предоставил</string>
 	<key>Quantization</key>
 	<string>Квантование</string>
+	<key>Reached The Model</key>
+	<string>Дошло до модели</string>
 	<key>Ready to Transcribe</key>
 	<string>Готов к расшифровке</string>
 	<key>Record microphone and system audio as separate local originals, or import an existing audio file.</key>
@@ -292,6 +518,10 @@
 	<string>Запись %@</string>
 	<key>Recording Not Found</key>
 	<string>Запись не найдена</string>
+	<key>Recording SHA-256</key>
+	<string>SHA-256 записи</string>
+	<key>Recording Size</key>
+	<string>Размер записи</string>
 	<key>Recording artifact %@ is not canonical 48 kHz mono PCM.</key>
 	<string>Артефакт записи %@ не является каноническим моно PCM 48 кГц.</string>
 	<key>Recording failed: %@</key>
@@ -302,10 +532,16 @@
 	<string>Удалять</string>
 	<key>Remove %@</key>
 	<string>Удалять %@</string>
+	<key>Remove this segment from the copy selection.</key>
+	<string>Удалить этот сегмент из выбранного для копирования.</string>
 	<key>Rename Speaker</key>
 	<string>Переименовать спикера</string>
 	<key>Rename this speaker everywhere in the corrected transcript.</key>
 	<string>Переименуйте этого докладчика везде в исправленной стенограмме.</string>
+	<key>Rename this speaker everywhere in this transcript.</key>
+	<string>Переименовать этого говорящего во всей этой расшифровке.</string>
+	<key>Request Logs</key>
+	<string>Журналы запросов</string>
 	<key>Resolved</key>
 	<string>Решено</string>
 	<key>Reveal</key>
@@ -320,8 +556,12 @@
 	<string>Показать в Finder</string>
 	<key>Review Profiles</key>
 	<string>Просмотреть профили</string>
+	<key>Review This Segment</key>
+	<string>Проверить этот сегмент</string>
 	<key>Review Uncertain Transcript</key>
 	<string>Просмотрите неопределенную стенограмму</string>
+	<key>Review what the pipeline was unsure about here.</key>
+	<string>Проверьте то, в чём обработка здесь не была уверена.</string>
 	<key>Revision</key>
 	<string>Редакция</string>
 	<key>Run</key>
@@ -334,6 +574,10 @@
 	<string>Инспектор запуска</string>
 	<key>Run Output</key>
 	<string>Вывод запуска</string>
+	<key>Run Record Unreadable</key>
+	<string>Запись запуска не читается</string>
+	<key>Run and result identifiers, file fingerprints, model revisions, and the batching numbers behind post-processing.</key>
+	<string>Идентификаторы запуска и результата, отпечатки файлов, ревизии моделей и параметры пакетов постобработки.</string>
 	<key>Russian</key>
 	<string>Русский</string>
 	<key>SHA-256</key>
@@ -346,22 +590,74 @@
 	<string>Частота дискретизации</string>
 	<key>Save</key>
 	<string>Сохранять</string>
+	<key>Search this transcript</key>
+	<string>Искать в этой расшифровке</string>
 	<key>Segment %lld does not have a valid SRT time range.</key>
 	<string>Сегмент %lld не имеет допустимого диапазона времени SRT.</string>
+	<key>Segments</key>
+	<string>Сегменты</string>
 	<key>Segments JSON</key>
 	<string>Сегменты JSON</string>
+	<key>Segments per Batch</key>
+	<string>Сегментов в пакете</string>
+	<key>Select this segment for copying.</key>
+	<string>Выбрать этот сегмент для копирования.</string>
+	<key>Sent To The Model</key>
+	<string>Отправлено модели</string>
+	<key>Service-managed (limit unavailable)</key>
+	<string>Управляется сервисом (лимит недоступен)</string>
 	<key>Settings Could Not Be Loaded</key>
 	<string>Не удалось загрузить настройки</string>
 	<key>Show or hide exact run and model details.</key>
 	<string>Показать или скрыть точные сведения о запуске и модели.</string>
+	<key>Show or hide how this run was produced.</key>
+	<string>Показать или скрыть, как был получен этот запуск.</string>
+	<key>Show this layer of the transcript.</key>
+	<string>Показать этот слой расшифровки.</string>
 	<key>Size</key>
 	<string>Размер</string>
+	<key>Some segments carry no recorded speaker evidence.</key>
+	<string>Для некоторых сегментов не записаны данные о говорящем.</string>
+	<key>Source Run</key>
+	<string>Исходный запуск</string>
+	<key>Source Run Glossary</key>
+	<string>Глоссарий исходного запуска</string>
+	<key>Source Segments SHA-256</key>
+	<string>SHA-256 исходных сегментов</string>
 	<key>Spanish</key>
 	<string>испанский</string>
+	<key>Speaker %@</key>
+	<string>Говорящий %@</string>
 	<key>Speaker Diarization</key>
 	<string>Диаризация говорящих</string>
+	<key>Speaker Separation</key>
+	<string>Разделение говорящих</string>
 	<key>Speaker name</key>
 	<string>Имя говорящего</string>
+	<key>Speaker not attributed yet</key>
+	<string>Говорящий ещё не сопоставлен</string>
+	<key>Speaker not named</key>
+	<string>Говорящий не назван</string>
+	<key>Speaker separation returned a speaker timeline Maccheroni cannot trust, so the run stopped before transcription.</key>
+	<string>Диаризация говорящих вернула таймлайн, которому Maccheroni не может доверять, поэтому запуск остановился до транскрипции.</string>
+	<key>Speaker-labelled</key>
+	<string>С обозначением говорящих</string>
+	<key>Speakers</key>
+	<string>Говорящие</string>
+	<key>Speech Recognition</key>
+	<string>Распознавание речи</string>
+	<key>Speech recognition ran past the time budget for this audio and was stopped.</key>
+	<string>Распознавание речи превысило отведённое на это аудио время и было остановлено.</string>
+	<key>Speech recognition reached the MOSS output limit even after the failed range had been split into smaller pieces.</key>
+	<string>Распознавание речи достигло предела вывода MOSS даже после разбиения неудавшегося диапазона на меньшие части.</string>
+	<key>Speech recognition reached the output limit for this audio before it finished, and splitting the audio into smaller pieces did not bring it back under the limit.</key>
+	<string>Распознавание речи достигло предела вывода для этого аудио, не закончив работу, и разбиение аудио на меньшие части не вернуло его под предел.</string>
+	<key>Speech recognition returned output Maccheroni could not verify, so nothing was promoted into the transcript.</key>
+	<string>Распознавание речи вернуло вывод, который Maccheroni не смог проверить, поэтому в расшифровку ничего не попало.</string>
+	<key>Speech recognition stopped producing new words and repeated itself to the end of its output budget, so that stretch of audio produced no usable text.</key>
+	<string>Распознавание речи перестало выдавать новые слова и повторялось до исчерпания бюджета вывода, поэтому этот отрезок аудио не дал пригодного текста.</string>
+	<key>Stale Bookmark</key>
+	<string>Устаревшая закладка</string>
 	<key>Start Recording</key>
 	<string>Начать запись</string>
 	<key>Starts separate microphone and system audio capture.</key>
@@ -374,18 +670,28 @@
 	<string>Остановите текущую запись перед импортом аудио.</string>
 	<key>Stop the active recording before starting transcription.</key>
 	<string>Остановите текущую запись перед запуском расшифровки.</string>
+	<key>Stopped At</key>
+	<string>Остановлено на</string>
 	<key>Stops capture and begins transcription.</key>
 	<string>Останавливает захват и начинает транскрипцию.</string>
 	<key>Storage</key>
 	<string>Хранилище</string>
+	<key>Storage Role</key>
+	<string>Роль хранилища</string>
 	<key>System Audio</key>
 	<string>Системный звук</string>
+	<key>System audio is not recordable yet. Turn Maccheroni on in System Settings &gt; Privacy &amp; Security &gt; Screen &amp; System Audio Recording.</key>
+	<string>Системный звук пока нельзя записывать. Включите Maccheroni в разделе «Системные настройки &gt; Конфиденциальность и безопасность &gt; Запись экрана и системного звука».</string>
+	<key>Target Language</key>
+	<string>Целевой язык</string>
+	<key>Temporary Work</key>
+	<string>Временные рабочие данные</string>
 	<key>Term Recall</key>
 	<string>Полнота распознавания терминов</string>
 	<key>Terms</key>
 	<string>Термины</string>
-	<key>The Maccheroni command-line engine is missing.</key>
-	<string>Механизм командной строки Maccheroni отсутствует.</string>
+	<key>Text only</key>
+	<string>Только текст</string>
 	<key>The Hugging Face %@ command failed (exit %lld): %@</key>
 	<string>Команда Hugging Face %@ завершилась ошибкой (код выхода %lld): %@</string>
 	<key>The Hugging Face command finished, but the pinned model location is missing: %@</key>
@@ -394,6 +700,10 @@
 	<string>Инструмент командной строки Hugging Face (hf) не установлен. Установите его и повторите попытку.</string>
 	<key>The Hugging Face command-line tool could not start: %@</key>
 	<string>Не удалось запустить инструмент командной строки Hugging Face: %@</string>
+	<key>The Maccheroni command-line engine is missing.</key>
+	<string>Механизм командной строки Maccheroni отсутствует.</string>
+	<key>The acoustic evidence is not loaded beside a translation. The source run still has it.</key>
+	<string>Акустические данные не загружаются рядом с переводом. В исходном запуске они сохранены.</string>
 	<key>The bundled profile registry is missing.</key>
 	<string>Реестр связанных профилей отсутствует.</string>
 	<key>The derived combined recording could not be read after writing: %@.</key>
@@ -402,44 +712,104 @@
 	<string>Экспортированное имя говорящего для сегмента %lld пусто.</string>
 	<key>The exported text is empty for segment %lld.</key>
 	<string>Экспортированный текст для сегмента %lld пуст.</string>
+	<key>The folder Maccheroni saves recordings and runs in cannot be reached.</key>
+	<string>Нет доступа к папке, в которой Maccheroni сохраняет записи и результаты запусков.</string>
+	<key>The glossary for this profile could not be used for this run.</key>
+	<string>Глоссарий этого профиля не удалось использовать в этом запуске.</string>
+	<key>The glossary the source run used</key>
+	<string>Глоссарий, использованный исходным запуском</string>
 	<key>The library entry is no longer available.</key>
 	<string>Запись в библиотеке больше не доступна.</string>
+	<key>The local speech runtime this profile needs is missing or does not match its pinned version.</key>
+	<string>Локальная речевая среда выполнения, необходимая этому профилю, отсутствует или не совпадает с закреплённой версией.</string>
 	<key>The original audio and completed artifacts were preserved. You can inspect the run or try again.</key>
 	<string>Оригинальный звук и завершенные артефакты были сохранены. Вы можете проверить запуск или повторить попытку.</string>
-	<key>The original audio and completed attempt artifacts were preserved. MOSS still reached its output limit after the failed range was split into smaller chunks.</key>
-	<string>Исходная аудиозапись и артефакты завершённой попытки сохранены. MOSS всё равно достиг лимита вывода после разбиения неудавшегося диапазона на более мелкие фрагменты.</string>
 	<key>The original audio and every completed intermediate artifact were preserved.</key>
 	<string>Исходный звук и все завершенные промежуточные артефакты были сохранены.</string>
 	<key>The original audio is not available.</key>
 	<string>Оригинальный звук недоступен.</string>
+	<key>The original recording could not be found.</key>
+	<string>Исходная запись не найдена.</string>
 	<key>The profile registry is invalid: %@</key>
 	<string>Реестр профиля недействителен: %@</string>
+	<key>The profile's current glossary</key>
+	<string>Текущий глоссарий профиля</string>
 	<key>The raw run remains on disk, but one or more required artifacts failed an integrity check.</key>
 	<string>Необработанный прогон остается на диске, но один или несколько необходимых артефактов не прошли проверку целостности.</string>
 	<key>The recording artifact name is unsafe: %@.</key>
 	<string>Имя артефакта записи небезопасно: %@.</string>
 	<key>The recording is preserved and ready for the selected profile.</key>
 	<string>Запись сохраняется и готова для выбранного профиля.</string>
+	<key>The recovered transcript, the original audio, and every completed artifact were preserved. This run is recorded as partial, not complete.</key>
+	<string>Восстановленная расшифровка, исходное аудио и все завершённые артефакты сохранены. Этот запуск записан как частичный, а не как завершённый.</string>
 	<key>The run contains an unsafe artifact path: %@</key>
 	<string>Выполнение содержит небезопасный путь артефакта: %@.</string>
 	<key>The run did not succeed.</key>
 	<string>Запуск завершился неудачно.</string>
+	<key>The run record for this transcription cannot be read, so Maccheroni cannot say what happened.</key>
+	<string>Запись запуска этой расшифровки не читается, поэтому Maccheroni не может сказать, что произошло.</string>
+	<key>The run was cancelled before it finished.</key>
+	<string>Запуск отменён до завершения.</string>
 	<key>The selected file has no readable audio duration.</key>
 	<string>Выбранный файл не имеет читаемой продолжительности звука.</string>
+	<key>The source-language transcript is not loaded beside a translation. It is unchanged on disk.</key>
+	<string>Расшифровка на исходном языке не загружается рядом с переводом. На диске она не изменилась.</string>
+	<key>The speaker separation model this profile needs is not installed on this Mac.</key>
+	<string>Модель разделения говорящих, необходимая этому профилю, не установлена на этом Mac.</string>
+	<key>The speaker timeline covered %@ of this segment, below the %@ it needs.</key>
+	<string>Шкала говорящих покрыла %@ этого сегмента, ниже требуемых %@.</string>
+	<key>The speaker timeline covered %@ of this segment, below what this run requires.</key>
+	<string>Шкала говорящих покрыла %@ этого сегмента, ниже требований этого запуска.</string>
+	<key>The speech model also reported a speaker for this segment. It is kept as evidence and never becomes the speaker.</key>
+	<string>Речевая модель также сообщила говорящего для этого сегмента. Это сохраняется как свидетельство и никогда не становится говорящим.</string>
+	<key>The speech model that answered is not the exact model this profile pins, so its output was refused.</key>
+	<string>Ответившая речевая модель не совпадает с моделью, закреплённой в этом профиле, поэтому её вывод отклонён.</string>
+	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
+	<string>Модель распознавания речи, необходимая этому профилю, не установлена на этом Mac.</string>
+	<key>The transcript could not be copied.</key>
+	<string>Не удалось скопировать расшифровку.</string>
 	<key>The transcription engine could not start: %@</key>
 	<string>Не удалось запустить механизм транскрипции: %@</string>
 	<key>The transcription engine exited with status %lld.</key>
 	<string>Механизм транскрипции завершил работу со статусом %lld.</string>
 	<key>The transcription engine finished without a run directory.</key>
 	<string>Механизм транскрипции завершил работу без каталога запуска.</string>
+	<key>The voice activity model this profile needs is not installed on this Mac.</key>
+	<string>Модель определения речевой активности, необходимая этому профилю, не установлена на этом Mac.</string>
 	<key>There is no active recording.</key>
 	<string>Активной записи нет.</string>
+	<key>This Run</key>
+	<string>Этот запуск</string>
 	<key>This name applies to every %@ segment in corrected exports.</key>
 	<string>Это имя применяется к каждому сегменту %@ в исправленном экспорте.</string>
+	<key>This name applies to every %@ segment in exports.</key>
+	<string>Это имя применяется к каждому сегменту %@ в экспортах.</string>
+	<key>This profile could not run with the settings it was given.</key>
+	<string>Этот профиль не смог запуститься с заданными настройками.</string>
+	<key>This profile is not ready to run.</key>
+	<string>Этот профиль не готов к запуску.</string>
+	<key>This run has not produced this layer.</key>
+	<string>Этот запуск не создал такой слой.</string>
 	<key>This run reached the MOSS output limit after bounded splitting. Choose a different profile or use a shorter copy before retrying.</key>
 	<string>Этот запуск достиг лимита вывода MOSS даже после ограниченного разделения. Перед повторной попыткой выберите другой профиль или используйте более короткую копию.</string>
+	<key>This segment carries no recorded speaker evidence.</key>
+	<string>Для этого сегмента не записаны данные о говорящем.</string>
 	<key>This segment was marked uncertain by the pipeline.</key>
 	<string>Этот сегмент был отмечен как неопределённый конвейером обработки.</string>
+	<key>This speaker held this much of the segment's speech.</key>
+	<string>Доля речи сегмента, приходящаяся на этого говорящего.</string>
+	<key>This stage covered only part of the recording.</key>
+	<string>Этот этап охватил только часть записи.</string>
+	<key>This stage stopped the run.</key>
+	<string>На этом этапе запуск остановился.</string>
+	<key>Timeline coverage %@, and this run named a speaker only above %@.</key>
+	<string>Покрытие шкалы %@; этот запуск называл говорящего только выше %@.</string>
+	<key>Timeline coverage %@.</key>
+	<string>Покрытие шкалы %@.</string>
+	<key>Took</key>
+	<string>Заняло</string>
+	<key>Transcribed</key>
+	<string>Расшифровано</string>
 	<key>Transcribing</key>
 	<string>Расшифровка</string>
 	<key>Transcript</key>
@@ -448,6 +818,16 @@
 	<string>Стенограмма не может быть экспортирована</string>
 	<key>Transcript Disagreement</key>
 	<string>Разногласия в стенограмме</string>
+	<key>Transcript layer: Corrected</key>
+	<string>Слой расшифровки: Исправленная</string>
+	<key>Transcript layer: Proposed</key>
+	<string>Слой расшифровки: предложенный</string>
+	<key>Transcript layer: Speaker-labelled</key>
+	<string>Слой расшифровки: С обозначением говорящих</string>
+	<key>Transcript layer: Translated</key>
+	<string>Слой расшифровки: Переведённая</string>
+	<key>Transcript text only. Audio stayed on this Mac.</key>
+	<string>Только текст расшифровки. Аудио осталось на этом Mac.</string>
 	<key>Transcription</key>
 	<string>Транскрипция</string>
 	<key>Transcription Cancelled</key>
@@ -458,179 +838,59 @@
 	<string>Достигнут лимит транскрипции</string>
 	<key>Transcription and the selected post-processing path run locally. The original audio and raw transcript stay unchanged.</key>
 	<string>Транскрипция и выбранный путь постобработки выполняются локально. Исходный звук и необработанная расшифровка остаются неизменными.</string>
-	<key>Truncated</key>
-	<string>Усечено</string>
-	<key>Try Again</key>
-	<string>Попробуйте еще раз</string>
-	<key>Uncertain</key>
-	<string>Неопределенный</string>
-	<key>Use System Language</key>
-	<string>Использовать системный язык</string>
-	<key>Verification Model %lld</key>
-	<string>Модель проверки %lld</string>
-	<key>Voice Activity Detection</key>
-	<string>Обнаружение голосовой активности</string>
-	<key>Wait for the active transcription to finish.</key>
-	<string>Подождите, пока активная транскрипция завершится.</string>
-	<key>Wall Time</key>
-	<string>Фактическое время</string>
-	<key>Yes</key>
-	<string>Да</string>
-	<key>Your selection is stored as a correction beside the immutable raw transcript.</key>
-	<string>Ваш выбор сохраняется как исправление рядом с неизменяемой необработанной расшифровкой.</string>
-	<key>•</key>
-	<string>•</string>
-	<key>%lld bytes</key>
-	<string>%lld байт</string>
-	<key>A new setup selects Codex only when its CLI is signed in; otherwise it selects Local. Codex receives transcript text only. Audio never leaves this Mac.</key>
-	<string>Новая настройка выбирает Codex только при входе в CLI; иначе выбирается Local. Codex получает только текст расшифровки. Аудио никогда не покидает этот Mac.</string>
-	<key>Audio stays on this Mac. Transcription runs locally; Codex receives transcript text only during post-processing.</key>
-	<string>Аудио остаётся на этом Mac. Расшифровка выполняется локально; Codex получает текст расшифровки только во время постобработки.</string>
-	<key>Batches Planned</key>
-	<string>Запланированные пакеты</string>
-	<key>Check Again</key>
-	<string>Проверить снова</string>
-	<key>Checking availability…</key>
-	<string>Проверка доступности…</string>
-	<key>Chooses the language the transcript is translated into.</key>
-	<string>Выбирает язык, на который будет переведена расшифровка.</string>
-	<key>Codex CLI</key>
-	<string>CLI Codex</string>
-	<key>Codex CLI was not found. Install it and run codex login in Terminal, or select Local meanwhile.</key>
-	<string>CLI Codex не найден. Установите его и выполните codex login в Терминале или пока выберите Local.</string>
-	<key>Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile.</key>
-	<string>Codex установлен, но вход не выполнен. Выполните codex login в Терминале или пока выберите Local.</string>
-	<key>Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local.</key>
-	<string>Срок действия входа в Codex истёк или скоро истечёт. Обновите его или войдите через Codex, затем повторите попытку либо выберите Local.</string>
-	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
-	<string>Codex установлен, но не удалось проверить состояние входа. Повторите попытку или пока выберите Local.</string>
-	<key>Codex is signed in and ready.</key>
-	<string>В Codex выполнен вход, всё готово.</string>
-	<key>Correct</key>
-	<string>Исправить</string>
-	<key>Input Mode</key>
-	<string>Режим ввода</string>
-	<key>Interrupted</key>
-	<string>Прервано</string>
-	<key>Installed and signed in</key>
-	<string>Установлен, вход выполнен</string>
-	<key>Installed, not signed in. Run codex login in Terminal.</key>
-	<string>Установлен, вход не выполнен. Выполните codex login в Терминале.</string>
-	<key>Installed, but sign-in status could not be checked.</key>
-	<string>Установлен, но не удалось проверить состояние входа.</string>
-	<key>Largest Accepted Output Bound</key>
-	<string>Наибольшая допустимая граница вывода</string>
-	<key>Largest Batch Estimate</key>
-	<string>Наибольшая оценка пакета</string>
-	<key>Largest Batch Input</key>
-	<string>Наибольший входной пакет</string>
-	<key>Largest Raw Response</key>
-	<string>Наибольший необработанный ответ</string>
-	<key>Model ID</key>
-	<string>ID модели</string>
-	<key>Operation</key>
-	<string>Операция</string>
-	<key>Output Estimate Formula</key>
-	<string>Формула оценки вывода</string>
-	<key>Output Planning Budget</key>
-	<string>Бюджет планирования вывода</string>
-	<key>Output Token Limit</key>
-	<string>Лимит выходных токенов</string>
-	<key>Prompt Limit</key>
-	<string>Лимит запроса</string>
-	<key>Rename this speaker everywhere in this transcript.</key>
-	<string>Переименовать этого говорящего во всей этой расшифровке.</string>
-	<key>Segments per Batch</key>
-	<string>Сегментов в пакете</string>
-	<key>Service-managed (limit unavailable)</key>
-	<string>Управляется сервисом (лимит недоступен)</string>
-	<key>Source Segments SHA-256</key>
-	<string>SHA-256 исходных сегментов</string>
-	<key>Target Language</key>
-	<string>Целевой язык</string>
-	<key>Text only</key>
-	<string>Только текст</string>
 	<key>Translate</key>
 	<string>Перевести</string>
 	<key>Translate Into</key>
 	<string>Перевести на</string>
-	<key>This name applies to every %@ segment in exports.</key>
-	<string>Это имя применяется к каждому сегменту %@ в экспортах.</string>
-	<key>Choose Folder…</key>
-	<string>Выбрать папку…</string>
-	<key>Use Default</key>
-	<string>Использовать по умолчанию</string>
-	<key>Directory choices apply the next time Maccheroni launches. Existing recordings and run artifacts stay where they are.</key>
-	<string>Выбор каталогов будет применён при следующем запуске Maccheroni. Существующие записи и артефакты запуска останутся на своих местах.</string>
-	<key>MACCHERONI_LIBRARY_ROOT controls the recording and run paths for this launch.</key>
-	<string>MACCHERONI_LIBRARY_ROOT управляет путями для записей и запусков в этом сеансе.</string>
-	<key>Planned Model</key>
-	<string>Планируемая модель</string>
-	<key>Play this segment from the source audio.</key>
-	<string>Воспроизведите этот сегмент из исходного звука.</string>
-	<key>Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio and source artifacts stay on this Mac unchanged.</key>
-	<string>Codex получает ограниченный текст расшифровки, полный глоссарий активного профиля и его хеш, инструкции по постобработке и, при переводе, целевой язык. Аудио и исходные артефакты остаются на этом Mac без изменений.</string>
-	<key>A new setup selects Codex only when its CLI is signed in; otherwise it selects Local. Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio never leaves this Mac.</key>
-	<string>Новая настройка выбирает Codex только при входе в CLI; иначе выбирается Local. Codex получает ограниченный текст расшифровки, полный глоссарий активного профиля и его хеш, инструкции по постобработке и, при переводе, целевой язык. Аудио никогда не покидает этот Mac.</string>
-	<key>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</key>
-	<string>Аудио остаётся на этом Mac. Расшифровка выполняется локально; во время постобработки Codex получает ограниченный текст расшифровки, полный глоссарий активного профиля и его хеш, инструкции по постобработке и, при переводе, целевой язык.</string>
-	<key>Choose an M4A, WAV, or MP3 audio file.</key>
-	<string>Выберите аудиофайл M4A, WAV или MP3.</string>
-	<key>Post-processing could not start for this completed run.</key>
-	<string>Не удалось запустить постобработку для этого завершённого запуска.</string>
-	<key>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</key>
-	<string>Подтверждение относится только к этому точному тексту перевода. Неизменяемая исходная расшифровка и перевод остаются без изменений.</string>
-	<key>A derived result manifest is invalid: %@</key>
-	<string>Манифест производного результата недействителен: %@</string>
-	<key>A derived result does not match its source run: %@</key>
-	<string>Производный результат не соответствует исходному запуску: %@</string>
-	<key>Source Run</key>
-	<string>Исходный запуск</string>
-	<key>Current Derived Result</key>
-	<string>Текущий производный результат</string>
-	<key>Glossary Semantics</key>
-	<string>Семантика глоссария</string>
-	<key>Source Run Glossary</key>
-	<string>Глоссарий исходного запуска</string>
-	<key>Current Derived Post-processing</key>
-	<string>Текущая производная постобработка</string>
-	<key>Free Space</key>
-	<string>Свободное место</string>
+	<key>Translated</key>
+	<string>Переведённая</string>
+	<key>Truncated</key>
+	<string>Усечено</string>
+	<key>Try Again</key>
+	<string>Попробуйте еще раз</string>
 	<key>Unavailable</key>
 	<string>Недоступно</string>
-	<key>Stale Bookmark</key>
-	<string>Устаревшая закладка</string>
-	<key>Library Metadata</key>
-	<string>Метаданные библиотеки</string>
-	<key>Request Logs</key>
-	<string>Журналы запросов</string>
-	<key>ASR Model Cache</key>
-	<string>Кэш модели ASR</string>
-	<key>VAD Model Cache</key>
-	<string>Кэш модели VAD</string>
-	<key>Diarization Model Cache</key>
-	<string>Кэш модели диаризации</string>
-	<key>Post-processing Model Cache</key>
-	<string>Кэш модели постобработки</string>
-	<key>Temporary Work</key>
-	<string>Временные рабочие данные</string>
-	<key>Available</key>
-	<string>Доступно</string>
-	<key>Not Created</key>
-	<string>Ещё не создано</string>
+	<key>Uncertain</key>
+	<string>Неопределенный</string>
 	<key>Unmounted</key>
 	<string>Не смонтировано</string>
 	<key>Unreadable</key>
 	<string>Невозможно прочитать</string>
-	<key>Bookmark Unavailable</key>
-	<string>Закладка недоступна</string>
+	<key>Use Default</key>
+	<string>Использовать по умолчанию</string>
+	<key>Use System Language</key>
+	<string>Использовать системный язык</string>
+	<key>VAD Model Cache</key>
+	<string>Кэш модели VAD</string>
+	<key>Verification Model %lld</key>
+	<string>Модель проверки %lld</string>
+	<key>Voice Activity</key>
+	<string>Речевая активность</string>
+	<key>Voice Activity Detection</key>
+	<string>Обнаружение голосовой активности</string>
 	<key>Volume Readiness</key>
 	<string>Состояние томов</string>
-	<key>Storage Role</key>
-	<string>Роль хранилища</string>
-	<key>Model Cache on %@</key>
-	<string>Кэш модели на %@</string>
-	<key>A configured storage folder is no longer available. Choose the folder again in Settings.</key>
-	<string>Настроенная папка хранилища больше недоступна. Выберите её снова в настройках.</string>
-	</dict>
+	<key>Wait for the active transcription to finish.</key>
+	<string>Подождите, пока активная транскрипция завершится.</string>
+	<key>Wall Time</key>
+	<string>Фактическое время</string>
+	<key>What The Pipeline Recorded</key>
+	<string>Что записала обработка</string>
+	<key>Who Was Speaking</key>
+	<string>Кто говорил</string>
+	<key>Wording</key>
+	<string>Формулировка</string>
+	<key>Yes</key>
+	<string>Да</string>
+	<key>You already reviewed this segment.</key>
+	<string>Вы уже проверили этот сегмент.</string>
+	<key>Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local.</key>
+	<string>Срок действия входа в Codex истёк или скоро истечёт. Обновите его или войдите через Codex, затем повторите попытку либо выберите Local.</string>
+	<key>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</key>
+	<string>Подтверждение относится только к этому точному тексту перевода. Неизменяемая исходная расшифровка и перевод остаются без изменений.</string>
+	<key>Your selection is stored as a correction beside the immutable raw transcript.</key>
+	<string>Ваш выбор сохраняется как исправление рядом с неизменяемой необработанной расшифровкой.</string>
+	<key>•</key>
+	<string>•</string>
+</dict>
 </plist>
