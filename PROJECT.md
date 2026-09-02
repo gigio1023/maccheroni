@@ -543,9 +543,9 @@ not deleted.
   discarded a complete transcript and a diarization validator rejecting about half of
   all mid-file clips on an arbitrary tie-break. D19's other terms are unchanged and
   binding: no recording, transcript, or run output enters version control, and only
-  structural metadata such as durations, counts, ratios, and terminal reasons may be
-  quoted into a tracked document. The gate is a smoke run, not a scored measurement; it
-  asks whether the profile runs and what it produces, not whether the output is good.
+  structural metadata such as durations, counts, ratios, and stop reasons may be
+  quoted into a tracked document. The gate is a smoke run. It asks whether the profile runs and what it produces;
+  scoring the output is a separate campaign.
 - D46 [maintainer] Adopt a layered reading model for speaker attribution, provisionally
   (decided 2026-09-02). The source run keeps acoustic-only assignment. A derived run may
   carry a non-acoustic speaker proposal, including one from an LLM, when it is marked as
@@ -556,8 +556,8 @@ not deleted.
   computes and discards, then re-examine the 0.60 dominant-share and 0.50 coverage
   thresholds against real overlap, and only then apply a non-acoustic proposal to what
   remains. Basis: on the 2026-09-01 run 110 of 248 segments carry no speaker, and the
-  measured cases sit just below the thresholds rather than lacking evidence, so most of
-  the gap is disclosure rather than inference. This decision deliberately does not settle
+  measured cases sit just below the thresholds rather than lacking evidence, so disclosure
+  closes most of the gap before any inference is needed. This decision deliberately does not settle
   whether a proposal may become the default reading layer, which model produces it, or
   what it may claim. Revisit when the disclosure and threshold work lands and the
   remaining unattributed share is known, or if any measured `correct_to_incorrect` rate
@@ -590,7 +590,11 @@ not deleted.
   must be structured so their content can be rendered outside a scroll container, and
   text fields, sliders and hover-revealed affordances remain unjudged by this method.
   A report under D48 states which controls it could not see rather than implying full
-  coverage.
+  coverage. Amended 2026-09-02, second use: laying the view out in an `NSHostingView`
+  and drawing it with `cacheDisplay(in:to:)` renders text fields, sliders, scroll-view
+  content, grouped forms and spinners, under the same permissions budget. `List` still
+  renders blank. The hosting-view path is the one to use; `ImageRenderer` remains
+  acceptable only for views that contain none of those controls.
 
 - D49 [maintainer] Extend D39 so a derived set may be created from a run whose coverage
   is incomplete, for the speaker-proposal family only (decided 2026-09-02). D39 says a
@@ -604,20 +608,21 @@ not deleted.
   point. Two conditions, both of which exist because a proposal over an incomplete
   transcript that presents as complete would be the same class of false claim the
   2026-09-01 repairs removed: the derived manifest records whether the source coverage
-  was complete, and the covered and missing durations travel with that flag rather than a
-  bare boolean. Revisit if a derived family other than speaker-proposal wants the same
+  was complete, and the covered and missing durations travel with that flag. Revisit if a derived family other than speaker-proposal wants the same
   relaxation, which should be argued separately rather than inherited.
 
 - D50 [maintainer] Constrain the first speaker-proposal iteration to confirm-or-decline
   (decided 2026-09-02). On the first real proposal run over the 2026-09-01 recording,
   110 unattributed segments produced 99 proposals and 11 declines; of the 99, 76
-  agreed with the acoustic leader (the speaker with the largest overlap share, below the
-  0.60 bar) and 23 overturned it. Confirming a sub-threshold acoustic leader completes
-  acoustic evidence; overturning it contradicts acoustic evidence, which is the act
-  judgment rule 4 was written against and the distortion the maintainer named when
-  proposing this direction. With no ground truth to tell a correct overturn from a
+  agreed with the top-ranked candidate (the speaker with the largest overlap share, below the
+  0.60 bar) and 23 did not. Basis corrected the same day: those 23 were not overturns
+  of a clear lean — every one was an exact overlap tie with no top-ranked candidate to
+  contradict, and the model had picked one side of the tie. A tie-break is still a
+  speaker assignment resting on no acoustic evidence, which is what judgment rule 4 was
+  written against and the distortion the maintainer named when proposing this
+  direction; the correction changes the description of the 23, not the decision. With no ground truth to tell a correct overturn from a
   plausible wrong one, the first iteration permits a proposal only when it names the
-  acoustic leader, and otherwise declines with its reason. The 76 confirmations alone
+  top-ranked candidate, and otherwise declines with its reason. The 76 confirmations alone
   fill about 69 % of the unattributed segments. Overturns become permissible only after
   a measurement shows they are right more often than wrong, which is a separate
   campaign. D46's provisional status and revisit triggers are unchanged.
@@ -633,7 +638,24 @@ not deleted.
   fails outright only when nothing anywhere was promotable, `partial` is written only
   when canonical artifacts exist, and `processed_duration_s` sums every promoted range
   rather than stopping at the first gap. Recorded as a decision because it reverses a
-  deliberate prior assertion, not because it was contested.
+  prior assertion that a test had made on purpose.
+
+- D52 [maintainer] A renamed wire value keeps its legacy value accepted on read, and a
+  sealed artifact is never rewritten to follow a rename (decided 2026-09-02). Basis: the
+  2026-09-02 terminology audit renamed the failure code `ASR_REPETITION_DEGENERATION`
+  to `ASR_REPETITION_LOOPING` and the proposal key `acoustic_leader` to
+  `top_ranked_candidate`. The first rename silently regressed every run written
+  before it — the app's classifier accepted only the new code, so a sealed manifest
+  carrying the old one lost its specific cause and its stopped-at stage on screen. The
+  second was migrated on disk in the private working directory, and the migration was
+  incomplete on its first pass because the derived set's manifest still carried the
+  pre-migration content hash, so the app rejected the set with `artifactHashMismatch`
+  until the hash was refreshed; the integrity check did its job. Rule: a reader accepts
+  the legacy value at the same case as the new one, with a comment naming the rename;
+  judgment rule 3 governs artifacts, so a sealed manifest is read through the alias
+  and left byte-identical. Where a private artifact must be migrated for local use,
+  every hash that seals it is refreshed in the same step and the original is kept
+  beside it.
 
 ## Project-wide Done Criteria
 

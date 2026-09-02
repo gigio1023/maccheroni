@@ -481,7 +481,7 @@ accept it as an inference limit.
 |---|---|---|---|---|---|---|
 | `vibevoice_requested_output_cap` | generated output, tokens | VibeVoice, operator choice made effective | `CLIASRInferencePolicy.maximumTokens`, passed unchanged to `mlx-audio` `max_tokens` | no new headroom; the production value remains 5,120; injectable contract tests cover one token below, exactly at, and one token above a test cap | below cap records observed EOS; at cap records typed `maximumTokens`; an impossible count above cap is malformed; record requested cap, effective cap, prompt tokens, generated tokens, and aggregate generation time | `mlx-audio` version, VibeVoice generator loop, tokenizer, or cap policy changes |
 | `vibevoice_context_hard_cap` | context capacity, tokens | VibeVoice, unavailable observation | `mlx-audio` 0.4.6 exposes no context hard-cap value through this backend | unavailable; never substitute the requested output cap | record `null` plus an unavailable reason; a runtime error cannot be promoted | upstream begins exposing a context cap or a context-limit stop |
-| `qwen_effective_output_cap` | generated output, tokens | Qwen through `speech` 0.0.23, unavailable enforcement | the command has no max-token option and emits no generated-token count or terminal reason | unavailable; the requested 5,120 tokens are recorded separately and are not claimed as effective | preserve stdout as diagnostic evidence, record `null` plus reasons, and fail with `asr_evidence_unavailable` | `speech` adds an enforceable cap, token counts, and a typed terminal reason |
+| `qwen_effective_output_cap` | generated output, tokens | Qwen through `speech` 0.0.23, unavailable enforcement | the command has no max-token option and emits no generated-token count or stop reason | unavailable; the requested 5,120 tokens are recorded separately and are not claimed as effective | preserve stdout as diagnostic evidence, record `null` plus reasons, and fail with `asr_evidence_unavailable` | `speech` adds an enforceable cap, token counts, and a typed stop reason |
 | `qwen_intra_chunk_timing` | segment boundaries, seconds | Qwen through `speech` 0.0.23, unavailable observation | the command emits one transcript string and no timestamped segments | unavailable; a synthetic `[0, duration]` range is forbidden | record chunk-only granularity, no normalized segments, zero promotable coverage, and fail before speaker attribution | `speech` adds validated segment or word timestamps |
 
 The supported-range calculation for the pinned VibeVoice path was:
@@ -526,14 +526,14 @@ complete or speaker-attributed transcript. Recalculate this range and add the
 same below, at, and above boundary tests before enabling promotion for a newer
 backend.
 
-## 2026-09-01 VibeVoice Repetition Degeneration and Leaf Re-derivation
+## 2026-09-01 VibeVoice Repetition Looping and Leaf Re-derivation
 
 Real-usage runs of a 20.7-minute meeting recording through the shipped
 `ko-meeting` profile failed at every leaf longer than four minutes. The token
 cap was not the binding limit in any of them. Generation collapsed into a
 repeated token and then ran to the cap, so the leaf reached the cap without
 producing new content. This section replaces the VibeVoice leaf bounds derived
-in the 2026-08-10 section, adds the degeneration term the supported-range
+in the 2026-08-10 section, adds the repetition-looping term the supported-range
 calculation lacked, and defines what a collapsed leaf may still promote.
 
 Read the bound below as a conservative operating limit, not as a safe
@@ -596,9 +596,9 @@ below.
 | `vibevoice_audio_context_rate` | prompt context, tokens per audio second | VibeVoice, empirical exact fit | measured `prompt_tokens` against leaf duration, `prompt = 65 + floor(7.5 * s) + glossary`, floor rounding | no headroom needed; 9 of 9 runs reproduce exactly, 120.024-641.664 s, 2026-08-31 to 2026-09-01 | over-plan rejects before launch; record prompt tokens, generated tokens, and leaf duration per attempt | model revision, tokenizer, prompt template, or audio frontend changes |
 | `vibevoice_generated_token_density` | generated output, tokens per audio second | VibeVoice, empirical coefficient | accepted end-of-sequence leaves only; collapsed leaves are excluded because their count is the cap, not a density | worst observed **23.34** with a 1.5x planning factor; 24 accepted leaf measurements across four runs, 18 of them distinct, 30.56-420.032 s, both audio classes; the driver is segment density rather than audio seconds, and the worst case is a 31.87 s leaf carrying 22 segments of rapid backchannel | output-budget over-plan; record generated tokens, segment count, and audio duration | a new accepted leaf exceeds the envelope, or the segment density of a track changes |
 | `vibevoice_segment_structure_density` | segments per audio second on accepted leaves, count per second | VibeVoice, empirical coefficient replacing an `unavailable` | measured segment count against leaf duration; each segment costs a fixed JSON scaffold of roughly 20-25 tokens on top of its text | 0.050-0.690 segments per second across the same 24 measurements; the 0.690 case is the 23.34 tok/s worst case above, and segment density and token density rank together at both extremes | it inflates generated tokens at constant audio duration, so the output budget must be planned from it and not from audio seconds alone | a track with faster speaker alternation than the measured maximum |
-| `vibevoice_repetition_run` | longest run of consecutive identical 1-to-8-gram units, count | VibeVoice, empirical detector threshold | `repetition_run_length` in `Sources/MaccheroniASR/Python/maccheroni_asr_runner.py`; threshold 12 | worst run inside an accepted transcript is 6 at any width up to 8, measured across 16 accepted and 13 collapsed payloads; the smallest run inside a collapsed payload is 339; the threshold of 12 sits in that 56x gap with a 2x factor over the worst accepted case and 28x below the smallest collapsed one | typed `repetitionDegeneration` terminal reason with a recovered prefix; record threshold, longest run inside the prefix, and longest run in the discarded tail | model revision, tokenizer, prompt template, or a new accepted transcript with a run at or above 12 |
+| `vibevoice_repetition_run` | longest run of consecutive identical 1-to-8-gram units, count | VibeVoice, empirical detector threshold | `repetition_run_length` in `Sources/MaccheroniASR/Python/maccheroni_asr_runner.py`; threshold 12 | worst run inside an accepted transcript is 6 at any width up to 8, measured across 16 accepted and 13 collapsed payloads; the smallest run inside a collapsed payload is 339; the threshold of 12 sits in that 56x gap with a 2x factor over the worst accepted case and 28x below the smallest collapsed one | typed `repetitionLooping` stop reason with a recovered prefix; record threshold, longest run inside the prefix, and longest run in the discarded tail | model revision, tokenizer, prompt template, or a new accepted transcript with a run at or above 12 |
 | `vibevoice_initial_leaf_duration` | leaf duration, seconds | VibeVoice, **conservative operating limit, not a validated safe threshold** | duration above which collapse is systematic rather than sporadic on class A; it is not a correctness condition and no duration bound is derivable from this data as one | maximum 120 s; 4 of 4 leaves collapsed between 285 s and 642 s and 1 of 2 at 240 s, against 1 of 8 leaves between 53 s and 120 s; collapse is observed both above and below the bound, so it reduces exposure and bounds the size of one collapse rather than preventing collapse | preflight split by the leaf planner, then split recovery, then prefix promotion; record planned leaf count and per-leaf duration | any collapse below 60 s, or clean 240 s leaves at several independent offsets across more than one recording and audio class |
-| `vibevoice_recovery_depth` | recovery tree depth, levels | VibeVoice, derived from the two duration bounds | 120 s maximum with a 30 s recovery minimum admits 120 -> 60 -> 30 | depth 2; a depth-3 child would be 15 s, below the recovery minimum; for a parent under 120 s the 30 s minimum binds before the depth does, so recovery is one level and then prefix promotion | `ASR_LIMIT_EXHAUSTED` or `ASR_REPETITION_DEGENERATION` after the tree is spent; record attempt lineage and depth | either duration bound changes |
+| `vibevoice_recovery_depth` | recovery tree depth, levels | VibeVoice, derived from the two duration bounds | 120 s maximum with a 30 s recovery minimum admits 120 -> 60 -> 30 | depth 2; a depth-3 child would be 15 s, below the recovery minimum; for a parent under 120 s the 30 s minimum binds before the depth does, so recovery is one level and then prefix promotion | `ASR_LIMIT_EXHAUSTED` or `ASR_REPETITION_LOOPING` after the tree is spent; record attempt lineage and depth | either duration bound changes |
 
 ### Supported-range calculation
 
@@ -620,13 +620,13 @@ rapid backchannel generated 744 tokens, 23.34 per audio second. The driver is
 segment density, not audio seconds - each segment costs a fixed JSON scaffold on
 top of its text - which is the same structure-density effect the MOSS section
 carries as `unavailable`. Recomputed, the output budget permits 146 s. The
-120-second leaf still clears it, but the margin is 1.2x rather than 3.7x, so the
+120-second leaf still clears it, but the margin is 1.2x, down from 3.7x, so the
 token cap is now close to binding on a dense leaf where it previously was not.
 Record the segment count per attempt so this coefficient can be tracked.
 
 `conservative_operating_limit` is the only term in that minimum that is not
-derived from a hard or exactly-fitted quantity, and it is deliberately not
-called an envelope. Collapse has been observed both above it and below it. It
+derived from a hard or exactly-fitted quantity, and it is not called an
+envelope. Collapse has been observed both above it and below it. It
 narrows the shipped 600/900/1,200-second values, every one of which is far
 above any duration that has ever completed on class A, and it caps how much
 audio one collapse can put at risk; it does not make a leaf safe. Correctness
@@ -637,7 +637,7 @@ the cap by repeating content, not by running out of budget for real transcript,
 and raising the cap would not have made any of them succeed. The cap stays at
 5,120 tokens. It is no longer far from binding, though - at the corrected
 density a leaf of 146 s would exhaust it legitimately, so the cap and the
-operating limit are now within 1.2x of each other rather than 3.7x.
+operating limit are now within 1.2x of each other, down from 3.7x.
 
 Context at the production leaf:
 
@@ -664,8 +664,8 @@ roughly unchanged; the added cost is per-leaf model load, bounded by the
 13.3-second residual between the 120-second run's 44.27-second wall time and its
 31.00-second aggregate generation time, which also contains that run's
 whole-file preprocessing and diarization. Nine additional leaves therefore add
-at most about 120 seconds. That is the price of never losing a leaf, and it is
-recorded here rather than traded away.
+at most about 120 seconds. That is the cost of never losing a leaf. It is
+recorded here.
 
 ### Completeness and promotion
 
@@ -681,7 +681,7 @@ verified_complete =
 
 The last clause is the term the 2026-08-10 formula lacked. An end-of-sequence
 stop whose final segment is degenerate is not a complete result: it is closed as
-a limit outcome with the `repetitionDegeneration` terminal reason and the same
+a limit outcome with the `repetitionLooping` stop reason and the same
 recovered prefix as a cap-reached collapse.
 
 ```text
@@ -693,21 +693,21 @@ terminal_collapse =
 promoted_prefix = leading complete objects up to and including the last
                   non-degenerate object; trailing degenerate objects are
                   dropped, an interior one is kept and flagged
-                  repetition_degenerate
+                  repetition_looping
 ```
 
-Degeneration is intermittent before it is terminal. In the 285-second class-A
-leaf a fully collapsed passage at 169.00-176.74 s is followed by correct output
-through 235.11 s, so a detector that stopped at the first repeated run would
-discard 66 seconds of recoverable transcript. Only the terminal region decides
-the terminal reason, and only trailing degenerate objects are dropped.
+Repetition looping is intermittent before it is terminal. In the 285-second
+class-A leaf a fully collapsed passage at 169.00-176.74 s is followed by correct
+output through 235.11 s, so a detector that stopped at the first repeated run
+would discard 66 seconds of recoverable transcript. Only the terminal region
+decides the stop reason, and only trailing degenerate objects are dropped.
 
-**Position, not episode length, is the discriminator.** The evidence that an
-episode was survivable is that correct output follows it; the evidence that one
-was fatal is that generation ended inside it. Measured episode counts and
+**Position, not repetition-run length, is the discriminator.** The evidence that
+a repetition run was survivable is that correct output follows it; the evidence
+that one was fatal is that generation ended inside it. Measured run counts and
 lengths corroborate that split without defining it:
 
-| payload | episodes | interior episode lengths | terminal episode length |
+| payload | runs | interior run lengths | terminal run length |
 |---|---|---|---|
 | 285.012 s leaf | 4 | 75, 72, 75 | 1,047 |
 | 330.012 s leaf | 4 | 75, 72, 75 | 1,077 |
@@ -720,13 +720,13 @@ lengths corroborate that split without defining it:
 | 420.032 s accepted class-B leaf | 0 | none | none |
 
 Three separated bands: at most 6 repeats inside an accepted transcript, 72 to
-75 for an episode the decoder escaped, and 1,047 to 4,497 for one it did not.
-The detection threshold of 12 sits in the first gap and every episode band is
-far from it, so the exact number is not load-bearing. An episode-length rule
-would also separate these runs, but it would be a proxy: it would have to guess
-which lengths are survivable, where the position rule reads the answer off the
-output. The bands come from six failing and three accepted payloads on two
-recordings, so treat the numbers as corroboration and not as calibration.
+75 for a repetition run the decoder escaped, and 1,047 to 4,497 for one it did
+not. The detection threshold of 12 sits in the first gap and every run-length
+band is far from it, so the exact number decides nothing. A run-length rule
+would also separate these payloads, but it would be a proxy: it would have to
+guess which lengths are survivable, where the position rule reads the answer
+off the output. The bands come from six failing and three accepted payloads on
+two recordings, so treat the numbers as corroboration and not as calibration.
 
 A limit outcome still cannot become a complete result. When the recovery tree is
 spent, the promoted prefix becomes explicit partial coverage:
@@ -742,19 +742,19 @@ run_status = partial
 coverage.truncated = true
 coverage.strategy = backend_truncated
 coverage.processed_duration_s = sum of promoted leaf coverage
-failure.code = ASR_REPETITION_DEGENERATION or ASR_LIMIT_EXHAUSTED
+failure.code = ASR_REPETITION_LOOPING or ASR_LIMIT_EXHAUSTED
 ```
 
 Every unpromoted range is named in `primary/partial-coverage.json` with its
-attempt ID and terminal reason, and the manifest failure message repeats them.
+attempt ID and stop reason, and the manifest failure message repeats them.
 Judgment rule 2 holds: nothing is silently truncated, and the covered duration
 is stated rather than inferred.
 
 **No minimum promotable share, and no claim that a promoted prefix is clean.**
 The 240-second class-A leaf that started at 45 s recovers exactly one object,
 22.79 s of 240.012 s, under 10 % of the leaf, and that object is itself visibly
-degraded: it stutters a discourse filler several times before the runaway
-proper. Two separate decisions apply to it.
+degraded: it stutters a discourse filler several times before the repetition
+run begins. Two separate decisions apply to it.
 
 Promote it. The policy's own state definitions settle this: `failed` means
 there is no result to promote, and 22.79 seconds of transcript is a result, so
@@ -767,7 +767,7 @@ measured.
 
 Do not call it clean. Coverage is the only claim promotion makes. Text quality
 is reported separately and per segment: a segment measured at or above the
-repetition threshold carries the `repetition_degenerate` flag through merge
+repetition threshold carries the `repetition_looping` flag through merge
 into `merged/segments.json`, the attempt record states how many promoted
 segments carry it alongside the longest repeated run inside the prefix and in
 the discarded tail, and the raw payload is preserved whole. Sub-threshold
@@ -776,27 +776,27 @@ measures 2, against 6 inside the accepted 240-second leaf and a threshold of 12,
 so any rule that caught it would fire on ordinary speech. It stays visible in
 the text itself.
 
-One reading trap follows from the chunk status vocabulary, which has no partial
+A common misreading follows from the chunk status vocabulary, which has no partial
 value. A chunk whose leaf promoted only a prefix is still marked `succeeded`,
 because it did produce a promoted transcript, so `chunks_completed` can equal
-`chunks_planned` on a run that did not cover its input. The coverage authority
-is `processed_duration_s` against `input_duration_s`, the `truncated` flag, the
-`backend_truncated` strategy, and `primary/partial-coverage.json` - never the
-chunk count. Any surface that renders coverage reads those, not
-`chunks_completed`.
+`chunks_planned` on a run that did not cover its input. Coverage is read from
+`processed_duration_s` against `input_duration_s`, the `truncated` flag, the
+`backend_truncated` strategy, and `primary/partial-coverage.json`. It is never
+read from the chunk count, so any surface that renders coverage reads those
+five.
 
 **A lost leaf ends the leaf, not the run.** When recovery is spent and no
 prefix can be promoted, that leaf's range is recorded as unrecovered and the
 run continues: sibling leaves keep their transcript, later chunks are still
 processed, and merge and canonical promotion still happen over everything that
 did complete. The run fails outright only when nothing anywhere was promotable,
-in which case it carries the typed cause of its first lost range. This applies
+in which case it carries the typed cause of its first missing range. This applies
 to every backend, MOSS included.
 
-That is a change to MOSS's behaviour and it is recorded here deliberately. A
+That is a change to MOSS's behaviour and it is recorded here. A
 MOSS run that exhausted its recovery depth previously aborted before merge and
 discarded every completed leaf, keeping their `result.json` files on disk with
-nothing promoted. It now promotes them and names the lost range. D28's leaf
+nothing promoted. It now promotes them and names the missing range. D28's leaf
 policy, the depth-3 recovery tree, the 5,120-token cap and the promotion
 conditions are all unchanged; only what happens after recovery is finally spent
 is different, and it changes toward the `partial` state this document already
@@ -824,8 +824,8 @@ stopped early.
 **A promoted complete leaf must stay distinguishable from a promoted prefix.**
 The project's done criteria require end of sequence for every promoted leaf, and
 prefix promotion produces a promoted leaf that did not reach it. The two are
-therefore separated in the artifact rather than blended, so the criterion can be
-restated against what the run directory actually records:
+therefore separated in the artifact, so the criterion can be restated against
+what the run directory actually records:
 
 | | promoted complete leaf | promoted prefix |
 |---|---|---|
@@ -840,7 +840,7 @@ holding only the run directory can therefore answer "did every promoted leaf
 reach end of sequence" by checking whether `partial_prefix_attempt_ids` is
 empty.
 
-A second reading trap sits in the attempt record. `canonical_promoted` in
+The attempt record invites a second misreading. `canonical_promoted` in
 `primary/attempts/<id>/outcome.json` is written `false` on every attempt,
 including one whose recovered prefix was promoted, and it is not the field to
 read. Attempt records are create-only and are sealed when the attempt closes,
@@ -878,15 +878,15 @@ leaves that had succeeded at 902.1-991.6 s.
 
 Both defects are closed above. The same evidence now produces a `partial` run
 that promotes 0-871.55 s and 902.11-991.6 s and beyond, names 871.55-902.11 s in
-`primary/partial-coverage.json` with its attempt ID and terminal reason, and
+`primary/partial-coverage.json` with its attempt ID and stop reason, and
 counts every promoted second rather than stopping at the gap.
 
 The same run also falsified the detector. Three of its attempts recorded
 `maximumTokens` while generating 5,120 tokens for 30 to 120 seconds of audio.
-They were collapses: the runaway cycled a five-unit phrase 333 times inside an
-object that never closed, which a four-unit window scores as 2. With the window
-at eight the three type as `repetitionDegeneration`, and the run's failure code
-changes from `ASR_LIMIT_EXHAUSTED` to `ASR_REPETITION_DEGENERATION`. Widening
+They were collapses: the repetition run cycled a five-unit phrase 333 times
+inside an object that never closed, which a four-unit window scores as 2. With
+the window at eight the three type as `repetitionLooping`, and the failure
+code changes from `ASR_LIMIT_EXHAUSTED` to `ASR_REPETITION_LOOPING`. Widening
 the window does not recover that range - there were never any complete objects
 in it - but it stops the cause being misreported.
 
@@ -951,7 +951,7 @@ a correctness condition.
   does not claim one is.
 - Class B completed at 420 s and roughly 628 s. Language, codec, overlap
   share, mic path, and speaker count all differ between the classes in one step,
-  so nothing here establishes which of them drives collapse; the runaway token
+  so nothing here establishes which of them drives collapse; the repeated token
   being a discourse filler dense in spontaneous speech and sparse in headset
   audio is a hypothesis with evidence, not a cause, and nobody has manipulated
   backchannel density to test it. If the operating limit is class-dependent, a
@@ -975,7 +975,7 @@ failure object. Neither recorded `MOSS_LIMIT_EXHAUSTED`.
 
 | leaf | seconds | generated | terminal | outcome |
 |---|---|---|---|---|
-| `chunk-0000-root` | 107.584 | 5,120 | `repetitionDegeneration` | collapsed, split |
+| `chunk-0000-root` | 107.584 | 5,120 | `repetitionLooping` | collapsed, split |
 | `chunk-0000-root-l` | 53.440 | 351 | `endOfSequence` | complete |
 | `chunk-0000-root-r` | 54.144 | 354 | `endOfSequence` | complete |
 | `chunk-0001-root` | 102.720 | 706 | `endOfSequence` | complete |
@@ -1002,7 +1002,7 @@ the bound, are what keep a run.
 Verification on this backend cannot assert transcript text. On the same
 1.35-2.65 s of audio the model emits different words in different runs, so a
 re-run that produces different text is not a regression. Live checks assert
-terminal reason, coverage, promotion behaviour, and token accounting instead. At
+stop reason, coverage, promotion behaviour, and token accounting instead. At
 identical leaf input the runs did agree exactly: the two clips share their first
 three leaves and reported the same 351, 354, and 706 generated tokens in both,
 so the observed variation is across differing prompts and leaf extents rather
@@ -1036,8 +1036,8 @@ supported-range calculation, boundary tests, and execution evidence this policy
 requires of a limit.
 
 **Decision: keep both values. 0.60 is kept on measurement; 0.50 is kept under
-acknowledged ignorance.** The two have different evidential status and that
-difference is recorded rather than blended away.
+acknowledged ignorance.** The two have different evidential status, and
+this section records the difference.
 
 Judgment rule 4 holds throughout. A threshold decides how acoustic evidence is
 read, never what it says: the chosen speaker is always the top-ranked candidate,
@@ -1070,7 +1070,7 @@ name.
 Where the 110 unattributed segments come from, re-merged through the shipped
 merger on 2026-09-02:
 
-| collapse site | segments | reachable within the swept range |
+| attribution outcome | segments | reachable within the swept range |
 |---|---|---|
 | `no_dominant_speaker` | 100 | 77 |
 | `coverage_below_threshold` | 8 | 4 |
@@ -1085,7 +1085,7 @@ at 0.20.
 **25 of the 110 are out of reach of any value at all.** 23 are exact 50/50 ties
 that the margin rule refuses at every bar including 0.50, and 2 have no turn
 beneath them. Only 85 segments are in play, and the top-share distribution of the
-100 is what a lower bar would actually buy:
+100 is what a lower bar would actually reach:
 
 | segment overlap share of the top candidate | segments | first attributed by a bar at |
 |---|---|---|
@@ -1118,7 +1118,7 @@ two proxies were built and neither is truth.
   at least 0.90 over at least 5 s of fit mass.
 - **E2, a different window, no ASR at all.** Eleven preserved clip diarizations
   from the same recording shifted into absolute time, offsets verified by
-  normalized cross-correlation at 0.995 or better, and the top-ranked speaker
+  normalized cross-correlation at 0.995 or better, and the top-ranked candidate
   recomputed per segment.
 
 | segment overlap share | E1 scored | E1 disagree | E1 rate | E2 scored | E2 flips | E2 rate |
@@ -1194,7 +1194,8 @@ The trade at 0.60 is a visible refusal against an invisible wrong name. This
 calculation does not price that; it reports that the smallest move available
 doubles the wrong count to buy 4.8 % more named segments, and the product
 judgment that a refusal costs a reader less than a false name is what makes that
-a bad trade. Reversing that judgment reverses the decision, not the arithmetic.
+a bad trade. The arithmetic holds either way. Reverse the judgment and the
+decision reverses with it.
 
 For `minimumTimelineCoverage` the calculation cannot be completed:
 
@@ -1239,7 +1240,7 @@ Execution evidence, 2026-09-02. Re-merging the preserved full-file run through
 the shipped merger gives 248 segments, 110 `UNKNOWN`, distribution 80 / 58 / 110,
 byte-identical to the preserved `merged/segments.json`. The 120-second baseline
 run gives 8 segments and 6 `UNKNOWN`, also byte-identical. Both counts are
-unchanged by this decision, which is what a decision to keep the values predicts.
+unchanged, as keeping the values predicts.
 
 ### The observation that cuts against this decision
 

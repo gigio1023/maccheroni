@@ -63,133 +63,275 @@ One window using `NavigationSplitView`: sidebar plus detail.
 
 ### 3. Transcript view (primary screen)
 
-Revised 2026-09-02 against a real transcript rather than a clean synthetic one:
-one 20.7-minute Korean meeting, 248 merged segments averaging 4.9 seconds, 2
+Designed against a real transcript rather than a clean synthetic one: one
+20.7-minute Korean meeting, 248 merged segments averaging 4.9 seconds, 2
 speakers, 43.4 % overlap share. In that transcript **110 of 248 segments carry no
-speaker (44.4 %) and 192 are flagged `conflict` or `uncertain` (77.4 %)**. Every
-rule below is chosen for those proportions. A design that only reads well when a
-handful of segments are marked is the wrong design for this product, because the
-marked case is the ordinary case.
+speaker (44.4 %) and 192 are flagged `conflict` or `uncertain` (77.4 %)**; 204 of
+the 248 are one line of text at the reading measure, and the median segment is
+18 characters. Every rule below is chosen for those proportions. A design that
+only reads well when a handful of segments are marked is the wrong design for
+this product, because the marked case is the ordinary case.
 
-#### The reading surface
+Revised 2026-09-02 a second time, after the first rework was rendered and
+measured against the owner's own design lock. The first rework fixed the
+content of the screen — evidence disclosed, layers, a review navigator, no raw
+tokens — and got the **genre** wrong: it applied product-UI grammar (pills,
+filled cards, coloured edge strips, status colour on three rows in four) to a
+job that is reading evidence and deciding the next action. Colour and radius
+were consistent; the document genre was not. This revision changes the genre.
 
-A fixed header bar sits above a scrolling segment list. The header carries every
-control that changes what the list shows, so a reader never hunts in a menu for
-the state the page is in:
+#### Two grammars, one boundary
 
-- the recording name, the segment and speaker counts, and how many segments have
-  no speaker;
-- the **layer bar** (below);
-- a **search field** that filters the list by text and by speaker name, showing
-  the match count;
-- the **review stepper**: the unresolved count is a control, not a label. It
-  reads `n of m` and its two buttons move the focus to the previous and next
-  unresolved segment and scroll it into view, wrapping at both ends;
-- the **transport**: elapsed and total time, a play/pause control, and a
-  scrubbable playhead over the whole recording.
+The screen has two jobs and they get two grammars, separated by one rule.
 
-The search field lives in the header rather than in the window toolbar. Both are
-native; the header is the one an offscreen render can show, and under D48 the
-screen is judged from rendered images.
+- **Above the rule, product UI.** The header carries every control that changes
+  what the list shows: transport, layer switch, search, review navigator. These
+  are controls and look like controls.
+- **Below the rule, an editorial table.** The row list shows what was said, by
+  whom, with what evidence. It is a data table in the owner's sense — dense,
+  first-class content — and follows the table rules below. Nothing in it is a
+  card, a chip-shaped pill, a filled surface, or a coloured strip.
+
+The rule is: **do not mix the two grammars in one surface**. The header may use
+a bordered field and a filled selection; the list may not. The rule under the
+header is where one grammar stops.
+
+The two sides share one left edge and one 860-point reading measure, so a
+control and the rows it acts on line up. Full-bleed chrome over a centred column
+put 261 points between the layer bar and the first segment it switched.
+
+#### The header
+
+- The recording name (22 pt) with, on the same line where it fits, the
+  **transport**: play/pause, elapsed time, a scrubbable playhead over the whole
+  recording, total time. No box around it.
+- One line of counts: segments, speakers, without a speaker, to review.
+- The **layer switch**: four text tabs, always all four. The displayed layer is
+  set in the primary ink at semibold with a 2-point accent underline; an
+  available layer is primary ink at regular weight; a layer this run cannot show
+  stays visible in the secondary ink, is not selectable, and says in one sentence
+  why. The same control switches layers and shows which layers this product can
+  produce at all. No fill, no pill.
+- The **review navigator**: the unresolved count is a control, not a label. It
+  reads `n of m to review` beside a flag glyph in the open colour — the one
+  place on the screen where status colour marks the reader's open work — and two
+  square hairline-bordered buttons step to the previous and next unresolved
+  segment, scrolling it into view and wrapping at both ends.
+- The **search field**: a hairline-bordered field at the control radius, with the
+  match count while a query is active. It sits to the right of the tabs where the
+  measure allows and drops under them where it does not.
+- A **proposal notice** under the tabs when the Proposed layer is displayed
+  (below).
+- A **hairline rule** closes the header. It is the boundary.
 
 #### Layers
 
 The reader switches the displayed layer between **Speaker-labelled**,
-**Corrected**, **Translated** and **Proposed** without ever losing the original. The layer bar
-lists all four at all times. A layer this run cannot show stays visible, is not
-selectable, and says in one sentence why — a reader learns what the product can
-produce from the same control that switches between what it did produce.
+**Corrected**, **Translated** and **Proposed** without ever losing the original.
 
 - **Speaker-labelled** is the immutable merged transcript: what the speech model
   said, joined to the acoustic speaker timeline. It is available whenever the
   source text is loaded, and it is the layer the rest of the tree calls raw.
-- **Corrected** is Speaker-labelled plus the corrections the reader accepted. Post-processing
-  never rewrites text on its own; it proposes, and the difference between Raw and
-  Corrected is exactly the set of proposals a human accepted. Copying while
-  Speaker-labelled is displayed copies the raw text, not the corrected text.
+- **Corrected** is Speaker-labelled plus the corrections the reader accepted.
+  Post-processing never rewrites text on its own; it proposes, and the
+  difference between the two is exactly the set of proposals a human accepted.
+  Copying while Speaker-labelled is displayed copies the raw text.
 - **Translated** is a separate create-only artifact and replaces the text.
 - **Proposed** is the D46 layer: a marked non-acoustic speaker proposal from a
   derived run. Until that derived run exists the layer is listed as not yet
-  produced. When it exists:
-  - The proposal is drawn **under** the acoustic evidence, never in place of
-    it, and never in the speaker chip's treatment. It takes the candidate
-    treatment — a colour dot and a plain name — behind a dashed label reading
-    *Proposed, not measured*. A reader must not be able to mistake it for the
-    segment's speaker; that is judgment rule 4 and the condition D46 allows
-    this layer to exist under.
-  - A segment the proposer **declined** is a state, not an absence. It reads
-    *No speaker proposed* with the reason underneath, in the same place a
-    proposal would have been. Every segment the source run left unattributed
-    appears in one of those two states, so the layer can never look like it
-    quietly skipped something. Roughly one unattributed segment in nine comes
-    back declined, and the reason is the payload of that row.
-  - The layer is **never the default**. It is something a reader asks to see.
-  - A header notice states how many were proposed and how many declined, that
-    this is neither acoustic evidence nor a measurement, and — when the source
-    transcript is incomplete — how much of the recording produced no transcript
-    at all, so a proposal layer over a 97.5 % transcript cannot present as
-    covering the meeting.
-  - Which layer a loaded result is showing is decided by the derived
-    operation's **kind**, never its mode: a speaker-proposal manifest keeps
-    `mode` at `correction` for a structural reason, and reading `mode` would
-    show a proposal run as a corrected transcript and offer a Corrected layer
-    over text nothing corrected.
+  produced. It is **never the default**; a reader asks for it. Which layer a
+  loaded result is showing is decided by the derived operation's **kind**, never
+  its mode: a speaker-proposal manifest keeps `mode` at `correction` for a
+  structural reason, and reading `mode` would show a proposal run as a corrected
+  transcript.
 
 Switching a layer changes what is displayed and nothing else. No layer writes to
 a source run (judgment rule 3), and the acoustic evidence is shown under every
-layer.
+layer that carries it.
+
+#### The row list
+
+Rules, each of which the previous screen violated:
+
+1. Hierarchy comes from type, spacing and neutral hairlines. No cards, no row
+   fills, no coloured left or top strips on routine components.
+2. One accent hue, used for the current thing: the focused row, the displayed
+   tab, a checked selection box, the playing segment.
+3. Status colour only for an open state, sparse, and always beside a
+   text label.
+4. Square geometry: 4 points on controls, 2 on chips, 0 elsewhere. No pills, no
+   repeated rounded surfaces.
+5. No motion beyond native scrolling and the navigator's scroll-to.
+6. Rows are separated by a bottom hairline only. No vertical rules, no zebra,
+   and the last row carries no rule.
+7. Numbers are set in tabular figures so they align down a column.
+
+**The structural change that pays for everything else.** The meta — selection
+box, time, speaker, share, review chip — leaves the stacked line above the text
+and moves into a **fixed-width left gutter beside it**, so a one-line segment is
+one line tall and every column aligns across rows. The eye reads down one
+column: down the times to find a moment, down the speakers to follow one voice,
+down the chips to find open work, down the text to read. The gutter is also
+where the type hierarchy comes from: roles are separated by axis, not by adding
+sizes.
+
+Columns, left to right, in points, with an 8-point gap between them and 12
+before the text:
+
+| column | width | content |
+|---|---|---|
+| select | 14 | checkbox glyph: include this segment in a copy selection |
+| time | 48 | segment start, tabular, secondary ink; the playback control for that segment. Wide enough for `59:59` beside the playing glyph |
+| speaker | 132 | the speaker's name in its colour at 13 pt semibold, or *Speaker not named* in the secondary ink; the share of speech right-aligned in the same cell when a second speaker held part of the segment |
+| review | 76 | the review chip, or nothing |
+| text | the rest | transcript, 15 pt, selectable |
+
+A pinned column-header row names the columns once — TIME, SPEAKER, SHARE,
+REVIEW, TEXT — in the 11-point label face, so a share of `64%` under SHARE
+cannot be misread as "64 % sure this is Jina": the header carries the label that
+the previous surface printed as *of speech* 82 times.
+
+Row states, none of which is a box:
+
+- **Focused** (the review navigator's target, exactly one at a time): the row's
+  bottom hairline becomes a 2-point accent rule, the time is set in the accent
+  at semibold, and the row prints the sentences that other rows do not (below).
+  Accent, underline and weight; no fill, no ring, no bar.
+- **Playing**: the time carries a waveform glyph in the accent.
+- **Selected for copying**: the checkbox is filled in the accent.
+- **Flagged**: the review chip is present. 192 of 248 rows are in this state and
+  it must not change the row's colour, weight or geometry.
 
 #### Speaker treatment
 
-Speaker identity is carried by a **name chip** — the speaker's name or its
-global speaker ID — plus a colour and a left rule. The name is the primary
-carrier, so the treatment survives a reader who cannot distinguish the colours.
-Colours are assigned by the speaker's position in the run's sorted speaker
-roster, not by a hash of the name, so two speakers in a two-speaker recording
-can never collide onto the same colour.
+Speaker identity is carried by the **name** — the speaker's given name or
+*Speaker n* from the global speaker ID — set in the speaker's colour at 13 pt
+semibold. The name is the primary carrier; the colour is paired with it and
+never appears without it, so the treatment survives a reader who cannot
+distinguish the colours. Colours are assigned by the speaker's position in the
+run's sorted speaker roster, not by a hash of the name, so two speakers in a
+two-speaker recording can never collide onto the same colour.
 
-An **unattributed** segment does not print `UNKNOWN`. It reads
-`Speaker not named`, carries a dashed rather than solid left rule and a `?`
-glyph, and shows the acoustic evidence the merger recorded:
+The palette is **resolved per appearance**. The previous seven system colours
+were chosen against the dark render and inherited into light, where the teal
+speaker name measured 2.16:1. Each roster position now has a light value and a
+dark value, chosen so the name reads at 4.5:1 or better on the page ground in
+both appearances (values under *Tokens*). The name keeps the same hue in both,
+so a speaker does not change identity when the appearance does.
 
-- a share meter, one band per candidate speaker, proportional to that speaker's
-  share of the segment's clipped overlap, up to 320 points wide so a near-even
-  split is still readable as one;
-- one line per candidate: name, share as a percentage, and overlapped seconds;
-- one sentence naming why no speaker was chosen, in the reader's language, one
-  sentence per outcome the merger distinguishes — no overlapping turn at all,
-  timeline coverage below the bar, or no speaker dominant.
+An **attributed segment that had a competing candidate** shows its winning
+share right-aligned in the speaker cell and nothing else; a segment only one
+speaker overlapped shows no number, so the number never implies doubt where the
+acoustics had none. Showing the full evidence on all 82 contested rows would
+bury the 110 that need it.
 
-This is the evidence P1 disclosed and P3 examined. It is the reason a reader can
-resolve a segment without going back to the audio: on the measured run the
-typical unattributed segment is a 0.54 / 0.46 split just under the 0.60 bar, and
-seeing that split is usually enough to decide.
+#### Evidence for a segment nobody was named for
 
-An **attributed** segment that had a competing candidate shows its winning share
-next to the name and nothing else. Showing the full meter on all 183 such
-segments would bury the 110 that need it.
+An unattributed segment does not print `UNKNOWN`. Its speaker cell reads
+*Speaker not named* in the secondary ink, and a second gutter line, aligned to
+the speaker column and spanning the speaker and review columns, prints the
+acoustic evidence the merger recorded:
 
-#### Conflicts at 77 % flagged
+- **the figures**: each candidate's name in its colour and its share of the
+  segment's clipped overlap as a percentage, in tabular figures, always printed;
+- **the band**: a 100 % stacked bar, 3 points tall, directly beneath the
+  figures, split by share, one part per candidate in that candidate's colour,
+  with a 2-point gap of page ground between the parts. "Band" is its name
+  everywhere in this document and in the code.
 
-The pre-2026-09-02 treatment tinted the row background, drew an orange border,
-and printed the raw flag tokens as chips. At 77.4 % flagged that turns the page
-into an orange field with three monospace tokens under every paragraph, and the
-marking stops meaning anything.
+The band is a chart, and the owner's rule is that a chart must answer a
+question the numbers beside it do not. It stays because it answers a question
+the figures do not: **how close was it, and who led**. It makes a 51/49 split
+and a 56/44 split distinguishable at a glance where the figures need a
+subtraction. It is subordinate — under the figures, never alone — and it
+carries nothing the figures do not: the figures are the record, the band is the
+reading aid. It sits *beneath* the figures rather than behind them because a
+band strong enough to meet the 3:1 floor for a meaning-carrying mark would
+destroy the contrast of text printed over it, and a band faint enough to sit
+behind text would fail the floor. Beneath, both pass.
 
-The rule now: **the page is calm, and only the segment the reader is working on
-is loud.**
+The overlapped seconds per candidate are no longer printed on the row. They
+restate the shares against the segment's duration, and the row has the
+duration's start beside it; they stay in the review sheet, where the full
+evidence block is shown with the wide band and the timeline coverage.
 
-- No per-row tint and no per-row border for being flagged.
-- A flagged segment carries one small review marker at the end of its meta row:
-  outline when unresolved, filled check when resolved.
-- The review stepper's current target — exactly one segment at a time — gets an
-  accent-tinted background and a visible focus ring.
-- Raw flag tokens never appear in the reading surface. `conflict` and
-  `uncertain` are represented by the review marker itself.
-  `backend_speaker_evidence` is provenance, appears on 245 of 248 segments, and
-  belongs in the segment's detail, not under every paragraph. Any flag the app
-  does not have a word for is shown only in the segment detail, under
-  `Other markers`.
+The **reason sentence** — one sentence per outcome the merger distinguishes, in
+the reader's language — prints under the text column on the focused row, and
+always for the two rarer outcomes (no overlapping turn at all; timeline coverage
+below the bar), which say something the shares do not. On the measured run 100
+of the 110 unnamed segments collapse for the common reason, and printing it 100
+times printed one fact 100 times. A translation result drops the evidence, and
+no outcome at all is its own case: it never prints per row and is stated once
+under the header instead.
+
+#### Review at 77 % flagged: the chip
+
+The marker is a **status chip**: 11-point heavy label with a glyph, 2-point
+radius, one-point border, **neutral by default**. That is the mechanism that
+lets 192 of 248 rows carry a marker without the page shouting: a neutral chip in
+the secondary ink is part of the table's texture, and colour is saved for the
+rare row whose state is open.
+
+| variant | when | appearance |
+|---|---|---|
+| neutral, pending | the segment carries a speaker conflict or an uncertainty flag and has not been marked reviewed | flag glyph, *Review*, secondary ink |
+| neutral, resolved | the reader marked it reviewed or accepted a wording | check glyph, *Reviewed*, secondary ink |
+| open | the segment has alternative wordings the reader must choose between — a text disagreement, or a post-processing candidate merged onto the segment | flag glyph, *Wording*, the open colour |
+
+No urgent variant is defined: nothing on this surface is urgent, and a variant
+without a state would be decoration. The chip opens the review sheet. Review
+state is carried by the glyph shape and the label, not by colour: a pending and
+a resolved chip differ in both.
+
+Raw flag tokens never appear in the reading surface. `conflict` and
+`uncertain` are represented by the chip; `backend_speaker_evidence` is
+provenance on 245 of 248 segments and belongs in the segment's detail; any flag
+the app has no word for is shown only there, under *Other markers*.
+
+#### The proposal layer on a row
+
+When the Proposed layer is displayed, every segment the source left
+unattributed gains a third gutter line and, under its text, a sentence:
+
+- A **proposed** segment reads a dashed label *Proposed, not measured* followed
+  by the proposed speaker in the **candidate treatment** — a 7-point dot and a
+  plain name in the primary ink — never in the speaker treatment. The label
+  never wraps; a name too long to sit beside it drops under it. The dashed
+  border and the plain name are what stop a proposal from being mistaken for
+  the segment's speaker; that is judgment rule 4 and the condition D46 allows
+  this layer to exist under. The proposer's reason prints under the text.
+- A **declined** segment reads a dashed label *No speaker proposed*, with the
+  reason under the text. Every unattributed segment appears either as proposed
+  or as declined, so the layer cannot look like it skipped one. The reason names
+  the cause in the reader's own language
+  wherever the constraint, rather than the model, decided; where the model
+  decided, its own words stand and the app adds nothing.
+- A segment declined because **the top candidates hold exactly equal overlap**
+  says so in its own sentence: *The top speakers held exactly equal time in this
+  segment.* Nothing else on the row can say it. The shares are printed rounded to
+  whole percentages, and on the measured run a model decline at 0.5015 / 0.4985
+  and a true tie at 0.5000 / 0.5000 both print 50 % / 50 %; the band splits the
+  same way for both. The tie is read off the overlapped seconds by the proposer's
+  own rule, never off the printed percentages, so the row can never call a tie
+  the artifact did not. This is the one cause sentence that does not stand down
+  for the acoustic reason on a focused row: that reason names the run's
+  dominant-share bar, which is true of every unattributed segment and says
+  nothing about two candidates being level.
+- A segment D50 declined **because the model disagreed with the top-ranked
+  candidate** reads as a decline. The disagreement is preserved evidence and the
+  reason sentence names both the model's answer and the top-ranked candidate,
+  but the model's answer is never printed as a name with a dot: rendering a
+  non-acoustic contradiction in the candidate treatment would put it beside the
+  acoustic candidates as if it were one of them. It stays in the sentence.
+
+The acoustic figures and band stay on the row above the proposal line, so a
+reader always sees what the acoustics said and what the proposal added.
+
+The header notice states how many were proposed and how many declined, that
+this is neither acoustic evidence nor a measurement, and — when the source
+transcript is incomplete — how much of the recording produced no transcript at
+all, in the open colour beside a glyph, so a proposal layer over a 97.5 %
+transcript cannot present as covering the meeting.
 
 #### Reviewing a segment
 
@@ -204,19 +346,19 @@ conflict kinds carry different things in the same `candidates` array:
   coverage, the bar that was applied — and offers no text replacement at all. It
   offers renaming the speaker and marking the segment reviewed.
 
-Offering a speaker ID as replacement transcript text is a data defect, not a
-choice, and the previous sheet did exactly that for all 293 conflicts on the
-measured run.
+Offering a speaker ID as replacement transcript text is a data defect, and an
+earlier sheet did exactly that for all 293 conflicts on the measured run.
 
 #### Text, selection and playback
 
 - Transcript text is selectable. Selection is the reader's primary tool for
   moving text out of the app, so it outranks making the paragraph a click
-  target. Playback is an explicit control on the meta row and on the transport.
+  target. Playback is an explicit control: the time in the gutter plays from
+  that segment, and the transport plays from the playhead.
 - Playing a segment seeks the source file and keeps playing past the segment
-  end, following the reader down the list and highlighting the segment that the
-  playhead is inside. Correction work is listening work; stopping after 4.9
-  seconds forces a click per segment.
+  end, following the reader down the list and marking the segment the playhead
+  is inside. Correction work is listening work; stopping after 4.9 seconds
+  forces a click per segment.
 - Playback offers pause and resume, and the playhead is visible in the header at
   all times, both as a time and as a position in the recording.
 - Audio comes only from the source file. No screen writes to it.
@@ -227,139 +369,249 @@ The inspector is **collapsed by default**. Opening it shows provenance as a
 readable summary — status, duration, coverage in words, speakers, segments,
 unattributed count, profile, models by role and model ID, glossary — and no run
 ID, no SHA-256, and no format strings. Fingerprints sit behind one disclosure
-labelled for what they are, and are selectable when opened. Exact identity stays
-one click away instead of being the first thing on the panel.
+labelled for what they are, and are selectable when opened.
 
-#### What the rendered images changed
+#### Tokens
 
-The design above was not written and shipped; it was rendered offscreen at 820
-and 1400 points, in light and dark, and read back. Five things changed because
-of what the images showed, and they are recorded here because the reasons are
-not visible in the result:
+One token set, defined once in `AppTheme` and used by every view in this
+surface, replacing per-view inline numbers. A stylesheet patched on top of an
+older one is a defect in its own right; these are the base.
 
-- **The reason sentence left 108 rows.** Printing "no speaker held 60 % …"
-  under every unnamed segment printed one fact 108 times. It now appears on the
-  segment the reader is on, and always for the two rarer outcomes, which say
-  something the shares do not.
-- **Both row controls moved off the right edge.** The review marker sat across
-  an empty 500-point gap from the text, and the copy-selection circle sat at the
-  right edge of the 860-point reading measure. With 192 of 248 segments carrying
-  a marker, that scan runs the width of the page for a marker and again for a
-  secondary affordance. Both now sit with the speaker and the time. They do
-  different things — the flag opens the review, the circle adds the segment to a
-  copy selection — and the glyphs, the help text and the accessibility labels
-  say which is which.
-- **A contested share says what it measures.** An attributed speaker with a
-  competing candidate showed a bare `64%` next to its name, which reads as
-  "64 % sure this is Jina" — a confidence this product does not compute. It now
-  reads `64% of speech`, falling back to the bare percent only where the label
-  does not fit. The number appears only when a second speaker actually held part
-  of the segment; a segment only one speaker overlapped shows none, so the
-  number never implies doubt where the acoustics had none.
-- **The share meter widened to 320 points.** At 220 a 51/49 split and a 56/44
-  split were hard to tell apart, and the reading measure has the room.
-- **Rows lost their card background.** `controlBackgroundColor` resolves to the
-  window colour in both appearances, so the card was invisible anyway. Only a
-  focused, playing or selected row is tinted, which is what the design wanted.
-- **The speaker palette dropped blue.** Blue is the accent that marks the
-  segment the reader is on, and speaker 0 was blue, so a speaker colour and a
-  state colour were the same colour.
-- **A wrong sentence was found.** Under a translation, an unnamed segment read
-  "This segment carries no recorded speaker evidence", which is false: the
-  evidence is in the source run and the translation load path drops it. Absent
-  evidence and unloaded evidence now read differently.
+**Colour, resolved per appearance.** Every colour below has a light value and a
+dark value. Text meets 4.5:1 and meaning-carrying marks meet 3:1 against the
+page ground in both appearances, verified on rendered pixels rather than by
+reading the values (results under *Judged from renders*). The grounds measure
+white and `#1E1E1E`.
 
-Two limits of the offscreen harness are worth writing down, because they decide
-what a rendered image can be trusted to show:
+| token | light | dark | used for |
+|---|---|---|---|
+| ink | system primary label | system primary label | transcript text, names, figures |
+| ink, secondary | `#5F5F5F` | `#A3A3A3` | times, counts, reasons, neutral chips, *Speaker not named*, unavailable tabs |
+| hairline | `#DADADA` | `#3A3A3A` | row separators and the header rule, and nothing a reader has to see |
+| control border | `#8A8A8A` | `#7A7A7A` | the edge of the search field, a step button, the play button |
+| accent | `#0B57D0` | `#7AB8FF` | the focused row, the displayed tab, a checked box, the playing glyph |
+| open | `#9E4B08` | `#F5A05A` | the navigator's flag, the *Wording* chip, the missing-range notice |
+| speaker 1 | `#227E91` | `#1F96AD` | roster position 0 |
+| speaker 2 | `#7F2CBA` | `#B26CE5` | roster position 1 |
+| speaker 3 | `#BA2C67` | `#E15690` | roster position 2 |
+| speaker 4 | `#2C2CBA` | `#7D7DE8` | roster position 3 |
+| speaker 5 | `#A95E28` | `#D46E25` | roster position 4 |
+| speaker 6 | `#1F8438` | `#1FAD42` | roster position 5 |
+| speaker 7 | `#2C73BA` | `#3C8CDD` | roster position 6 |
+
+The system secondary label colour is not used on this surface: it measures
+3.95:1 in the light appearance, which is the single cause of most of the eight
+light-appearance failures the first rework shipped with. Blue is absent from
+the speaker palette because the accent is blue.
+
+**Type.** Screen title 22 semibold; section title 13 semibold (was 15, so a
+heading stops competing with the body it heads); transcript body 15 with 3 pt
+line spacing; speaker name 13 semibold; meta and figures 12; label 11 heavy,
+used only for chips and column headers. Numbers that align down a column are
+set in tabular figures. Nothing a reader reads is smaller than 11, and 11 is
+reserved for the heavy-weight label face.
+
+**Spacing.** 4 / 8 / 12 / 16 / 24. Row vertical padding 12, column gap 8, gap
+before the text 12, no inter-row spacing (the hairline is the separation).
+
+**Radius.** Controls 4, chips 2, everything else 0. No pill exists.
+
+**Layout.** One 860-point measure for the header and the list; gutter columns
+14 / 48 / 132 / 76 as above.
+
+**Glyphs.** One glyph, one meaning: a flag is review pending, a check is review
+resolved, a checkbox is inclusion in a copy selection, a waveform is playing.
+
+#### Judged from renders
+
+D48 governs: this surface is judged by rendering it offscreen from the real
+248-segment run at 820 and 1400 points in both appearances and reading the
+images back, not by the maintainer. Two limits of that method decide what an
+image can be trusted to show and are recorded here:
 
 - **Nothing inside a scrolling container renders.** `ScrollView`, `List` and
   `Form(.grouped)` all come back empty. The transcript header, the segment
   column, the inspector's sections and the review sheet's body are therefore
-  separate views that a harness can render on their own.
-- **AppKit-backed controls render as a placeholder glyph.** Button styles
-  `.borderless` and `.link` do, so this surface uses `.plain` throughout. Text
-  fields and sliders do too, and cannot be avoided: the search field and the
-  playhead scrubber appear as yellow blocks in every rendered image, and their
-  appearance is the one thing offscreen rendering cannot judge.
+  separate views that a harness renders on their own.
+- **AppKit-backed controls render as a placeholder glyph.** The search field's
+  text field and the transport's slider appear as yellow blocks in every
+  rendered image; their appearance, and any hover-revealed affordance such as
+  the tab tooltips, is what offscreen rendering cannot judge. This surface uses
+  `.plain` button styles throughout for that reason.
 
-#### Three defects a second reading of the images caught
+Measured on the real 248-segment run by rendering every row at the measure and
+reading the heights back, header included, in a window 1000 points tall
+(1400 points wide unless stated):
 
-A critique pass over the same renders found three more. They are recorded here
-because two of them are the kind that a design document can claim fixed while
-the code says otherwise.
+| measure | before (first rework) | after (this revision) |
+|---|---|---|
+| row pitch, attributed one-line segment | 79 pt | 43–44 pt |
+| row pitch, unattributed segment (median) | 113 pt | 69 pt |
+| row pitch, all rows (mean) | 100 pt | 62 pt (64 at 820) |
+| transcript share of row pitch (median) | 24 % | 43 % |
+| header height at 1400 / 820 pt | 166 / 212 pt | 111 / 145 pt |
+| segments fully visible, 1000-pt window | 6 (82 s) | 9 (135 s) |
+| segments fully visible, 820 pt wide | 6 (82 s) | 8 (120 s) |
+| segments fully visible, 780-pt window | 5 (68 s) | 7 (108 s) |
 
-- **The reason sentence came back on the translation layer.** The predicate was
-  `isFocused || outcome != .noDominantSpeaker`. On a translation the evidence is
-  not loaded, so `outcome` is `nil`, and `nil != .noDominantSpeaker` is true —
-  the sentence printed under all 110 unnamed rows, on the one layer with the
-  least to say. **No outcome at all is now its own case**: it never prints per
-  row, and the reason is stated once under the layer bar instead. A regression
-  test pins both halves.
-- **The header and the segment column sat on different axes.** The column is
-  capped at 860 points and centred; the header was full-bleed. At 1400 points
-  that put 261 points between the layer bar and the first segment it switches,
-  and the eye path before reading one segment crossed four axes. The header now
-  takes the same measure and centring, so every control shares a left edge with
-  the rows it acts on. The measure itself is right and did not change.
-- **One glyph meant three things.** `checkmark.circle.fill` was *review
-  resolved* on the marker, *selected for copying* on the control beside it, and
-  *run finished* in the library sidebar — two of those on the same row, eight
-  points apart, separated only by grey against accent. The copy-selection
-  control is now a **checkbox**, which is what macOS uses for "include this in a
-  bulk action" and which leaves the check-in-a-circle to mean one thing.
+The attributed one-line row is the 12 + 18 + 12 + 1 the tokens imply. The
+unattributed row is the speaker line, the figures line and the band beside a
+text that is usually one line, so the gutter sets its height. The mean sits
+above the one-line pitch because 57 of the 248 segments wrap to two lines or
+more at the 554-point text column; the measure is 860 and does not move, so
+the density comes from the gutter, not from width. A 1400-point window shows no
+more segments than a 908-point one.
 
-#### Type and layout tokens
+Contrast, measured on the rendered pixels of the 1400-point source render and
+the 820-point proposal render by finding every pixel painted in a token's
+colour and comparing its median against the page ground:
 
-One token set, defined once and used by every view in this surface, replacing
-per-view inline numbers:
+| element | light | dark |
+|---|---|---|
+| ink: transcript, figures, available tab | 14.9:1 | 12.3:1 |
+| secondary ink: times, counts, chips, *Speaker not named*, column headers, unavailable tabs, dashed proposal label | 6.4:1 | 6.6:1 |
+| accent: focused time, focused rule, tab underline, checked box | 6.4:1 | 8.0:1 |
+| open: navigator flag, missing-range notice | 6.1:1 | 8.0:1 |
+| speaker 1 name and band | 4.7:1 | 4.8:1 |
+| speaker 2 name and band | 7.1:1 | 4.9:1 |
+| hairline (decorative, no floor) | 1.4:1 | 1.5:1 |
 
-- **Type.** Screen title 22, section title 15 semibold, transcript body 15 with
-  3 pt line spacing, speaker name 13 semibold, meta and evidence 12. Nothing in
-  the reading surface is smaller than 12, and `caption2` is not used there at
-  all. The old surface set flags, evidence and provenance at `caption2`, which
-  is 10 pt, and made the reading surface the smallest text on screen.
-- **Spacing.** 4 / 8 / 12 / 16 / 24. Row padding 14, list spacing 8.
-- **Radius.** 6 for chips and markers, 10 for rows, 14 for sheets.
-- **Axis.** The header and the segment column share one 860-point measure and
-  one centring, so a control and the rows it acts on line up.
-- **Glyphs.** One glyph, one meaning, per surface: a flag is review pending, a
-  check in a circle is review resolved, a checkbox is included in a copy
-  selection.
-- **Colour.** A seven-entry speaker palette indexed by roster position; one
-  neutral for unattributed; one accent for the current review target; one
-  surface and one hairline. Colour never carries meaning alone: every colour in
-  this surface accompanies a word, a glyph, or a rule style.
+Every text element clears 4.5:1 and every band clears 3:1 in both appearances.
+The same measurement on the first rework's renders: light teal name and band
+1.9:1, purple name 3.0:1, secondary text 4.0:1, review flag 2.3:1, white on
+the layer pill 3.5:1; dark purple name 3.1:1 and white on the pill 3.2:1.
+
+What the renders could not show: the search field's text field and the
+transport's slider (placeholders), the tab and chip tooltips, and the pinned
+column header while scrolling. Those wait for the running app.
+
+#### Decisions the renders forced
+
+Recorded because the reasons are not visible in the result.
+
+From the first rework's renders (2026-09-02):
+
+- The reason sentence left the ordinary unnamed rows and stayed on the focused
+  row and the two rare outcomes; a translation's rows never print it and the
+  header states it once. An earlier predicate compared `nil` against one
+  outcome, which is true, and put the sentence back under all 110 rows of the
+  layer with the least to say — a regression test pins both halves.
+- A contested share says what it measures; a bare `64%` beside a name reads as
+  a confidence this product does not compute. The column header now carries
+  that label once.
+- Rows lost their card background: `controlBackgroundColor` resolves to the
+  window colour in both appearances, so the card was invisible anyway.
+- The speaker palette dropped blue, because blue is the accent.
+- One glyph meant three things; the copy-selection control became a checkbox.
+- An unnamed segment under a translation read "carries no recorded speaker
+  evidence", which is false — the evidence is in the source run and the
+  translation load path drops it. Absent evidence and unloaded evidence read
+  differently.
+- The header and the segment column sat on different axes; they now share one
+  measure and one centring.
+
+From the genre revision's renders (2026-09-02, this revision):
+
+- The coloured left rule, the focused row's filled rounded surface, the layer
+  bar's filled pill, the quaternary boxes around the transport, navigator and
+  search field, and the orange flag on 192 rows are gone, each for the rule it
+  broke above.
+- The overlapped seconds moved from the row to the review sheet; the row
+  prints the shares and the band.
+- The `?` glyph beside *Speaker not named* was dropped: the words are the
+  mark, and the glyph doubled a label that already says it.
+- The first render of the table wrapped the focused row's time onto two lines
+  and wrapped *Proposed, not measured* beside a longer name. The time column
+  grew from 36 to 48 and the focused row lost its play glyph, keeping the
+  accent and the weight; the proposal label never wraps and the name drops
+  under it instead.
 
 #### Reach of the token set
 
-The tokens are defined once and used by the transcript view, the run inspector
-and the library sidebar. The capture view, the run progress view and settings
-still carry their own inline numbers; they were settled in the predecessor plan
-and are not reopened here. Bringing them onto the same tokens is the next step
-for whoever owns those files.
+**Done, 2026-09-02.** The tokens are used by the transcript view, the review
+sheet, the run inspector, the library sidebar, the capture view and the run
+progress view. Settings is the one surface left on its own inline numbers, and
+it is the one surface a reader never reads a transcript on.
 
-#### Not yet built here
+What the last three surfaces were carrying, found by rendering them for the
+first time rather than by reading their code:
 
-Recording rename and the two-step move to Trash are still promised by this
-document and still absent. They need library mutation the transcript surface does
-not own: a rename and a trash operation on the app model and the library
-repository. They are specified here so the task that owns those files can build
-them:
+- The system secondary label colour, on the inspector's values, on the failure
+  screen's reason sentence and detail labels, and on the capture screen's
+  progress line. It measures 2.5–3.0:1 on those grounds in the light
+  appearance, which is the failure this document already named and banned from
+  the transcript surface. All of it is now the secondary ink.
+- The system orange, on the *Partial Transcript* title and the warning glyph
+  beside an incomplete stage, at 2.3:1 — below even the 3:1 floor that applies
+  to 34-point text. Both are now the open token, which is what the open state
+  means everywhere else.
+- The system red, on a failed run's title and stage glyph, at 3.6:1. Now the
+  error token.
+
+**A border that is the only thing marking a control is not decorative.** The
+search field, the review navigator's two step buttons and the play button were
+each drawn with the hairline at 1.4:1 light and 1.5:1 dark, and in each case
+that border was the entire visual claim that the thing is operable. WCAG 1.4.11
+asks 3:1 of exactly that, and the surface already contained the answer: the
+review chip's outline is drawn in the secondary ink and measures 6.4:1. The
+ruling is to keep the two apart rather than to raise one to the other:
+
+- **hairline** stays decorative and keeps its 1.4:1. It separates rows and
+  draws the header rule, where nothing depends on seeing it and a darker line
+  would turn 248 rows into a grid.
+- **control border** is a new token at 3.45:1 light and 3.88:1 dark, used
+  wherever a stroke is the boundary of something a reader can type in, click
+  or drag. It is deliberately below the secondary ink: a control's edge should
+  be findable, not as loud as the text inside it.
+
+The playhead is the one control this ruling could not reach by colouring a
+border. The system `Slider` draws a near-white knob — 1.04:1 against the page
+and 1.14:1 against its own track in the light appearance, at the position the
+screen opens on — and its knob takes no tint. It is now drawn from the tokens:
+a hairline track, an accent fill from the start to the current position, and an
+accent knob with a page-coloured ring so it stays visible where it sits on top
+of its own fill. Dragging it seeks, and it is one adjustable accessibility
+element that steps by a twentieth of the recording.
+
+**What is deliberately still not on the tokens, on those two screens.** Each of
+these is a geometry or a control the token set does not reach, and each is
+recorded rather than quietly left:
+
+- The benchmark capsules and the two segmented pickers on the capture screen.
+  Section 3 bans a pill and the capsule breaks it, but the pickers are AppKit's
+  own control and cannot be restyled without replacing them, so changing only
+  the chips would leave the clash half-fixed. Both wait for whoever reopens
+  that screen's grammar.
+- The prominent record button keeps the *system* tint. `.borderedProminent`
+  paints a white label over its tint, and the accent token is a foreground
+  colour chosen against the page: as a fill under that label its dark value
+  measured 2.08:1 on the render. The system tint is the one thing there that
+  adapts its own label.
+- The outer 28-point screen padding, the 18-point card padding, the
+  12-point card radius and the stage row's 11-point vertical padding. The
+  radius is invisible in both appearances — `controlBackgroundColor` and
+  `.background.secondary` resolve close enough to the window colour that the
+  card has no visible edge — so moving them buys nothing a reader can see and
+  moves every element on two screens.
+
+#### Library maintenance, on the sidebar
+
+Three gaps this document listed as promised-and-absent are built. They are
+described here rather than specified, and the wording each was specified in was
+followed exactly.
 
 - **Rename** edits only `displayName` in the library index. It never renames the
-  source file, the run directory, or any artifact.
+  source file, the run directory, or any artifact. The new name is written to the
+  index before it is adopted, so a save that fails leaves the old name.
 - **Move to Trash** is two steps, and never a first-order action: a menu item
-  that opens a confirmation naming the recording and what will be moved, then the
-  move itself through `NSWorkspace.recycle`, so the Finder Trash and its Put Back
-  remain the recovery path. The run directory and the source audio go to the
-  Trash together or not at all, and a failure leaves the library entry in place.
-
-The Speaker-labelled layer beside a translation is the third gap. The library
-decodes the source transcript, applies the translated text over it, and drops
-the source document, so the raw text is not in memory once a translation result
-is loaded — the same shape of loss P1 found in the merger. Carrying the source
-document on the loaded run would make the layer selectable without re-reading
-anything from disk. The layer bar states this rather than hiding the layer.
+  opens a confirmation naming the recording and what will be moved, then one
+  `NSWorkspace.recycle` call moves the run directory and the source audio
+  together, so the Finder Trash and its Put Back remain the recovery path. A
+  partial move is put back, and any failure leaves the library entry in place.
+- **The Speaker-labelled layer beside a translation** is selectable. The loaded
+  run carries the decoded source document, so the raw text is still in memory
+  once a translation result is applied over it, and the layer needs no second
+  read from disk.
 
 ### 4. Glossary editor (sheet or settings tab)
 
