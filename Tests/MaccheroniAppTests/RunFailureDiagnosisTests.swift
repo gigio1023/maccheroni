@@ -39,7 +39,7 @@ struct RunFailureDiagnosisTests {
             recordState: .failed
         )
 
-        #expect(outcome.disposition == .failed)
+        #expect(outcome.completion == .failed)
         #expect(outcome.cause == .asrLimitExhausted)
         #expect(outcome.failedStage == .asr)
         #expect(outcome.status(of: .preprocessing) == .finished)
@@ -81,7 +81,7 @@ struct RunFailureDiagnosisTests {
             recordState: .failed
         )
 
-        #expect(outcome.disposition == .failed)
+        #expect(outcome.completion == .failed)
         #expect(outcome.cause == .diarizationRejectedTimeline)
         #expect(outcome.failedStage == .diarization)
         #expect(outcome.status(of: .preprocessing) == .finished)
@@ -105,10 +105,10 @@ struct RunFailureDiagnosisTests {
             name: "partial",
             status: .partial,
             failure: Failure(
-                code: "ASR_REPETITION_DEGENERATION",
+                code: "ASR_REPETITION_LOOPING",
                 message: """
                 promoted 235.11 s of 641.66 s; 1 range(s) produced no transcript \
-                after repetition degeneration exhausted recovery: \
+                after repetition looping exhausted recovery: \
                 [235.11, 641.66) s
                 """
             ),
@@ -139,7 +139,7 @@ struct RunFailureDiagnosisTests {
                   "start_s": 235.11,
                   "end_s": 641.66,
                   "attempt_id": "a0",
-                  "stop_reason": "repetitionDegeneration"
+                  "stop_reason": "repetitionLooping"
                 }
               ],
               "partial_attempt_ids": ["a0"]
@@ -152,8 +152,8 @@ struct RunFailureDiagnosisTests {
             recordState: .failed
         )
 
-        #expect(outcome.disposition == .partial)
-        #expect(outcome.cause == .repetitionDegeneration)
+        #expect(outcome.completion == .partial)
+        #expect(outcome.cause == .repetitionLooping)
         let coverage = try #require(outcome.coverage)
         #expect(coverage.processedDurationS == 235.11)
         #expect(coverage.inputDurationS == 641.66)
@@ -171,7 +171,7 @@ struct RunFailureDiagnosisTests {
     }
 
     @Test
-    func degenerationWithNothingPromotedStaysAFailureNotAPartial() throws {
+    func loopingWithNothingPromotedStaysAFailureNotAPartial() throws {
         let root = try diagnosisTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let runURL = try writeRunFixture(
@@ -179,7 +179,7 @@ struct RunFailureDiagnosisTests {
             name: "collapsed",
             status: .failed,
             failure: Failure(
-                code: "ASR_REPETITION_DEGENERATION",
+                code: "ASR_REPETITION_LOOPING",
                 message: "generation collapsed into a repeated token"
             ),
             coverage: Coverage(
@@ -201,8 +201,8 @@ struct RunFailureDiagnosisTests {
             recordState: .failed
         )
 
-        #expect(outcome.disposition == .failed)
-        #expect(outcome.cause == .repetitionDegeneration)
+        #expect(outcome.completion == .failed)
+        #expect(outcome.cause == .repetitionLooping)
         #expect(outcome.status(of: .asr) == .failed)
         #expect(outcome.coverage?.promotedAnyAudio == false)
     }
@@ -248,9 +248,9 @@ struct RunFailureDiagnosisTests {
             recordState: .failed
         )
 
-        #expect(corruptedOutcome.disposition == .unreadable)
+        #expect(corruptedOutcome.completion == .unreadable)
         #expect(corruptedOutcome.cause == .unreadableRunRecord)
-        #expect(dependencyOutcome.disposition == .failed)
+        #expect(dependencyOutcome.completion == .failed)
         #expect(dependencyOutcome.cause == .missingDependency)
         #expect(
             RunFailureCause.unreadableRunRecord.sentenceText()
@@ -295,7 +295,7 @@ struct RunFailureDiagnosisTests {
         let sentences = [
             RunFailureCause.integrityMismatch, .missingFile, .missingDependency,
             .modelIdentityMismatch, .mossLimitExhausted, .asrLimitExhausted,
-            .repetitionDegeneration, .diarizationRejectedTimeline,
+            .repetitionLooping, .diarizationRejectedTimeline,
         ].map { $0.sentenceText() }
         #expect(Set(sentences).count == sentences.count)
     }
@@ -366,7 +366,7 @@ struct RunFailureDiagnosisTests {
             recordState: .done
         )
 
-        #expect(outcome.disposition == .succeeded)
+        #expect(outcome.completion == .succeeded)
         #expect(outcome.cause == nil)
         #expect(outcome.failedStage == nil)
         #expect(!outcome.isFailureLike)
@@ -383,7 +383,7 @@ struct RunFailureDiagnosisTests {
             recordState: .failed
         )
 
-        #expect(outcome.disposition == .failed)
+        #expect(outcome.completion == .failed)
         #expect(outcome.cause == .missingFile)
         #expect(outcome.failedStage == .preparing)
         #expect(outcome.status(of: .preparing) == .failed)
@@ -401,10 +401,10 @@ struct RunFailureDiagnosisTests {
             name: "leading-gap",
             status: .partial,
             failure: Failure(
-                code: "ASR_REPETITION_DEGENERATION",
+                code: "ASR_REPETITION_LOOPING",
                 message: """
                 promoted 1135.50 s of 1243.08 s; 1 range(s) produced no \
-                transcript after repetition degeneration exhausted recovery: \
+                transcript after repetition looping exhausted recovery: \
                 [0.00, 107.58) s
                 """
             ),
@@ -436,7 +436,7 @@ struct RunFailureDiagnosisTests {
                   "start_s": 0,
                   "end_s": 107.584,
                   "attempt_id": "a0",
-                  "stop_reason": "repetitionDegeneration"
+                  "stop_reason": "repetitionLooping"
                 }
               ],
               "partial_attempt_ids": ["a0"]
@@ -449,8 +449,8 @@ struct RunFailureDiagnosisTests {
             recordState: .failed
         )
 
-        #expect(outcome.disposition == .partial)
-        #expect(outcome.cause == .repetitionDegeneration)
+        #expect(outcome.completion == .partial)
+        #expect(outcome.cause == .repetitionLooping)
         let coverage = try #require(outcome.coverage)
         #expect(coverage.isShortOfInput)
         #expect(coverage.promotedAnyAudio)
@@ -465,6 +465,132 @@ struct RunFailureDiagnosisTests {
         #expect(manifest.coverage.chunksCompleted == manifest.coverage.chunksPlanned)
     }
 
+    /// A manifest sealed before the 2026-09-02 rename still says what it said.
+    ///
+    /// Every run recorded before that day wrote `ASR_REPETITION_DEGENERATION`,
+    /// and no stage rewrites a sealed manifest (PROJECT.md judgment rule 3), so
+    /// the reader accepts the old spelling as an alias. Without it the screen
+    /// falls to `.unspecified`, which drops the sentence naming the cause and
+    /// the Stopped At row with it. The numbers here are the shape of the real
+    /// 2026-09-01 recording, written synthetically.
+    @Test
+    func aManifestSealedBeforeTheRenameStillNamesRepetitionLooping() throws {
+        let root = try diagnosisTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let runURL = try writeRunFixture(
+            in: root,
+            name: "legacy-code",
+            status: .partial,
+            failure: Failure(
+                code: "ASR_REPETITION_DEGENERATION",
+                message: """
+                promoted 1212.520 s of 1243.080 s; 1 range(s) produced no \
+                transcript after repetition degeneration exhausted recovery: \
+                [871.552, 902.112) s
+                """
+            ),
+            coverage: Coverage(
+                inputDurationS: 1243.08,
+                processedDurationS: 1212.52,
+                truncated: true,
+                strategy: .backendTruncated,
+                chunksPlanned: 12,
+                chunksCompleted: 12
+            ),
+            chunkBoundaries: (0 ..< 12).map {
+                ChunkBoundary(
+                    index: $0,
+                    startS: Double($0) * 103.59,
+                    endS: Double($0 + 1) * 103.59,
+                    status: .succeeded
+                )
+            },
+            // Every stage produced its artifact, which is exactly why the
+            // fallback stage rule cannot supply a stopped-at stage here: the
+            // cause has to name one.
+            artifactKinds: [
+                "preprocessed_audio", "vad_map", "chunk_plan",
+                "diarization_timeline", "primary_segments", "merged_segments",
+                "partial_coverage",
+            ],
+            partialCoverage: """
+            {
+              "schema_version": "1.0.0",
+              "input_duration_s": 1243.08,
+              "promoted_duration_s": 1212.52,
+              "missing_duration_s": 30.56,
+              "missing": [
+                {
+                  "start_s": 871.552,
+                  "end_s": 902.112,
+                  "attempt_id": "a0",
+                  "stop_reason": "repetitionDegeneration"
+                }
+              ],
+              "partial_attempt_ids": ["a0"]
+            }
+            """
+        )
+
+        let outcome = LibraryRepository(root: root).runOutcome(
+            at: runURL,
+            recordState: .failed
+        )
+
+        #expect(outcome.completion == .partial)
+        #expect(outcome.cause == .repetitionLooping)
+        // The Stopped At row: it is drawn from `failedStage`, and `.unspecified`
+        // would leave it nil on a run whose every stage completed.
+        #expect(outcome.failedStage == .asr)
+        #expect(outcome.status(of: .asr) == .incomplete)
+        #expect(
+            RunFailureCause.repetitionLooping.sentenceText()
+                != RunFailureCause.unspecified.sentenceText()
+        )
+        // The manifest on disk is untouched: the alias is a reading rule, not a
+        // migration.
+        let manifest = try #require(LibraryRepository.readManifest(at: runURL))
+        #expect(manifest.failure?.code == "ASR_REPETITION_DEGENERATION")
+        // Both spellings arrive at one cause, so no run reads differently for
+        // having been recorded on a different day.
+        #expect(
+            RunFailureCause.classify(
+                code: "ASR_REPETITION_DEGENERATION",
+                message: ""
+            ) == RunFailureCause.classify(
+                code: "ASR_REPETITION_LOOPING",
+                message: ""
+            )
+        )
+    }
+
+    /// The same reading, on the real recording rather than a fixture.
+    ///
+    /// The regression this closes was invisible to every fixture in this file,
+    /// because each of them was written after the rename and carries the new
+    /// code. The only thing that carried the old one was a run already on
+    /// disk. Skipped when that run is not present, so a fresh clone stays
+    /// green; opened read-only, and the manifest is never written.
+    @Test
+    func theRealPreRenameRunStillReadsAsRepetitionLooping() throws {
+        let runURL = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(
+                "maccheroni-usage-20260901/t4-verify/full-acceptance/20260901T122702Z-f2d938",
+                isDirectory: true
+            )
+        let manifestURL = runURL.appendingPathComponent("manifest.json")
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else { return }
+        let before = try Data(contentsOf: manifestURL)
+
+        let outcome = LibraryRepository(root: runURL.deletingLastPathComponent())
+            .runOutcome(at: runURL, recordState: .failed)
+
+        #expect(outcome.completion == .partial)
+        #expect(outcome.cause == .repetitionLooping)
+        #expect(outcome.failedStage == .asr)
+        #expect(try Data(contentsOf: manifestURL) == before)
+    }
+
     @Test
     func moreMissingRangesThanFitAreCappedRatherThanTruncatedSilently() {
         let coverage = RunCoverageSummary(
@@ -476,7 +602,7 @@ struct RunFailureDiagnosisTests {
                 RunMissingRange(
                     startS: Double($0) * 100,
                     endS: Double($0) * 100 + 50,
-                    stopReason: "repetitionDegeneration"
+                    stopReason: "repetitionLooping"
                 )
             },
             missingDurationS: 200
@@ -503,7 +629,7 @@ struct RunFailureDiagnosisTests {
                 recordState: state,
                 recordFailureMessage: "Interrupted"
             )
-            #expect(outcome.disposition == .canceled)
+            #expect(outcome.completion == .canceled)
             #expect(outcome.cause == nil)
             #expect(outcome.failedStage == nil)
             #expect(!outcome.isFailureLike)

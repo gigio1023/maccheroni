@@ -4,6 +4,16 @@
 <dict>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
+	<key>%@ The system reported: %@</key>
+	<string>%@ Das System meldete: %@</string>
+	<key>%@ could not be moved because its folder is not writable. Nothing was moved.</key>
+	<string>%@ konnte nicht verschoben werden, weil sein Ordner nicht beschreibbar ist. Es wurde nichts verschoben.</string>
+	<key>%@ could not be moved to the Trash, and part of it is in the Trash now. Put it back in the Finder. The recording is still in your library.</key>
+	<string>%@ konnte nicht vollständig in den Papierkorb gelegt werden; ein Teil liegt jetzt dort. Legen Sie ihn im Finder zurück. Die Aufnahme bleibt in der Bibliothek.</string>
+	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
+	<string>%@ konnte nicht in den Papierkorb gelegt werden. Die Dateien liegen unverändert an ihrem Platz, und die Aufnahme bleibt in der Bibliothek.</string>
+	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
+	<string>%@ befindet sich nicht mehr dort, wo die Bibliothek es erwartet; es wurde nichts verschoben.</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%1$@ von %2$@ (%3$@)</string>
 	<key>%@ of speech</key>
@@ -234,6 +244,8 @@
 	<string>Angepinntes Modell herunterladen…</string>
 	<key>Drop an audio file here</key>
 	<string>Legen Sie hier eine Audiodatei ab</string>
+	<key>Duration</key>
+	<string>Dauer</string>
 	<key>Edit Glossary</key>
 	<string>Glossar bearbeiten</string>
 	<key>Elapsed</key>
@@ -366,8 +378,8 @@
 	<string>Maccheroni konnte den Bereitschaftsbericht seiner Befehlszeilen-Engine nicht lesen.</string>
 	<key>Maccheroni is processing the full recording locally.</key>
 	<string>Maccheroni verarbeitet die gesamte Aufnahme vor Ort.</string>
-	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Model removal uses the macOS Trash.</key>
-	<string>Maccheroni löscht oder überschreibt niemals Aufzeichnungen, Rohtranskripte oder Artefakte abgeschlossener Läufe. Beim Entfernen des Modells wird der macOS-Papierkorb verwendet.</string>
+	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Removing a model or a recording uses the macOS Trash.</key>
+	<string>Maccheroni löscht oder überschreibt niemals Aufzeichnungen, Rohtranskripte oder Artefakte abgeschlossener Läufe. Beim Entfernen eines Modells oder einer Aufzeichnung wird der macOS-Papierkorb verwendet.</string>
 	<key>Maccheroni stopped this run and its record does not name a more specific cause.</key>
 	<string>Maccheroni hat diesen Lauf angehalten; die Aufzeichnung nennt keine genauere Ursache.</string>
 	<key>Maccheroni will not assign a speaker without acoustic evidence, so this stays as it is.</key>
@@ -392,6 +404,12 @@
 	<string>Modelle</string>
 	<key>Move Model to Trash</key>
 	<string>Modell in den Papierkorb verschieben</string>
+	<key>Move to Trash</key>
+	<string>In den Papierkorb legen</string>
+	<key>Move to Trash…</key>
+	<string>In den Papierkorb legen…</string>
+	<key>Move “%@” to the Trash?</key>
+	<string>„%@“ in den Papierkorb legen?</string>
 	<key>New Recording</key>
 	<string>Neue Aufnahme</string>
 	<key>No</key>
@@ -458,8 +476,6 @@
 	<string>Peak-Normalisierung</string>
 	<key>People</key>
 	<string>Menschen</string>
-	<key>Pipeline</key>
-	<string>Pipeline</string>
 	<key>Places</key>
 	<string>Orte</string>
 	<key>Planned Model</key>
@@ -504,7 +520,7 @@
 	<string>Bereitgestellt</string>
 	<key>Quantization</key>
 	<string>Quantisierung</string>
-	<key>Reached The Model</key>
+	<key>Reached the Model</key>
 	<string>Hat das Modell erreicht</string>
 	<key>Ready to Transcribe</key>
 	<string>Bereit zum Transkribieren</string>
@@ -516,6 +532,8 @@
 	<string>Aufnahme</string>
 	<key>Recording %@</key>
 	<string>Aufnahme %@</string>
+	<key>Recording Name</key>
+	<string>Aufnahmename</string>
 	<key>Recording Not Found</key>
 	<string>Aufnahme nicht gefunden</string>
 	<key>Recording SHA-256</key>
@@ -532,14 +550,22 @@
 	<string>Entfernen</string>
 	<key>Remove %@</key>
 	<string>Entfernen %@</string>
+	<key>Remove from Library</key>
+	<string>Aus der Bibliothek entfernen</string>
 	<key>Remove this segment from the copy selection.</key>
 	<string>Dieses Segment aus der Kopierauswahl entfernen.</string>
+	<key>Remove “%@” from the library?</key>
+	<string>„%@“ aus der Bibliothek entfernen?</string>
 	<key>Rename Speaker</key>
 	<string>Sprecher umbenennen</string>
 	<key>Rename this speaker everywhere in the corrected transcript.</key>
 	<string>Benennen Sie diesen Sprecher überall im korrigierten Transkript um.</string>
 	<key>Rename this speaker everywhere in this transcript.</key>
 	<string>Benennen Sie diesen Sprecher überall in diesem Transkript um.</string>
+	<key>Renames this recording in the library only. The audio file and the run folder keep their names.</key>
+	<string>Benennt diese Aufnahme nur in der Bibliothek um. Die Audiodatei und der Run-Ordner behalten ihre Namen.</string>
+	<key>Rename…</key>
+	<string>Umbenennen…</string>
 	<key>Request Logs</key>
 	<string>Anfrageprotokolle</string>
 	<key>Resolved</key>
@@ -554,14 +580,18 @@
 	<string>Run im Finder anzeigen</string>
 	<key>Reveal in Finder</key>
 	<string>Im Finder anzeigen</string>
+	<key>Review</key>
+	<string>Prüfen</string>
 	<key>Review Profiles</key>
 	<string>Profile prüfen</string>
 	<key>Review This Segment</key>
 	<string>Dieses Segment prüfen</string>
 	<key>Review Uncertain Transcript</key>
 	<string>Überprüfen Sie das unsichere Transkript</string>
-	<key>Review what the pipeline was unsure about here.</key>
-	<string>Prüfen, worüber die Verarbeitung hier unsicher war.</string>
+	<key>Review what Maccheroni was unsure about here.</key>
+	<string>Prüfen, worüber Maccheroni hier unsicher war.</string>
+	<key>Reviewed</key>
+	<string>Geprüft</string>
 	<key>Revision</key>
 	<string>Revision</string>
 	<key>Run</key>
@@ -602,12 +632,14 @@
 	<string>Segmente pro Batch</string>
 	<key>Select this segment for copying.</key>
 	<string>Dieses Segment zum Kopieren auswählen.</string>
-	<key>Sent To The Model</key>
+	<key>Sent to the Model</key>
 	<string>An das Modell gesendet</string>
 	<key>Service-managed (limit unavailable)</key>
 	<string>Vom Dienst verwaltet (Limit nicht verfügbar)</string>
 	<key>Settings Could Not Be Loaded</key>
 	<string>Einstellungen konnten nicht geladen werden</string>
+	<key>Share</key>
+	<string>Anteil</string>
 	<key>Show or hide exact run and model details.</key>
 	<string>Genaue Lauf- und Modelldetails ein- oder ausblenden.</string>
 	<key>Show or hide how this run was produced.</key>
@@ -626,10 +658,14 @@
 	<string>SHA-256 der Quellsegmente</string>
 	<key>Spanish</key>
 	<string>Spanisch</string>
+	<key>Speaker</key>
+	<string>Sprecher</string>
 	<key>Speaker %@</key>
 	<string>Sprecher %@</string>
 	<key>Speaker Diarization</key>
 	<string>Sprecherdiarisierung</string>
+	<key>Speaker Proposal</key>
+	<string>Sprechervorschlag</string>
 	<key>Speaker Separation</key>
 	<string>Sprechertrennung</string>
 	<key>Speaker name</key>
@@ -690,6 +726,8 @@
 	<string>Begriffs-Recall</string>
 	<key>Terms</key>
 	<string>Begriffe</string>
+	<key>Text</key>
+	<string>Text</string>
 	<key>Text only</key>
 	<string>Nur Text</string>
 	<key>The Hugging Face %@ command failed (exit %lld): %@</key>
@@ -712,6 +750,8 @@
 	<string>Der exportierte Sprechername ist für Segment %lld leer.</string>
 	<key>The exported text is empty for segment %lld.</key>
 	<string>Der exportierte Text ist für Segment %lld leer.</string>
+	<key>The files this recording named are no longer on disk, so this removes its library entry and nothing else.</key>
+	<string>Die Dateien dieser Aufnahme liegen nicht mehr auf der Festplatte; entfernt wird daher nur ihr Bibliothekseintrag.</string>
 	<key>The folder Maccheroni saves recordings and runs in cannot be reached.</key>
 	<string>Auf den Ordner, in dem Maccheroni Aufnahmen und Durchläufe speichert, kann nicht zugegriffen werden.</string>
 	<key>The glossary for this profile could not be used for this run.</key>
@@ -766,6 +806,8 @@
 	<string>Das antwortende Sprachmodell ist nicht genau das von diesem Profil festgelegte Modell, daher wurde seine Ausgabe abgelehnt.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>Das Spracherkennungsmodell, das dieses Profil benötigt, ist auf diesem Mac nicht installiert.</string>
+	<key>The top speakers held exactly equal time in this segment.</key>
+	<string>In diesem Segment hielten die führenden Sprecher genau gleich lange das Wort.</string>
 	<key>The transcript could not be copied.</key>
 	<string>Das Transkript konnte nicht kopiert werden.</string>
 	<key>The transcription engine could not start: %@</key>
@@ -780,6 +822,12 @@
 	<string>Es gibt keine aktive Aufzeichnung.</string>
 	<key>This Run</key>
 	<string>Dieser Lauf</string>
+	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>Damit wird die Run-Ausgabe in den Papierkorb gelegt. Nichts wird gelöscht, und „Zurücklegen“ im Finder stellt sie wieder her.</string>
+	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>
+	<string>Damit werden die Originalaufnahme und die Run-Ausgabe gemeinsam in den Papierkorb gelegt. Nichts wird gelöscht, und „Zurücklegen“ im Finder stellt sie wieder her.</string>
+	<key>This moves the source audio to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>Damit wird die Originalaufnahme in den Papierkorb gelegt. Nichts wird gelöscht, und „Zurücklegen“ im Finder stellt sie wieder her.</string>
 	<key>This name applies to every %@ segment in corrected exports.</key>
 	<string>Dieser Name gilt für jedes %@-Segment in korrigierten Exporten.</string>
 	<key>This name applies to every %@ segment in exports.</key>
@@ -794,20 +842,18 @@
 	<string>Dieser Durchlauf hat auch nach der begrenzten Aufteilung das Ausgabelimit von MOSS erreicht. Wählen Sie vor dem erneuten Versuch ein anderes Profil oder verwenden Sie eine kürzere Kopie.</string>
 	<key>This segment carries no recorded speaker evidence.</key>
 	<string>Für dieses Segment ist kein Sprechernachweis aufgezeichnet.</string>
-	<key>This segment was marked uncertain by the pipeline.</key>
-	<string>Dieser Abschnitt war durch die Pipeline als unsicher gekennzeichnet.</string>
 	<key>This speaker held this much of the segment's speech.</key>
 	<string>So viel der Sprache dieses Segments entfiel auf diesen Sprecher.</string>
 	<key>This stage covered only part of the recording.</key>
 	<string>Diese Phase hat nur einen Teil der Aufnahme abgedeckt.</string>
 	<key>This stage stopped the run.</key>
 	<string>Diese Phase hat den Lauf angehalten.</string>
+	<key>Time</key>
+	<string>Zeit</string>
 	<key>Timeline coverage %@, and this run named a speaker only above %@.</key>
 	<string>Zeitleistenabdeckung %@; dieser Lauf benannte einen Sprecher erst ab %@.</string>
 	<key>Timeline coverage %@.</key>
 	<string>Zeitleistenabdeckung %@.</string>
-	<key>Took</key>
-	<string>Dauer</string>
 	<key>Transcribed</key>
 	<string>Transkribiert</string>
 	<key>Transcribing</key>
@@ -830,6 +876,8 @@
 	<string>Nur Transkripttext. Audio blieb auf diesem Mac.</string>
 	<key>Transcription</key>
 	<string>Transkription</string>
+	<key>Transcription Backend</key>
+	<string>Backend der Transkription</string>
 	<key>Transcription Cancelled</key>
 	<string>Transkription abgebrochen</string>
 	<key>Transcription Failed</key>
@@ -872,10 +920,12 @@
 	<string>Volume-Bereitschaft</string>
 	<key>Wait for the active transcription to finish.</key>
 	<string>Warten Sie, bis die aktive Transkription abgeschlossen ist.</string>
+	<key>Wait for this recording's transcription to finish before moving it to the Trash.</key>
+	<string>Warten Sie, bis die Transkription dieser Aufnahme abgeschlossen ist, bevor Sie sie in den Papierkorb legen.</string>
 	<key>Wall Time</key>
 	<string>Verarbeitungszeit</string>
-	<key>What The Pipeline Recorded</key>
-	<string>Was die Verarbeitung aufgezeichnet hat</string>
+	<key>What Maccheroni Recorded</key>
+	<string>Was Maccheroni aufgezeichnet hat</string>
 	<key>Who Was Speaking</key>
 	<string>Wer gesprochen hat</string>
 	<key>Wording</key>

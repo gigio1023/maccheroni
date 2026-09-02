@@ -163,7 +163,14 @@ enum TranscriptLayerCatalog {
         record: LibraryRecord
     ) -> String {
         switch layer {
-        case .speakerLabelled, .translated, .proposed:
+        case .speakerLabelled:
+            // Beside a translation `item.segment.text` is the translated text.
+            // The immutable merged document is kept on the loaded run, and it
+            // is what this layer means, so read it when it is there.
+            run.effectiveSourceTranscript.segments.indices.contains(item.index)
+                ? run.effectiveSourceTranscript.segments[item.index].text
+                : item.segment.text
+        case .translated, .proposed:
             item.segment.text
         case .corrected:
             run.correctionResolution(at: item.index, record: record)
@@ -185,7 +192,12 @@ enum TranscriptLayerCatalog {
         } ?? true
         switch layer {
         case .speakerLabelled:
-            return isTranslation ? .sourceTextNotLoadedWithTranslation : nil
+            // The source-language document now survives loading, so a
+            // translation no longer hides the layer it replaced. The reason
+            // stays for a run whose source document really is not in memory.
+            return isTranslation && run.sourceTranscript == nil
+                ? .sourceTextNotLoadedWithTranslation
+                : nil
         case .corrected:
             guard !isTranslation else { return .notProduced }
             let hasCorrectionResult = isTextResult

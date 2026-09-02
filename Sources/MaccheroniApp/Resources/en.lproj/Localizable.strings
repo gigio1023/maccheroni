@@ -4,6 +4,16 @@
 <dict>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
+	<key>%@ The system reported: %@</key>
+	<string>%@ The system reported: %@</string>
+	<key>%@ could not be moved because its folder is not writable. Nothing was moved.</key>
+	<string>%@ could not be moved because its folder is not writable. Nothing was moved.</string>
+	<key>%@ could not be moved to the Trash, and part of it is in the Trash now. Put it back in the Finder. The recording is still in your library.</key>
+	<string>%@ could not be moved to the Trash, and part of it is in the Trash now. Put it back in the Finder. The recording is still in your library.</string>
+	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
+	<string>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</string>
+	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
+	<string>%@ is no longer where the library expects it, so nothing was moved.</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%@ of %@ (%@)</string>
 	<key>%@ of speech</key>
@@ -234,6 +244,8 @@
 	<string>Download Pinned Model…</string>
 	<key>Drop an audio file here</key>
 	<string>Drop an audio file here</string>
+	<key>Duration</key>
+	<string>Duration</string>
 	<key>Edit Glossary</key>
 	<string>Edit Glossary</string>
 	<key>Elapsed</key>
@@ -366,8 +378,8 @@
 	<string>Maccheroni could not read the readiness report from its command-line engine.</string>
 	<key>Maccheroni is processing the full recording locally.</key>
 	<string>Maccheroni is processing the full recording locally.</string>
-	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Model removal uses the macOS Trash.</key>
-	<string>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Model removal uses the macOS Trash.</string>
+	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Removing a model or a recording uses the macOS Trash.</key>
+	<string>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Removing a model or a recording uses the macOS Trash.</string>
 	<key>Maccheroni stopped this run and its record does not name a more specific cause.</key>
 	<string>Maccheroni stopped this run and its record does not name a more specific cause.</string>
 	<key>Maccheroni will not assign a speaker without acoustic evidence, so this stays as it is.</key>
@@ -392,6 +404,12 @@
 	<string>Models</string>
 	<key>Move Model to Trash</key>
 	<string>Move Model to Trash</string>
+	<key>Move to Trash</key>
+	<string>Move to Trash</string>
+	<key>Move to Trash…</key>
+	<string>Move to Trash…</string>
+	<key>Move “%@” to the Trash?</key>
+	<string>Move “%@” to the Trash?</string>
 	<key>New Recording</key>
 	<string>New Recording</string>
 	<key>No</key>
@@ -458,8 +476,6 @@
 	<string>Peak Normalization</string>
 	<key>People</key>
 	<string>People</string>
-	<key>Pipeline</key>
-	<string>Pipeline</string>
 	<key>Places</key>
 	<string>Places</string>
 	<key>Planned Model</key>
@@ -504,8 +520,8 @@
 	<string>Provided</string>
 	<key>Quantization</key>
 	<string>Quantization</string>
-	<key>Reached The Model</key>
-	<string>Reached The Model</string>
+	<key>Reached the Model</key>
+	<string>Reached the Model</string>
 	<key>Ready to Transcribe</key>
 	<string>Ready to Transcribe</string>
 	<key>Record microphone and system audio as separate local originals, or import an existing audio file.</key>
@@ -516,6 +532,8 @@
 	<string>Recording</string>
 	<key>Recording %@</key>
 	<string>Recording %@</string>
+	<key>Recording Name</key>
+	<string>Recording Name</string>
 	<key>Recording Not Found</key>
 	<string>Recording Not Found</string>
 	<key>Recording SHA-256</key>
@@ -532,14 +550,22 @@
 	<string>Remove</string>
 	<key>Remove %@</key>
 	<string>Remove %@</string>
+	<key>Remove from Library</key>
+	<string>Remove from Library</string>
 	<key>Remove this segment from the copy selection.</key>
 	<string>Remove this segment from the copy selection.</string>
+	<key>Remove “%@” from the library?</key>
+	<string>Remove “%@” from the library?</string>
 	<key>Rename Speaker</key>
 	<string>Rename Speaker</string>
 	<key>Rename this speaker everywhere in the corrected transcript.</key>
 	<string>Rename this speaker everywhere in the corrected transcript.</string>
 	<key>Rename this speaker everywhere in this transcript.</key>
 	<string>Rename this speaker everywhere in this transcript.</string>
+	<key>Renames this recording in the library only. The audio file and the run folder keep their names.</key>
+	<string>Renames this recording in the library only. The audio file and the run folder keep their names.</string>
+	<key>Rename…</key>
+	<string>Rename…</string>
 	<key>Request Logs</key>
 	<string>Request Logs</string>
 	<key>Resolved</key>
@@ -554,14 +580,18 @@
 	<string>Reveal Run in Finder</string>
 	<key>Reveal in Finder</key>
 	<string>Reveal in Finder</string>
+	<key>Review</key>
+	<string>Review</string>
 	<key>Review Profiles</key>
 	<string>Review Profiles</string>
 	<key>Review This Segment</key>
 	<string>Review This Segment</string>
 	<key>Review Uncertain Transcript</key>
 	<string>Review Uncertain Transcript</string>
-	<key>Review what the pipeline was unsure about here.</key>
-	<string>Review what the pipeline was unsure about here.</string>
+	<key>Review what Maccheroni was unsure about here.</key>
+	<string>Review what Maccheroni was unsure about here.</string>
+	<key>Reviewed</key>
+	<string>Reviewed</string>
 	<key>Revision</key>
 	<string>Revision</string>
 	<key>Run</key>
@@ -602,12 +632,14 @@
 	<string>Segments per Batch</string>
 	<key>Select this segment for copying.</key>
 	<string>Select this segment for copying.</string>
-	<key>Sent To The Model</key>
-	<string>Sent To The Model</string>
+	<key>Sent to the Model</key>
+	<string>Sent to the Model</string>
 	<key>Service-managed (limit unavailable)</key>
 	<string>Service-managed (limit unavailable)</string>
 	<key>Settings Could Not Be Loaded</key>
 	<string>Settings Could Not Be Loaded</string>
+	<key>Share</key>
+	<string>Share</string>
 	<key>Show or hide exact run and model details.</key>
 	<string>Show or hide exact run and model details.</string>
 	<key>Show or hide how this run was produced.</key>
@@ -626,10 +658,14 @@
 	<string>Source Segments SHA-256</string>
 	<key>Spanish</key>
 	<string>Spanish</string>
+	<key>Speaker</key>
+	<string>Speaker</string>
 	<key>Speaker %@</key>
 	<string>Speaker %@</string>
 	<key>Speaker Diarization</key>
 	<string>Speaker Diarization</string>
+	<key>Speaker Proposal</key>
+	<string>Speaker Proposal</string>
 	<key>Speaker Separation</key>
 	<string>Speaker Separation</string>
 	<key>Speaker name</key>
@@ -690,6 +726,8 @@
 	<string>Term Recall</string>
 	<key>Terms</key>
 	<string>Terms</string>
+	<key>Text</key>
+	<string>Text</string>
 	<key>Text only</key>
 	<string>Text only</string>
 	<key>The Hugging Face %@ command failed (exit %lld): %@</key>
@@ -712,6 +750,8 @@
 	<string>The exported speaker name is empty for segment %lld.</string>
 	<key>The exported text is empty for segment %lld.</key>
 	<string>The exported text is empty for segment %lld.</string>
+	<key>The files this recording named are no longer on disk, so this removes its library entry and nothing else.</key>
+	<string>The files this recording named are no longer on disk, so this removes its library entry and nothing else.</string>
 	<key>The folder Maccheroni saves recordings and runs in cannot be reached.</key>
 	<string>The folder Maccheroni saves recordings and runs in cannot be reached.</string>
 	<key>The glossary for this profile could not be used for this run.</key>
@@ -766,6 +806,8 @@
 	<string>The speech model that answered is not the exact model this profile pins, so its output was refused.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>The speech recognition model this profile needs is not installed on this Mac.</string>
+	<key>The top speakers held exactly equal time in this segment.</key>
+	<string>The top speakers held exactly equal time in this segment.</string>
 	<key>The transcript could not be copied.</key>
 	<string>The transcript could not be copied.</string>
 	<key>The transcription engine could not start: %@</key>
@@ -780,6 +822,12 @@
 	<string>There is no active recording.</string>
 	<key>This Run</key>
 	<string>This Run</string>
+	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</string>
+	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>
+	<string>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</string>
+	<key>This moves the source audio to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>This moves the source audio to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</string>
 	<key>This name applies to every %@ segment in corrected exports.</key>
 	<string>This name applies to every %@ segment in corrected exports.</string>
 	<key>This name applies to every %@ segment in exports.</key>
@@ -794,20 +842,18 @@
 	<string>This run reached the MOSS output limit after bounded splitting. Choose a different profile or use a shorter copy before retrying.</string>
 	<key>This segment carries no recorded speaker evidence.</key>
 	<string>This segment carries no recorded speaker evidence.</string>
-	<key>This segment was marked uncertain by the pipeline.</key>
-	<string>This segment was marked uncertain by the pipeline.</string>
 	<key>This speaker held this much of the segment's speech.</key>
 	<string>This speaker held this much of the segment's speech.</string>
 	<key>This stage covered only part of the recording.</key>
 	<string>This stage covered only part of the recording.</string>
 	<key>This stage stopped the run.</key>
 	<string>This stage stopped the run.</string>
+	<key>Time</key>
+	<string>Time</string>
 	<key>Timeline coverage %@, and this run named a speaker only above %@.</key>
 	<string>Timeline coverage %@, and this run named a speaker only above %@.</string>
 	<key>Timeline coverage %@.</key>
 	<string>Timeline coverage %@.</string>
-	<key>Took</key>
-	<string>Took</string>
 	<key>Transcribed</key>
 	<string>Transcribed</string>
 	<key>Transcribing</key>
@@ -830,6 +876,8 @@
 	<string>Transcript text only. Audio stayed on this Mac.</string>
 	<key>Transcription</key>
 	<string>Transcription</string>
+	<key>Transcription Backend</key>
+	<string>Transcription Backend</string>
 	<key>Transcription Cancelled</key>
 	<string>Transcription Cancelled</string>
 	<key>Transcription Failed</key>
@@ -872,10 +920,12 @@
 	<string>Volume Readiness</string>
 	<key>Wait for the active transcription to finish.</key>
 	<string>Wait for the active transcription to finish.</string>
+	<key>Wait for this recording's transcription to finish before moving it to the Trash.</key>
+	<string>Wait for this recording's transcription to finish before moving it to the Trash.</string>
 	<key>Wall Time</key>
 	<string>Wall Time</string>
-	<key>What The Pipeline Recorded</key>
-	<string>What The Pipeline Recorded</string>
+	<key>What Maccheroni Recorded</key>
+	<string>What Maccheroni Recorded</string>
 	<key>Who Was Speaking</key>
 	<string>Who Was Speaking</string>
 	<key>Wording</key>

@@ -3212,7 +3212,7 @@ struct MaccheroniCLITests {
             in: run
         )
         #expect(parent["status"] as? String == "limit_isolated")
-        #expect(parent["stop_reason"] as? String == "repetitionDegeneration")
+        #expect(parent["stop_reason"] as? String == "repetitionLooping")
         #expect(parent["error_code"] == nil)
         for child in ["chunk-0000-root-l", "chunk-0000-root-r"] {
             let outcome = try jsonObject(
@@ -3272,7 +3272,7 @@ struct MaccheroniCLITests {
         let manifest: Manifest = try decode("manifest.json", in: run)
 
         #expect(manifest.status == .partial)
-        #expect(manifest.failure?.code == "ASR_REPETITION_DEGENERATION")
+        #expect(manifest.failure?.code == "ASR_REPETITION_LOOPING")
         #expect(manifest.failure?.code != "MOSS_LIMIT_EXHAUSTED")
         #expect(manifest.coverage.truncated)
         #expect(manifest.coverage.strategy == .backendTruncated)
@@ -3287,9 +3287,9 @@ struct MaccheroniCLITests {
             in: run
         )
         #expect(promoted["status"] as? String == "partial_prefix_promoted")
-        #expect(promoted["stop_reason"] as? String == "repetitionDegeneration")
+        #expect(promoted["stop_reason"] as? String == "repetitionLooping")
         #expect(promoted["error_code"] as? String
-            == "ASR_REPETITION_DEGENERATION")
+            == "ASR_REPETITION_LOOPING")
         #expect(promoted["result_path"] as? String != nil)
         #expect(promoted["canonical_promoted"] as? Bool == false)
 
@@ -3297,7 +3297,7 @@ struct MaccheroniCLITests {
         let missing = try #require(partial["missing"] as? [[String: Any]])
         #expect(missing.count == 2)
         #expect(missing.allSatisfy {
-            $0["stop_reason"] as? String == "repetitionDegeneration"
+            $0["stop_reason"] as? String == "repetitionLooping"
         })
         #expect(missing.allSatisfy {
             ($0["end_s"] as? Double ?? 0) > ($0["start_s"] as? Double ?? 0)
@@ -3360,7 +3360,7 @@ struct MaccheroniCLITests {
 
         // The run keeps everything it transcribed.
         #expect(manifest.status == .partial)
-        #expect(manifest.failure?.code == "ASR_REPETITION_DEGENERATION")
+        #expect(manifest.failure?.code == "ASR_REPETITION_LOOPING")
         #expect(manifest.coverage.truncated)
         #expect(manifest.coverage.strategy == .backendTruncated)
         #expect(abs(manifest.coverage.processedDurationS - 240) < 0.01)
@@ -3385,7 +3385,7 @@ struct MaccheroniCLITests {
         let missing = try #require(partial["missing"] as? [[String: Any]])
         #expect(missing.count == 4)
         #expect(missing.allSatisfy {
-            $0["failure_code"] as? String == "ASR_REPETITION_DEGENERATION"
+            $0["failure_code"] as? String == "ASR_REPETITION_LOOPING"
         })
         #expect(missing.allSatisfy {
             ($0["start_s"] as? Double ?? -1) >= 120
@@ -3436,9 +3436,9 @@ struct MaccheroniCLITests {
                 "--profiles", profiles.path,
                 "--output-root", outputRoot.path,
             ])
-            Issue.record("expected an unrecoverable degeneration failure")
+            Issue.record("expected an unrecoverable looping failure")
         } catch let error as CLIError {
-            #expect(error.code == "ASR_REPETITION_DEGENERATION")
+            #expect(error.code == "ASR_REPETITION_LOOPING")
         }
 
         let run = outputRoot.appendingPathComponent(
@@ -3447,14 +3447,14 @@ struct MaccheroniCLITests {
         )
         let manifest: Manifest = try decode("manifest.json", in: run)
         #expect(manifest.status == .failed)
-        #expect(manifest.failure?.code == "ASR_REPETITION_DEGENERATION")
+        #expect(manifest.failure?.code == "ASR_REPETITION_LOOPING")
         let exhausted = try jsonObject(
             "primary/attempts/chunk-0000-root-l-l/outcome.json",
             in: run
         )
-        #expect(exhausted["status"] as? String == "repetition_degeneration")
+        #expect(exhausted["status"] as? String == "repetition_looping")
         #expect(exhausted["error_code"] as? String
-            == "ASR_REPETITION_DEGENERATION")
+            == "ASR_REPETITION_LOOPING")
         #expect(exhausted["result_path"] == nil)
     }
 
@@ -4450,7 +4450,7 @@ private func vibeVoiceTestDependencies(
                         endS: request.startS + coverageS,
                         text: "recovered prefix \(request.startS)",
                         language: "ko",
-                        flags: ["repetition_degenerate"]
+                        flags: ["repetition_looping"]
                     ),
                 ],
                 completeObjectCount: 3,
@@ -4462,7 +4462,7 @@ private func vibeVoiceTestDependencies(
                 terminalCollapse: true
             )
             return .limit(CLIASRLimit(
-                stopReason: .repetitionDegeneration,
+                stopReason: .repetitionLooping,
                 evidence: evidence,
                 partialPrefix: prefix
             ))
@@ -5117,10 +5117,10 @@ func speakerProposalFixture(
     case .local: LocalPostprocessBackend.defaultBatchPolicy
     }
     var proposals: [SpeakerProposal] = []
-    var declined: [SpeakerProposalDeclination] = []
+    var declined: [SpeakerProposalDecline] = []
     for (offset, record) in request.evidence.enumerated() {
         if dropDecisionsFor.contains(record.segmentIndex) {
-            declined.append(SpeakerProposalDeclination(
+            declined.append(SpeakerProposalDecline(
                 segmentIndex: record.segmentIndex,
                 reason: "the proposer returned no decision for this segment",
                 acousticOutcome: record.outcome,
@@ -5151,7 +5151,7 @@ func speakerProposalFixture(
                 acousticCandidates: record.candidates
             ))
         } else {
-            declined.append(SpeakerProposalDeclination(
+            declined.append(SpeakerProposalDecline(
                 segmentIndex: record.segmentIndex,
                 reason: reason,
                 acousticOutcome: record.outcome,

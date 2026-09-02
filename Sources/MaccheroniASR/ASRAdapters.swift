@@ -173,7 +173,7 @@ public enum ASRAttemptStopReason: String, Codable, Equatable, Sendable {
     /// other two, but it is not the same event as a transcript that
     /// legitimately reached the output cap with real content, and the
     /// recovered prefix travels with it in `ASRLimitRecord.partialPrefix`.
-    case repetitionDegeneration
+    case repetitionLooping
 
     /// Whether this reason closes an attempt without a complete transcript.
     public var isLimitOutcome: Bool { self != .endOfSequence }
@@ -811,7 +811,7 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
 
     /// Normalize backend segments onto the run timeline.  The backend's own
     /// speaker label never becomes the segment speaker, and a segment the
-    /// runner measured as repetition degeneration is marked rather than
+    /// runner measured as repetition looping is marked rather than
     /// silently kept or silently dropped.
     private func normalized(
         segments: [RunnerDocument.RunnerSegment],
@@ -830,7 +830,7 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
             else { throw ASRAdapterError.coverageShortfall("invalid normalized segment \(index)") }
             var flags: [String] = []
             if !segment.speaker.isEmpty { flags.append("backend_speaker_evidence") }
-            if segment.degenerate == true { flags.append("repetition_degenerate") }
+            if segment.degenerate == true { flags.append("repetition_looping") }
             return Segment(
                 speaker: "UNASSIGNED",
                 startS: segment.startS,
@@ -852,15 +852,15 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
         stopReason: ASRAttemptStopReason
     ) throws -> ASRPartialPrefix? {
         guard let partialPrefix else {
-            guard stopReason != .repetitionDegeneration else {
+            guard stopReason != .repetitionLooping else {
                 throw ASRAdapterError.malformedOutput(
-                    "ASR repetition-degeneration outcome carries no recovery evidence"
+                    "ASR repetition-looping outcome carries no recovery evidence"
                 )
             }
             return nil
         }
         guard partialPrefix.terminalCollapse
-                == (stopReason == .repetitionDegeneration),
+                == (stopReason == .repetitionLooping),
               partialPrefix.repetitionRunThreshold > 1,
               partialPrefix.promotedObjectCount >= 0,
               partialPrefix.promotedObjectCount <= partialPrefix.validatedObjectCount,
@@ -1067,9 +1067,9 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
                   document.segments.isEmpty,
                   selected != .moss || fingerprint != nil
             else { throw ASRAdapterError.malformedOutput("ASR limit output contains promotable partial content") }
-            guard stop != .repetitionDegeneration || selected == .vibeVoice else {
+            guard stop != .repetitionLooping || selected == .vibeVoice else {
                 throw ASRAdapterError.malformedOutput(
-                    "only the VibeVoice path detects repetition degeneration"
+                    "only the VibeVoice path detects repetition looping"
                 )
             }
             let partialPrefix = try validate(

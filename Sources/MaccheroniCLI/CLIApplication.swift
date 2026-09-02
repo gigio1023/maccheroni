@@ -26,7 +26,7 @@ public enum CLIError: Error, LocalizedError, Sendable {
     case asrLimitExhausted(String)
     /// The decoder collapsed into repetition and neither recovery nor prefix
     /// promotion produced a usable result for the whole planned range.
-    case asrRepetitionDegeneration(String)
+    case asrRepetitionLooping(String)
     case run(String)
     case sourceIntegrity(RunIntegrityError)
 
@@ -38,7 +38,7 @@ public enum CLIError: Error, LocalizedError, Sendable {
         case .glossary: "GLOSSARY_ERROR"
         case .mossLimitExhausted: "MOSS_LIMIT_EXHAUSTED"
         case .asrLimitExhausted: "ASR_LIMIT_EXHAUSTED"
-        case .asrRepetitionDegeneration: "ASR_REPETITION_DEGENERATION"
+        case .asrRepetitionLooping: "ASR_REPETITION_LOOPING"
         case .run: "RUN_ERROR"
         case .sourceIntegrity: "SOURCE_INTEGRITY_ERROR"
         }
@@ -49,7 +49,7 @@ public enum CLIError: Error, LocalizedError, Sendable {
         case let .usage(message), let .profile(message), let .postprocess(message),
              let .glossary(message), let .mossLimitExhausted(message),
              let .asrLimitExhausted(message),
-             let .asrRepetitionDegeneration(message),
+             let .asrRepetitionLooping(message),
              let .run(message): message
         case let .sourceIntegrity(error): error.localizedDescription
         }
@@ -87,7 +87,7 @@ public struct CLIASRInferencePolicy: Codable, Equatable, Sendable {
         case .vibeVoice:
             // Derived in the VibeVoice section of
             // docs/engineering-constraint-policy.md.  The binding constraint is
-            // repetition degeneration, not the token cap: no leaf longer than
+            // repetition looping, not the token cap: no leaf longer than
             // 120 s has a clean record on the measured passages, and a 240 s
             // leaf collapsed on one of the two offsets it was measured at.
             // Depth 2 is the depth at which a 120 s parent reaches the 30 s
@@ -388,7 +388,7 @@ private enum ASRAttemptStatus: String, Codable, Sendable {
     case eosComplete = "eos_complete"
     case limitIsolated = "limit_isolated"
     case limitExhausted = "limit_exhausted"
-    case repetitionDegeneration = "repetition_degeneration"
+    case repetitionLooping = "repetition_looping"
     case partialPrefixPromoted = "partial_prefix_promoted"
     case invalidEOSOutput = "invalid_eos_output"
     case asrTimeout = "asr_timeout"
@@ -486,7 +486,7 @@ private struct ASRLeafResult: Sendable {
 }
 
 /// A half-open source range that no attempt produced transcript for.
-private struct MissingSourceRange: Codable, Sendable, Equatable {
+private struct SourceMissingRange: Codable, Sendable, Equatable {
     var startS: Double
     var endS: Double
     var attemptID: String
@@ -513,7 +513,7 @@ private struct PartialCoverageRecord: Codable, Sendable {
     var inputDurationS: Double
     var promotedDurationS: Double
     var missingDurationS: Double
-    var missing: [MissingSourceRange]
+    var missing: [SourceMissingRange]
     var partialAttemptIDs: [String]
 
     enum CodingKeys: String, CodingKey {
@@ -1505,13 +1505,13 @@ public struct CLIApplication: Sendable {
                 )
             }
         }
-        for declination in document.declined {
+        for decline in document.declined {
             try check(
-                segmentIndex: declination.segmentIndex,
-                reason: declination.reason,
-                outcome: declination.acousticOutcome,
-                coverage: declination.acousticTimelineCoverage,
-                candidates: declination.acousticCandidates
+                segmentIndex: decline.segmentIndex,
+                reason: decline.reason,
+                outcome: decline.acousticOutcome,
+                coverage: decline.acousticTimelineCoverage,
+                candidates: decline.acousticCandidates
             )
         }
         guard seen == expected else {
@@ -1864,7 +1864,7 @@ public struct CLIApplication: Sendable {
             var transcripts: [ChunkTranscript] = []
             var rawText: [String] = []
             var allEOSLeaves: [CompletedASRLeaf] = []
-            var missingRanges: [MissingSourceRange] = []
+            var missingRanges: [SourceMissingRange] = []
             var partialAttemptIDs: [String] = []
             var unrecoveredLeaves: [UnrecoveredASRLeaf] = []
             for (rootIndex, rootLeaf) in plannedLeaves.enumerated() {
@@ -1916,7 +1916,7 @@ public struct CLIApplication: Sendable {
                     // range it lost and keep going: later chunks are
                     // independent work.
                     missingRanges += leafResult.unrecovered.map {
-                        MissingSourceRange(
+                        SourceMissingRange(
                             startS: Double($0.leaf.startSample)
                                 / Double(policy.sampleRateHz),
                             endS: Double($0.leaf.endSample)
@@ -2341,8 +2341,8 @@ public struct CLIApplication: Sendable {
                 throw CLIError.mossLimitExhausted(annotated)
             case "ASR_LIMIT_EXHAUSTED":
                 throw CLIError.asrLimitExhausted(annotated)
-            case "ASR_REPETITION_DEGENERATION":
-                throw CLIError.asrRepetitionDegeneration(annotated)
+            case "ASR_REPETITION_LOOPING":
+                throw CLIError.asrRepetitionLooping(annotated)
             default:
                 throw CLIError.run(annotated)
             }
@@ -2658,8 +2658,8 @@ public struct CLIApplication: Sendable {
                     limitOutcomeRecord(
                         attemptID: attemptID,
                         requestSHA256: requestSHA256,
-                        status: limit.stopReason == .repetitionDegeneration
-                            ? .repetitionDegeneration
+                        status: limit.stopReason == .repetitionLooping
+                            ? .repetitionLooping
                             : .limitExhausted,
                         stopReason: limit.stopReason,
                         childAttemptIDs: [],
@@ -2786,16 +2786,16 @@ public struct CLIApplication: Sendable {
     /// not transcribe every planned second, and the manifest says which
     /// seconds and why rather than reporting the run as complete.
     private func partialCoverageFailure(
-        missing: [MissingSourceRange],
+        missing: [SourceMissingRange],
         inputDurationS: Double,
         promotedDurationS: Double
     ) -> Failure? {
         guard !missing.isEmpty else { return nil }
-        let degenerate = missing.contains { $0.stopReason == .repetitionDegeneration }
-        // Prefer a degeneration cause when one is present, otherwise keep the
+        let looping = missing.contains { $0.stopReason == .repetitionLooping }
+        // Prefer a looping cause when one is present, otherwise keep the
         // first recorded code so a MOSS run still reports MOSS_LIMIT_EXHAUSTED.
         let code = missing.first {
-            $0.stopReason == .repetitionDegeneration
+            $0.stopReason == .repetitionLooping
         }?.failureCode ?? missing[0].failureCode
         let ranges = missing
             .map { "[\(format(seconds: $0.startS)), \(format(seconds: $0.endS))) s" }
@@ -2803,7 +2803,7 @@ public struct CLIApplication: Sendable {
         let message = """
         promoted \(format(seconds: promotedDurationS)) s of \
         \(format(seconds: inputDurationS)) s; \(missing.count) range(s) produced no \
-        transcript after \(degenerate ? "repetition degeneration" : "a limit outcome") \
+        transcript after \(looping ? "repetition looping" : "a limit outcome") \
         exhausted recovery: \(ranges)
         """
         return Failure(code: code, message: message)
@@ -2820,9 +2820,9 @@ public struct CLIApplication: Sendable {
                 "MOSS \(stopReason.rawValue) persisted \(range)"
             )
         }
-        if stopReason == .repetitionDegeneration {
-            return .asrRepetitionDegeneration(
-                "\(backend.rawValue) repetition degeneration persisted \(range) with no promotable prefix"
+        if stopReason == .repetitionLooping {
+            return .asrRepetitionLooping(
+                "\(backend.rawValue) repetition looping persisted \(range) with no promotable prefix"
             )
         }
         return .asrLimitExhausted(
@@ -2909,8 +2909,8 @@ public struct CLIApplication: Sendable {
                 language: limit.evidence.language,
                 helperFingerprint: limit.evidence.helperFingerprint,
                 command: limit.evidence.command,
-                errorCode: limit.stopReason == .repetitionDegeneration
-                    ? CLIError.asrRepetitionDegeneration("").code
+                errorCode: limit.stopReason == .repetitionLooping
+                    ? CLIError.asrRepetitionLooping("").code
                     : CLIError.asrLimitExhausted("").code,
                 errorMessage: partialPrefixMessage(
                     prefix,
@@ -2942,7 +2942,7 @@ public struct CLIApplication: Sendable {
         promoted the valid transcript prefix after \(stopReason.rawValue): \
         \(format(seconds: prefix.coverageS)) s of \(format(seconds: leafDuration)) s, \
         \(prefix.promotedObjectCount) of \(prefix.completeObjectCount) recovered segments, \
-        \(prefix.degenerateObjectCount) of them marked repetition_degenerate; \
+        \(prefix.degenerateObjectCount) of them marked repetition_looping; \
         longest repeated run \(prefix.repetitionRunMaximum) inside the prefix and \
         \(prefix.tailRepetitionRun) in the discarded tail
         """
@@ -3441,7 +3441,7 @@ public struct CLIApplication: Sendable {
         unrecovered: [UnrecoveredASRLeaf],
         covering root: InferenceLeaf,
         sampleRateHz: Int
-    ) throws -> (coveredSamples: Int64, missing: [MissingSourceRange]) {
+    ) throws -> (coveredSamples: Int64, missing: [SourceMissingRange]) {
         guard !completedLeaves.isEmpty else {
             throw CLIError.run("ASR root produced no promotable leaves")
         }
@@ -3461,7 +3461,7 @@ public struct CLIApplication: Sendable {
             .sorted { $0.leaf.startSample < $1.leaf.startSample }
         var cursor = root.startSample
         var coveredSamples: Int64 = 0
-        var missing: [MissingSourceRange] = []
+        var missing: [SourceMissingRange] = []
         for entry in accounted {
             let leaf = entry.leaf
             guard leaf.startSample == cursor,
@@ -3484,19 +3484,19 @@ public struct CLIApplication: Sendable {
                 }
                 coveredSamples += completed.coveredEndSample - leaf.startSample
                 if completed.coveredEndSample < leaf.endSample {
-                    missing.append(MissingSourceRange(
+                    missing.append(SourceMissingRange(
                         startS: Double(completed.coveredEndSample)
                             / Double(sampleRateHz),
                         endS: Double(leaf.endSample) / Double(sampleRateHz),
                         attemptID: completed.attemptID,
                         stopReason: completed.stopReason,
-                        failureCode: completed.stopReason == .repetitionDegeneration
-                            ? CLIError.asrRepetitionDegeneration("").code
+                        failureCode: completed.stopReason == .repetitionLooping
+                            ? CLIError.asrRepetitionLooping("").code
                             : CLIError.asrLimitExhausted("").code
                     ))
                 }
             case let .unrecovered(entry):
-                missing.append(MissingSourceRange(
+                missing.append(SourceMissingRange(
                     startS: Double(leaf.startSample) / Double(sampleRateHz),
                     endS: Double(leaf.endSample) / Double(sampleRateHz),
                     attemptID: entry.attemptID,

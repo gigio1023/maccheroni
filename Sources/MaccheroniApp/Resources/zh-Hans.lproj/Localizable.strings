@@ -4,6 +4,16 @@
 <dict>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
+	<key>%@ The system reported: %@</key>
+	<string>%@ 系统报告：%@</string>
+	<key>%@ could not be moved because its folder is not writable. Nothing was moved.</key>
+	<string>无法移动 %@，因为其所在文件夹不可写入。未移动任何内容。</string>
+	<key>%@ could not be moved to the Trash, and part of it is in the Trash now. Put it back in the Finder. The recording is still in your library.</key>
+	<string>无法将 %@ 移到垃圾箱，其中一部分现已在垃圾箱中。请在 Finder 中放回原处。录音仍在资料库中。</string>
+	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
+	<string>无法将 %@ 移到垃圾箱。其文件仍在原处，录音也仍在资料库中。</string>
+	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
+	<string>%@ 已不在资料库预期的位置，因此未移动任何内容。</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%2$@ 中的 %1$@（%3$@）</string>
 	<key>%@ of speech</key>
@@ -234,6 +244,8 @@
 	<string>下载固定模型...</string>
 	<key>Drop an audio file here</key>
 	<string>将音频文件拖放到此处</string>
+	<key>Duration</key>
+	<string>耗时</string>
 	<key>Edit Glossary</key>
 	<string>编辑术语表</string>
 	<key>Elapsed</key>
@@ -366,8 +378,8 @@
 	<string>Maccheroni 无法读取其命令行引擎返回的就绪报告。</string>
 	<key>Maccheroni is processing the full recording locally.</key>
 	<string>Maccheroni 正在本地处理完整的录音。</string>
-	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Model removal uses the macOS Trash.</key>
-	<string>Maccheroni 绝不会删除或覆盖录音、原始记录或已完成的运行工件。模型删除使用 macOS 垃圾箱。</string>
+	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Removing a model or a recording uses the macOS Trash.</key>
+	<string>Maccheroni 绝不会删除或覆盖录音、原始记录或已完成的运行工件。删除模型或录音时使用 macOS 垃圾箱。</string>
 	<key>Maccheroni stopped this run and its record does not name a more specific cause.</key>
 	<string>Maccheroni 停止了本次运行，其记录未指出更具体的原因。</string>
 	<key>Maccheroni will not assign a speaker without acoustic evidence, so this stays as it is.</key>
@@ -392,6 +404,12 @@
 	<string>模型</string>
 	<key>Move Model to Trash</key>
 	<string>将模型移至垃圾箱</string>
+	<key>Move to Trash</key>
+	<string>移到垃圾箱</string>
+	<key>Move to Trash…</key>
+	<string>移到垃圾箱…</string>
+	<key>Move “%@” to the Trash?</key>
+	<string>将“%@”移到垃圾箱？</string>
 	<key>New Recording</key>
 	<string>新录音</string>
 	<key>No</key>
@@ -458,8 +476,6 @@
 	<string>峰值归一化</string>
 	<key>People</key>
 	<string>人们</string>
-	<key>Pipeline</key>
-	<string>处理流程</string>
 	<key>Places</key>
 	<string>地点</string>
 	<key>Planned Model</key>
@@ -504,7 +520,7 @@
 	<string>已提供</string>
 	<key>Quantization</key>
 	<string>量化</string>
-	<key>Reached The Model</key>
+	<key>Reached the Model</key>
 	<string>已送达模型</string>
 	<key>Ready to Transcribe</key>
 	<string>准备转录</string>
@@ -516,6 +532,8 @@
 	<string>录音</string>
 	<key>Recording %@</key>
 	<string>记录 %@</string>
+	<key>Recording Name</key>
+	<string>录音名称</string>
 	<key>Recording Not Found</key>
 	<string>未找到录音</string>
 	<key>Recording SHA-256</key>
@@ -532,14 +550,22 @@
 	<string>消除</string>
 	<key>Remove %@</key>
 	<string>消除 %@</string>
+	<key>Remove from Library</key>
+	<string>从资料库中移除</string>
 	<key>Remove this segment from the copy selection.</key>
 	<string>从复制所选内容中移除此片段。</string>
+	<key>Remove “%@” from the library?</key>
+	<string>从资料库中移除“%@”？</string>
 	<key>Rename Speaker</key>
 	<string>重命名发言人</string>
 	<key>Rename this speaker everywhere in the corrected transcript.</key>
 	<string>在更正的记录中的所有位置重命名该说话者。</string>
 	<key>Rename this speaker everywhere in this transcript.</key>
 	<string>在此转录文本中所有位置重命名此发言人。</string>
+	<key>Renames this recording in the library only. The audio file and the run folder keep their names.</key>
+	<string>仅在资料库中重命名此录音。音频文件与运行文件夹的名称保持不变。</string>
+	<key>Rename…</key>
+	<string>重命名…</string>
 	<key>Request Logs</key>
 	<string>请求日志</string>
 	<key>Resolved</key>
@@ -554,14 +580,18 @@
 	<string>在 Finder 中显示运行</string>
 	<key>Reveal in Finder</key>
 	<string>在 Finder 中显示</string>
+	<key>Review</key>
+	<string>待复核</string>
 	<key>Review Profiles</key>
 	<string>查看配置文件</string>
 	<key>Review This Segment</key>
 	<string>复核此片段</string>
 	<key>Review Uncertain Transcript</key>
 	<string>审阅不确定的转录文本</string>
-	<key>Review what the pipeline was unsure about here.</key>
-	<string>复核处理流程在此处不确定的内容。</string>
+	<key>Review what Maccheroni was unsure about here.</key>
+	<string>复核 Maccheroni 在此处不确定的内容。</string>
+	<key>Reviewed</key>
+	<string>已复核</string>
 	<key>Revision</key>
 	<string>修订</string>
 	<key>Run</key>
@@ -602,12 +632,14 @@
 	<string>每批片段数</string>
 	<key>Select this segment for copying.</key>
 	<string>选择此片段以复制。</string>
-	<key>Sent To The Model</key>
+	<key>Sent to the Model</key>
 	<string>发送给模型的内容</string>
 	<key>Service-managed (limit unavailable)</key>
 	<string>由服务管理（限制不可用）</string>
 	<key>Settings Could Not Be Loaded</key>
 	<string>无法加载设置</string>
+	<key>Share</key>
+	<string>占比</string>
 	<key>Show or hide exact run and model details.</key>
 	<string>显示或隐藏确切的运行和模型详细信息。</string>
 	<key>Show or hide how this run was produced.</key>
@@ -626,10 +658,14 @@
 	<string>源片段 SHA-256</string>
 	<key>Spanish</key>
 	<string>西班牙语</string>
+	<key>Speaker</key>
+	<string>说话人</string>
 	<key>Speaker %@</key>
 	<string>说话人 %@</string>
 	<key>Speaker Diarization</key>
 	<string>说话人分离</string>
+	<key>Speaker Proposal</key>
+	<string>说话人建议</string>
 	<key>Speaker Separation</key>
 	<string>说话人分离</string>
 	<key>Speaker name</key>
@@ -690,6 +726,8 @@
 	<string>术语召回率</string>
 	<key>Terms</key>
 	<string>术语</string>
+	<key>Text</key>
+	<string>文本</string>
 	<key>Text only</key>
 	<string>仅文本</string>
 	<key>The Hugging Face %@ command failed (exit %lld): %@</key>
@@ -712,6 +750,8 @@
 	<string>段 %lld 的导出发言者姓名为空。</string>
 	<key>The exported text is empty for segment %lld.</key>
 	<string>段 %lld 的导出文本为空。</string>
+	<key>The files this recording named are no longer on disk, so this removes its library entry and nothing else.</key>
+	<string>此录音的文件已不在磁盘上，因此仅移除其资料库条目。</string>
 	<key>The folder Maccheroni saves recordings and runs in cannot be reached.</key>
 	<string>无法访问 Maccheroni 保存录音和运行结果的文件夹。</string>
 	<key>The glossary for this profile could not be used for this run.</key>
@@ -766,6 +806,8 @@
 	<string>作出响应的语音模型并非此配置文件锁定的模型，其输出已被拒绝。</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>此配置文件所需的语音识别模型尚未安装在这台 Mac 上。</string>
+	<key>The top speakers held exactly equal time in this segment.</key>
+	<string>在此片段中，居前的说话人占据的时长完全相同。</string>
 	<key>The transcript could not be copied.</key>
 	<string>无法复制转录文本。</string>
 	<key>The transcription engine could not start: %@</key>
@@ -780,6 +822,12 @@
 	<string>没有活动录音。</string>
 	<key>This Run</key>
 	<string>本次运行</string>
+	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>这会将运行输出移到垃圾箱。不会删除任何内容，在 Finder 中使用“放回原处”即可还原。</string>
+	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>
+	<string>这会将源音频和运行输出一并移到垃圾箱。不会删除任何内容，在 Finder 中使用“放回原处”即可还原。</string>
+	<key>This moves the source audio to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>这会将源音频移到垃圾箱。不会删除任何内容，在 Finder 中使用“放回原处”即可还原。</string>
 	<key>This name applies to every %@ segment in corrected exports.</key>
 	<string>此名称适用于更正导出中的每个 %@ 段。</string>
 	<key>This name applies to every %@ segment in exports.</key>
@@ -794,20 +842,18 @@
 	<string>此次运行经过受限拆分后仍达到 MOSS 输出上限。请在重试前选择其他配置文件或使用更短的副本。</string>
 	<key>This segment carries no recorded speaker evidence.</key>
 	<string>此片段没有记录任何说话人证据。</string>
-	<key>This segment was marked uncertain by the pipeline.</key>
-	<string>此片段被处理流程标记为不确定。</string>
 	<key>This speaker held this much of the segment's speech.</key>
 	<string>该说话人在此片段语音中所占的比例。</string>
 	<key>This stage covered only part of the recording.</key>
 	<string>此阶段只覆盖了录音的一部分。</string>
 	<key>This stage stopped the run.</key>
 	<string>运行在此阶段停止。</string>
+	<key>Time</key>
+	<string>时间</string>
 	<key>Timeline coverage %@, and this run named a speaker only above %@.</key>
 	<string>时间轴覆盖率为 %@，本次运行仅在高于 %@ 时才确定说话人。</string>
 	<key>Timeline coverage %@.</key>
 	<string>时间轴覆盖率为 %@。</string>
-	<key>Took</key>
-	<string>耗时</string>
 	<key>Transcribed</key>
 	<string>已转录</string>
 	<key>Transcribing</key>
@@ -830,6 +876,8 @@
 	<string>仅转录文本。音频始终留在这台 Mac 上。</string>
 	<key>Transcription</key>
 	<string>转录</string>
+	<key>Transcription Backend</key>
+	<string>转录后端</string>
 	<key>Transcription Cancelled</key>
 	<string>转录已取消</string>
 	<key>Transcription Failed</key>
@@ -872,10 +920,12 @@
 	<string>卷状态</string>
 	<key>Wait for the active transcription to finish.</key>
 	<string>等待活动转录完成。</string>
+	<key>Wait for this recording's transcription to finish before moving it to the Trash.</key>
+	<string>请等待此录音的转写完成后再移到垃圾箱。</string>
 	<key>Wall Time</key>
 	<string>实际耗时</string>
-	<key>What The Pipeline Recorded</key>
-	<string>处理流程记录的内容</string>
+	<key>What Maccheroni Recorded</key>
+	<string>Maccheroni 记录的内容</string>
 	<key>Who Was Speaking</key>
 	<string>谁在说话</string>
 	<key>Wording</key>

@@ -41,7 +41,7 @@ MOSS_DEFAULT_INSTRUCTION = (
     "并在段末标注结束时间戳，以清晰标明该段语音范围。"
 )
 
-# Repetition-degeneration detection for the VibeVoice path.  A collapsed
+# Repetition-looping detection for the VibeVoice path.  A collapsed
 # decoder stops producing new content and repeats one token or short phrase
 # until the output cap, so the signal is the length of the longest run of
 # consecutive identical units rather than the generated-token count.  The
@@ -700,7 +700,7 @@ def repetition_run_length(text: Any, *, phrase_units: int = VIBEVOICE_REPETITION
     return longest
 
 
-def is_repetition_degenerate(text: Any) -> bool:
+def is_repetition_looping(text: Any) -> bool:
     return repetition_run_length(text) >= VIBEVOICE_REPETITION_RUN_THRESHOLD
 
 
@@ -742,7 +742,7 @@ def decode_leading_transcript_objects(text: Any) -> tuple[list[tuple[dict[str, A
 def recover_vibevoice_prefix(raw_text: Any, duration: float) -> dict[str, Any]:
     """Recover the leading valid transcript prefix from a VibeVoice payload.
 
-    Degeneration is intermittent before it is terminal: a collapsed passage
+    Looping is intermittent before it is terminal: a collapsed passage
     can be followed by correct output.  Stopping at the first repeated run
     would therefore discard recoverable transcript, so only trailing
     degenerate objects are dropped and an interior one is kept and marked.
@@ -771,7 +771,7 @@ def recover_vibevoice_prefix(raw_text: Any, duration: float) -> dict[str, Any]:
             "end_s": end,
             "text": text,
             "speaker": speaker,
-            "degenerate": is_repetition_degenerate(text),
+            "degenerate": is_repetition_looping(text),
         })
         offsets.append(end_offset)
     promoted = len(segments)
@@ -929,7 +929,7 @@ def run_vibevoice(
             "raw_text": "",
             "segments": [],
             "outcome": "limit",
-            "stop_reason": "repetitionDegeneration" if prefix["terminal_collapse"] else "maximumTokens",
+            "stop_reason": "repetitionLooping" if prefix["terminal_collapse"] else "maximumTokens",
             "partial_prefix": prefix,
         }
 
@@ -961,7 +961,7 @@ def run_vibevoice(
             "text": text,
             "speaker": speaker,
         }
-        if is_repetition_degenerate(text):
+        if is_repetition_looping(text):
             entry["degenerate"] = True
         segments.append(entry)
     # An end-of-sequence stop is not by itself a complete result: a decoder
@@ -974,7 +974,7 @@ def run_vibevoice(
             "raw_text": "",
             "segments": [],
             "outcome": "limit",
-            "stop_reason": "repetitionDegeneration",
+            "stop_reason": "repetitionLooping",
             "partial_prefix": recover_vibevoice_prefix(raw_text, duration),
         }
     return {

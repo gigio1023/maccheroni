@@ -229,14 +229,63 @@ struct TranslationReviewAcknowledgement: Codable, Equatable, Sendable {
     }
 }
 
+/// How many of the segments a speaker-proposal set examined it proposed a
+/// speaker for, and how many it declined.
+///
+/// Counted once, while the set's own artifact is being verified, and carried on
+/// the summary from there. The reading surface cannot recount them: only the
+/// current member of the family is loaded as a document, so a second proposal
+/// set would have no numbers at all if these were derived at display time.
+struct SpeakerProposalCounts: Equatable, Sendable {
+    var proposed: Int
+    var declined: Int
+
+    /// Every unattributed segment the set looked at, proposed or declined.
+    var examined: Int { proposed + declined }
+}
+
 struct DerivedResultSummary: Equatable, Identifiable, Sendable {
     var id: String
     var createdAt: Date
+    /// Which text operation the set recorded. Meaningful only when `kind` is
+    /// `.textPostprocess`; a speaker-proposal manifest carries `.correction`
+    /// here for a structural reason in the derived contract and corrected no
+    /// text. Read `kind` first.
     var operation: PostprocessMode
+    /// What family of derived set this is. Defaulted so every reader that
+    /// predates the speaker-proposal family keeps compiling and keeps seeing
+    /// what it always saw.
+    var kind: DerivedOperationKind = .textPostprocess
     var targetLanguage: String?
     var glossarySHA256: String?
     var directory: URL
     var isCurrent: Bool
+    /// The set's own proposal and decline counts when `kind` is
+    /// `.speakerProposal`, `nil` otherwise. Two proposal sets of one run carry
+    /// the same name, so this and `createdAt` are what tell them apart.
+    var speakerProposalCounts: SpeakerProposalCounts? = nil
+}
+
+/// A derived set the app found beside a run, verified as far as it could, and
+/// could not read.
+///
+/// It exists so that such a set is *rejected* rather than silently ignored,
+/// while the source run still opens. Before this, an unrecognised derived
+/// family made the source run itself fail to open, which is the failure mode
+/// the speaker-proposal layer was built against.
+struct UnreadableDerivedSet: Equatable, Identifiable, Sendable {
+    /// Kept as data with no sentence of its own. Wording this for a reader
+    /// means a new localized string in all ten locales, and those resources
+    /// belong to the reading-surface tasks rather than to the loader.
+    enum Reason: Equatable, Sendable {
+        /// The manifest names a derived family this build does not know. The
+        /// associated value is the raw `operation.kind` string as written.
+        case unrecognisedKind(String)
+    }
+
+    /// The derived directory name, which is also the derived ID it claims.
+    var id: String
+    var reason: Reason
 }
 
 struct LoadedRun: Equatable, Sendable {
@@ -244,12 +293,31 @@ struct LoadedRun: Equatable, Sendable {
     var transcript: SegmentsDocument
     var conflicts: [MergeConflict]
     var segments: [TranscriptSegment]
+    /// The run's own merged transcript, kept when `transcript` is not it.
+    ///
+    /// A translation writes translated text over every segment and a
+    /// correction replaces the document wholesale, and both used to throw the
+    /// decoded source away. Keeping it means the acoustic, source-language
+    /// record stays in memory beside the layer that replaced it instead of
+    /// being reachable only by re-reading the run. `nil` when `transcript`
+    /// already is the merged document; read `effectiveSourceTranscript`.
+    var sourceTranscript: SegmentsDocument? = nil
     var resultID: String? = nil
     var derivedResults: [DerivedResultSummary] = []
+    /// D46's marked non-acoustic speaker proposal, when a derived set carries
+    /// one. Selected independently of the text result: a proposal changes no
+    /// text, so it must not displace a correction or a translation.
+    var speakerProposal: SpeakerProposalDocument? = nil
+    /// Derived sets found beside this run that this build cannot read. The run
+    /// still loads; these are recorded rather than dropped.
+    var unreadableDerivedSets: [UnreadableDerivedSet] = []
     var resultPostprocess: ManifestPostprocess? = nil
     var resultOperation: DerivedOperation? = nil
 
     var effectiveResultID: String { resultID ?? manifest.runID }
+
+    /// The run's merged transcript, whichever layer is loaded on top of it.
+    var effectiveSourceTranscript: SegmentsDocument { sourceTranscript ?? transcript }
 
     var effectivePostprocess: ManifestPostprocess? {
         resultPostprocess ?? manifest.postprocess

@@ -44,8 +44,11 @@ import Testing
 
     private static let sourceHash = String(repeating: "a", count: 64)
 
-    /// Two speakers hold segment 1 in an exact tie and segment 3 has no
-    /// diarization turn at all; segments 0 and 2 are acoustically assigned.
+    /// Segment 1 has an top-ranked candidate below the bar — "0" at 0.573, the
+    /// measured 17.3 s against 12.9 s case scaled to a 2 s segment — segment
+    /// 3 has no diarization turn at all, and segment 4 is a tie inside the
+    /// merger's margin, which no threshold resolves; segments 0 and 2 are
+    /// acoustically assigned.
     private func speakerProposalDocument() -> SegmentsDocument {
         SegmentsDocument(
             segments: [
@@ -53,12 +56,13 @@ import Testing
                 Segment(speaker: "UNKNOWN", startS: 2, endS: 4, text: "다음 주 금요일이요"),
                 Segment(speaker: "1", startS: 4, endS: 6, text: "알겠습니다"),
                 Segment(speaker: "UNASSIGNED", startS: 6, endS: 8, text: "네"),
+                Segment(speaker: "UNKNOWN", startS: 8, endS: 10, text: "그럼 그때 뵙죠"),
             ],
             numSpeakers: 2,
             source: SourceAudio(
                 fileName: "meeting.m4a",
                 sha256: String(repeating: "b", count: 64),
-                durationS: 8
+                durationS: 10
             )
         )
     }
@@ -67,6 +71,21 @@ import Testing
         [
             SegmentSpeakerEvidence(
                 segmentIndex: 1,
+                outcome: "no_dominant_speaker",
+                candidates: [
+                    SpeakerCandidateEvidence(speaker: "0", overlapS: 1.146, share: 0.573),
+                    SpeakerCandidateEvidence(speaker: "1", overlapS: 0.854, share: 0.427),
+                ],
+                timelineCoverage: 0.97
+            ),
+            SegmentSpeakerEvidence(
+                segmentIndex: 3,
+                outcome: "no_overlapping_turn",
+                candidates: [],
+                timelineCoverage: 0
+            ),
+            SegmentSpeakerEvidence(
+                segmentIndex: 4,
                 outcome: "no_dominant_speaker",
                 candidates: [
                     SpeakerCandidateEvidence(
@@ -82,22 +101,16 @@ import Testing
                 ],
                 timelineCoverage: 0.97
             ),
-            SegmentSpeakerEvidence(
-                segmentIndex: 3,
-                outcome: "no_overlapping_turn",
-                candidates: [],
-                timelineCoverage: 0
-            ),
         ]
     }
 
-    /// A source that lost 0.5 s of its 8 s, so the incompleteness has to reach
-    /// the artifact rather than only the manifest.
+    /// A source that lost 0.5 s of its 10 s, so the incompleteness has to
+    /// reach the artifact rather than only the manifest.
     private func speakerProposalCoverage() -> DerivedSourceCoverage {
         DerivedSourceCoverage(
             complete: false,
-            inputDurationS: 8,
-            processedDurationS: 7.5,
+            inputDurationS: 10,
+            processedDurationS: 9.5,
             message: "1 range(s) produced no transcript: [4.0, 4.5) s"
         )
     }
@@ -131,9 +144,10 @@ import Testing
         ).propose(speakerProposalRequest())
 
         #expect(result.document.layer == "speaker-proposal")
+        #expect(result.document.constraint == .confirmOrDecline)
         #expect(result.document.sourceSegmentsSHA256 == Self.sourceHash)
         #expect(result.document.proposals.map(\.segmentIndex) == [1])
-        #expect(result.document.declined.map(\.segmentIndex) == [3])
+        #expect(result.document.declined.map(\.segmentIndex) == [3, 4])
         let proposal = try #require(result.document.proposals.first)
         #expect(proposal.proposedSpeaker == "0")
         #expect(proposal.acousticOutcome == "no_dominant_speaker")
@@ -141,8 +155,20 @@ import Testing
         // reader sees beside the proposal.
         #expect(proposal.acousticCandidates == speakerProposalEvidence()[0].candidates)
         #expect(proposal.acousticTimelineCoverage == 0.97)
-        #expect(result.document.declined[0].acousticOutcome == "no_overlapping_turn")
-        #expect(result.document.declined[0].acousticCandidates.isEmpty)
+        let noTurn = result.document.declined[0]
+        #expect(noTurn.acousticOutcome == "no_overlapping_turn")
+        #expect(noTurn.acousticCandidates.isEmpty)
+        // With nothing to confirm, the constraint is the cause even though the
+        // model declined as well; the model's own decline is kept beside it.
+        #expect(noTurn.cause == .noAcousticCandidates)
+        #expect(noTurn.topRankedCandidate == nil)
+        #expect(noTurn.modelAnswer?.disposition == .decline)
+        #expect(noTurn.reason.contains(
+            "The model also declined: a bare acknowledgement either speaker could give"
+        ))
+        let silent = result.document.declined[1]
+        #expect(silent.cause == .noDecision)
+        #expect(silent.modelAnswer == nil)
         // The source's incompleteness is stated in the artifact that carries
         // the proposals, not only in the manifest beside it.
         #expect(result.document.sourceCoverage == speakerProposalCoverage())
@@ -194,21 +220,34 @@ import Testing
     }
 
     @Test
-    func aSegmentWithNoOverlappingTurnMayTakeAnySpeakerTheRunResolved() async throws {
+    func aSegmentWithNoOverlappingTurnIsAlwaysDeclinedAndKeepsTheModelsAnswer() async throws {
+        let answer = SpeakerProposalDecision(
+            segmentIndex: 3,
+            proposedSpeaker: "1",
+            disposition: .propose,
+            reason: "continues the same speaker's turn"
+        )
         let result = try await SpeakerProposer(
-            backend: StubSpeakerProposalBackend(decisions: [
-                SpeakerProposalDecision(
-                    segmentIndex: 3,
-                    proposedSpeaker: "1",
-                    disposition: .propose,
-                    reason: "continues the same speaker's turn"
-                ),
-            ])
+            backend: StubSpeakerProposalBackend(decisions: [answer])
         ).propose(speakerProposalRequest())
-        #expect(result.document.proposals.map(\.segmentIndex) == [3])
-        #expect(result.document.declined.map(\.segmentIndex) == [1])
+        // No candidate means no top-ranked candidate to confirm, so the answer is recorded
+        // as evidence rather than applied.
+        #expect(result.document.proposals.isEmpty)
+        #expect(result.document.declined.map(\.segmentIndex) == [1, 3, 4])
+        let decline = result.document.declined[1]
+        #expect(decline.segmentIndex == 3)
+        #expect(decline.cause == .noAcousticCandidates)
+        #expect(decline.topRankedCandidate == nil)
+        #expect(decline.modelAnswer == answer)
+        #expect(decline.reason.contains(
+            "no diarization turn overlapped this segment"
+        ))
+        #expect(decline.reason.contains(
+            "The model proposed speaker 1: continues the same speaker's turn"
+        ))
 
-        // ...and no speaker the run never resolved.
+        // A speaker the run never resolved is still malformed output, not
+        // evidence worth keeping.
         await #expect(throws: PostprocessError.speakerProposalNotACandidate(
             segmentIndex: 3,
             speaker: "9"
@@ -263,10 +302,12 @@ import Testing
             backend: StubSpeakerProposalBackend(decisions: [])
         ).propose(speakerProposalRequest())
         #expect(result.document.proposals.isEmpty)
-        #expect(result.document.declined.map(\.segmentIndex) == [1, 3])
+        #expect(result.document.declined.map(\.segmentIndex) == [1, 3, 4])
         // Every unattributed segment is still accounted for, with what the
-        // acoustics held and a stated reason.
+        // acoustics held, a stated reason, and the top-ranked candidate that went unconfirmed.
         #expect(result.document.declined.allSatisfy { !$0.reason.isEmpty })
+        #expect(result.document.declined.allSatisfy { $0.cause == .noDecision })
+        #expect(result.document.declined.map(\.topRankedCandidate) == ["0", nil, nil])
         #expect(result.document.declined[0].acousticCandidates.count == 2)
     }
 
@@ -275,6 +316,7 @@ import Testing
         var document = speakerProposalDocument()
         document.segments[1].speaker = "0"
         document.segments[3].speaker = "1"
+        document.segments[4].speaker = "1"
         await #expect(throws: PostprocessError.noUnattributedSegments) {
             _ = try await SpeakerProposer(
                 backend: StubSpeakerProposalBackend(decisions: [])
@@ -330,25 +372,241 @@ import Testing
         #expect(parts.instruction.contains("proposal for human review"))
         #expect(parts.instruction.contains("never changes it"))
         #expect(parts.instruction.contains("A decline is a correct answer"))
+        // The constraint is stated to the model, not only enforced behind it.
+        #expect(parts.instruction.hasPrefix("Confirm or decline a speaker"))
+        #expect(parts.instruction.contains("Propose only to confirm top_ranked_candidate"))
+        #expect(parts.instruction.contains("Never propose any other speaker"))
+        #expect(parts.instruction.contains("Decline when top_ranked_candidate is null"))
         #expect(parts.input["known_speakers"] as? [String] == ["0", "1"])
         let segments = try #require(parts.input["segments"] as? [[String: Any]])
-        #expect(segments.count == 4)
-        #expect(segments.map { $0["target"] as? Bool } == [false, true, false, true])
+        #expect(segments.count == 5)
+        #expect(segments.map { $0["target"] as? Bool } == [false, true, false, true, true])
         // Context segments carry their acoustic speaker and no candidate list;
         // targets carry the candidates and no speaker.
         #expect(segments[0]["speaker"] as? String == "0")
         #expect(segments[0]["acoustic_candidates"] == nil)
+        #expect(segments[0]["top_ranked_candidate"] == nil)
         #expect(segments[1]["speaker"] == nil)
         let candidates = try #require(
             segments[1]["acoustic_candidates"] as? [[String: Any]]
         )
         #expect(candidates.map { $0["speaker"] as? String } == ["0", "1"])
-        #expect(candidates.map { $0["share"] as? Double } == [0.5, 0.5])
+        #expect(candidates.map { $0["share"] as? Double } == [0.573, 0.427])
         #expect(segments[1]["acoustic_outcome"] as? String == "no_dominant_speaker")
+        // Every target names its top-ranked candidate explicitly, as null when there is
+        // none: the rounded shares cannot carry that distinction.
+        #expect(segments[1]["top_ranked_candidate"] as? String == "0")
+        #expect(segments[3]["top_ranked_candidate"] is NSNull)
+        #expect(segments[4]["top_ranked_candidate"] is NSNull)
+        let tied = try #require(
+            segments[4]["acoustic_candidates"] as? [[String: Any]]
+        )
+        #expect(tied.map { $0["share"] as? Double } == [0.5, 0.5])
         // No timing, and no speaker for a target: the proposer is given text
         // and shares, never the acoustic decision it is meant to complement.
         #expect(segments[1]["start_s"] == nil)
         #expect(segments[1]["end_s"] == nil)
+    }
+
+    // MARK: Confirm-or-decline (PROJECT.md D50)
+
+    @Test
+    func anOverturnOfTheTopRankedCandidateIsRecordedAsADeclineThatKeepsBothAnswers() async throws {
+        let answer = SpeakerProposalDecision(
+            segmentIndex: 1,
+            proposedSpeaker: "1",
+            disposition: .propose,
+            reason: "replies to the question speaker 0 just asked"
+        )
+        let result = try await SpeakerProposer(
+            backend: StubSpeakerProposalBackend(decisions: [answer])
+        ).propose(speakerProposalRequest())
+
+        #expect(result.document.constraint == .confirmOrDecline)
+        #expect(result.document.proposals.isEmpty)
+        #expect(result.document.declined.map(\.segmentIndex) == [1, 3, 4])
+        let decline = result.document.declined[0]
+        #expect(decline.cause == .modelDisagreedWithTopRankedCandidate)
+        #expect(decline.topRankedCandidate == "0")
+        #expect(decline.modelAnswer == answer)
+        #expect(decline.reason == "Declined under confirm-or-decline: the language evidence pointed to speaker 1, but the top-ranked candidate is speaker 0 at 57% of the overlapped speech, and a proposal may only confirm that candidate. The model's reason: replies to the question speaker 0 just asked")
+        // The acoustic evidence beside the decline is the merger's, untouched.
+        #expect(decline.acousticOutcome == "no_dominant_speaker")
+        #expect(decline.acousticCandidates == speakerProposalEvidence()[0].candidates)
+        #expect(decline.acousticTimelineCoverage == 0.97)
+    }
+
+    @Test
+    func aTieHasNoTopRankedCandidateToConfirmSoItIsDeclinedWhateverTheModelSays() async throws {
+        for answer in [
+            SpeakerProposalDecision(segmentIndex: 4, proposedSpeaker: "0", disposition: .propose, reason: "the lower id"),
+            SpeakerProposalDecision(segmentIndex: 4, proposedSpeaker: "1", disposition: .propose, reason: "the higher id"),
+            SpeakerProposalDecision(segmentIndex: 4, proposedSpeaker: "", disposition: .decline, reason: "nothing to confirm"),
+        ] {
+            let result = try await SpeakerProposer(
+                backend: StubSpeakerProposalBackend(decisions: [answer])
+            ).propose(speakerProposalRequest())
+            #expect(result.document.proposals.isEmpty)
+            let decline = try #require(
+                result.document.declined.first { $0.segmentIndex == 4 }
+            )
+            #expect(decline.cause == .noTopRankedCandidate)
+            #expect(decline.topRankedCandidate == nil)
+            #expect(decline.modelAnswer == answer)
+            #expect(decline.reason.contains(
+                "the acoustic candidates 0 and 1 hold equal overlap, so there is no top-ranked candidate to confirm"
+            ))
+            #expect(decline.reason.contains(answer.reason))
+        }
+    }
+
+    @Test
+    func aModelDeclineOnARankedSegmentRecordsTheTopRankedCandidateItDidNotConfirm() async throws {
+        let result = try await SpeakerProposer(
+            backend: StubSpeakerProposalBackend(decisions: [
+                SpeakerProposalDecision(
+                    segmentIndex: 1,
+                    proposedSpeaker: "",
+                    disposition: .decline,
+                    reason: "both speakers are mid-sentence here"
+                ),
+            ])
+        ).propose(speakerProposalRequest())
+        let decline = result.document.declined[0]
+        #expect(decline.segmentIndex == 1)
+        #expect(decline.cause == .modelDeclined)
+        #expect(decline.topRankedCandidate == "0")
+        #expect(decline.modelAnswer == nil)
+        // The model's own words are the reason; nothing is prepended to them.
+        #expect(decline.reason == "both speakers are mid-sentence here")
+    }
+
+    @Test
+    func everyUnattributedSegmentStillAppearsExactlyOnceUnderTheConstraint() async throws {
+        // One confirmation, one overturn converted, one tie converted: the
+        // exactly-once rule over proposals plus declined is what makes the
+        // constraint auditable from the artifact alone.
+        let result = try await SpeakerProposer(
+            backend: StubSpeakerProposalBackend(decisions: [
+                SpeakerProposalDecision(segmentIndex: 1, proposedSpeaker: "0", disposition: .propose, reason: "confirms"),
+                SpeakerProposalDecision(segmentIndex: 3, proposedSpeaker: "0", disposition: .propose, reason: "no candidate"),
+                SpeakerProposalDecision(segmentIndex: 4, proposedSpeaker: "1", disposition: .propose, reason: "tie"),
+            ])
+        ).propose(speakerProposalRequest())
+        #expect(result.document.proposals.map(\.segmentIndex) == [1])
+        #expect(result.document.declined.map(\.segmentIndex) == [3, 4])
+        #expect(result.document.declined.map(\.cause) == [.noAcousticCandidates, .noTopRankedCandidate])
+        #expect(result.document.declined.compactMap(\.modelAnswer?.proposedSpeaker) == ["0", "1"])
+        let covered = result.document.proposals.map(\.segmentIndex)
+            + result.document.declined.map(\.segmentIndex)
+        #expect(covered.sorted() == [1, 3, 4])
+    }
+
+    @Test
+    func theTopRankedCandidateIsUniqueInsideTheMergersMargin() {
+        func candidate(_ speaker: String, _ overlapS: Double) -> SpeakerCandidateEvidence {
+            SpeakerCandidateEvidence(speaker: speaker, overlapS: overlapS, share: 0)
+        }
+        #expect(SpeakerProposalConstraint.topRankedCandidate(among: []) == nil)
+        #expect(SpeakerProposalConstraint.topRankedCandidate(among: [candidate("1", 0.3)]) == "1")
+        #expect(SpeakerProposalConstraint.topRankedCandidate(
+            among: [candidate("0", 17.3), candidate("1", 12.9)]
+        ) == "0")
+        // The top-ranked candidate is the largest overlap, not the first entry.
+        #expect(SpeakerProposalConstraint.topRankedCandidate(
+            among: [candidate("0", 12.9), candidate("1", 17.3)]
+        ) == "1")
+        // Inside the merger's 1e-9 s margin is a tie; outside it is not.
+        #expect(SpeakerProposalConstraint.topRankedCandidate(
+            among: [candidate("0", 1.0 + 1e-10), candidate("1", 1.0)]
+        ) == nil)
+        #expect(SpeakerProposalConstraint.topRankedCandidate(
+            among: [candidate("0", 1.0 + 2e-9), candidate("1", 1.0)]
+        ) == "0")
+        // Two tied at the top with a third below is still no top-ranked candidate; one
+        // clear top over two tied below is.
+        #expect(SpeakerProposalConstraint.topRankedCandidate(
+            among: [candidate("0", 2), candidate("1", 2), candidate("2", 1)]
+        ) == nil)
+        #expect(SpeakerProposalConstraint.topRankedCandidate(
+            among: [candidate("0", 3), candidate("1", 2), candidate("2", 2)]
+        ) == "0")
+    }
+
+    @Test
+    func theConstraintIsNamedInTheArtifactAndOlderArtifactsStillDecode() throws {
+        let answer = SpeakerProposalDecision(
+            segmentIndex: 1,
+            proposedSpeaker: "1",
+            disposition: .propose,
+            reason: "r"
+        )
+        let document = SpeakerProposalDocument(
+            sourceSegmentsSHA256: Self.sourceHash,
+            sourceCoverage: speakerProposalCoverage(),
+            constraint: .confirmOrDecline,
+            proposals: [],
+            declined: [
+                SpeakerProposalDecline(
+                    segmentIndex: 1,
+                    reason: "converted",
+                    acousticOutcome: "no_dominant_speaker",
+                    acousticTimelineCoverage: 0.97,
+                    acousticCandidates: speakerProposalEvidence()[0].candidates,
+                    cause: .modelDisagreedWithTopRankedCandidate,
+                    topRankedCandidate: "0",
+                    modelAnswer: answer
+                ),
+                SpeakerProposalDecline(
+                    segmentIndex: 3,
+                    reason: "silent",
+                    acousticOutcome: "no_overlapping_turn",
+                    acousticTimelineCoverage: 0,
+                    acousticCandidates: [],
+                    cause: .noDecision
+                ),
+            ],
+            batches: []
+        )
+        let data = try JSONEncoder().encode(document)
+        let json = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        #expect(json["constraint"] as? String == "confirm-or-decline")
+        let declined = try #require(json["declined"] as? [[String: Any]])
+        #expect(declined[0]["cause"] as? String == "model_disagreed_with_top_ranked_candidate")
+        #expect(declined[0]["top_ranked_candidate"] as? String == "0")
+        let modelAnswer = try #require(declined[0]["model_answer"] as? [String: Any])
+        #expect(modelAnswer["proposed_speaker"] as? String == "1")
+        #expect(modelAnswer["disposition"] as? String == "propose")
+        #expect(modelAnswer["reason"] as? String == "r")
+        // Absent evidence is absent, not null: a key is written only when it
+        // carries something.
+        #expect(declined[1]["cause"] as? String == "no_decision")
+        #expect(declined[1]["top_ranked_candidate"] == nil)
+        #expect(declined[1]["model_answer"] == nil)
+        #expect(try JSONDecoder().decode(SpeakerProposalDocument.self, from: data) == document)
+
+        // An artifact written before the constraint existed still decodes,
+        // and nothing is invented for it.
+        var legacy = json
+        legacy["constraint"] = nil
+        legacy["declined"] = declined.map { record in
+            var stripped = record
+            stripped["cause"] = nil
+            stripped["top_ranked_candidate"] = nil
+            stripped["model_answer"] = nil
+            return stripped
+        }
+        let decoded = try JSONDecoder().decode(
+            SpeakerProposalDocument.self,
+            from: JSONSerialization.data(withJSONObject: legacy)
+        )
+        #expect(decoded.constraint == nil)
+        #expect(decoded.declined.map(\.segmentIndex) == [1, 3])
+        #expect(decoded.declined.allSatisfy { $0.cause == nil })
+        #expect(decoded.declined.allSatisfy { $0.topRankedCandidate == nil })
+        #expect(decoded.declined.allSatisfy { $0.modelAnswer == nil })
     }
 
     @Test

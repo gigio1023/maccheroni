@@ -676,7 +676,7 @@ import Testing
             truncated: true,
             processedDurationS: 1.5,
             failure: Failure(
-                code: "ASR_REPETITION_DEGENERATION",
+                code: "ASR_REPETITION_LOOPING",
                 message: "one range produced no transcript"
             )
         )

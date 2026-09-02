@@ -4,6 +4,16 @@
 <dict>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
+	<key>%@ The system reported: %@</key>
+	<string>%@ 시스템 보고: %@</string>
+	<key>%@ could not be moved because its folder is not writable. Nothing was moved.</key>
+	<string>%@의 폴더에 쓸 수 없어 옮기지 못했습니다. 아무것도 옮기지 않았습니다.</string>
+	<key>%@ could not be moved to the Trash, and part of it is in the Trash now. Put it back in the Finder. The recording is still in your library.</key>
+	<string>%@을(를) 휴지통으로 옮기지 못했고 일부만 휴지통에 있습니다. Finder에서 되돌려놓으세요. 녹음은 라이브러리에 남아 있습니다.</string>
+	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
+	<string>%@을(를) 휴지통으로 옮기지 못했습니다. 파일은 원래 자리에 그대로 있고 녹음도 라이브러리에 남아 있습니다.</string>
+	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
+	<string>%@이(가) 라이브러리가 기대한 위치에 없어 아무것도 옮기지 않았습니다.</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%2$@ 중 %1$@ (%3$@)</string>
 	<key>%@ of speech</key>
@@ -234,6 +244,8 @@
 	<string>고정 버전 모델 다운로드…</string>
 	<key>Drop an audio file here</key>
 	<string>여기에 오디오 파일을 드롭하세요.</string>
+	<key>Duration</key>
+	<string>소요 시간</string>
 	<key>Edit Glossary</key>
 	<string>용어집 편집</string>
 	<key>Elapsed</key>
@@ -366,8 +378,8 @@
 	<string>Maccheroni가 명령줄 엔진이 보낸 준비 상태 보고서를 읽지 못했습니다.</string>
 	<key>Maccheroni is processing the full recording locally.</key>
 	<string>Maccheroni는 전체 녹음을 로컬에서 처리하고 있습니다.</string>
-	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Model removal uses the macOS Trash.</key>
-	<string>Maccheroni는 녹음, 원시 전사문, 완료된 실행 산출물을 삭제하거나 덮어쓰지 않습니다. 모델을 제거하면 macOS 휴지통으로 이동합니다.</string>
+	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Removing a model or a recording uses the macOS Trash.</key>
+	<string>Maccheroni는 녹음, 원시 전사문, 완료된 실행 산출물을 삭제하거나 덮어쓰지 않습니다. 모델이나 녹음을 제거하면 macOS 휴지통으로 이동합니다.</string>
 	<key>Maccheroni stopped this run and its record does not name a more specific cause.</key>
 	<string>Maccheroni가 이 실행을 멈췄고 기록에는 더 구체적인 원인이 남아 있지 않습니다.</string>
 	<key>Maccheroni will not assign a speaker without acoustic evidence, so this stays as it is.</key>
@@ -392,6 +404,12 @@
 	<string>모델</string>
 	<key>Move Model to Trash</key>
 	<string>모델을 휴지통으로 이동</string>
+	<key>Move to Trash</key>
+	<string>휴지통으로 이동</string>
+	<key>Move to Trash…</key>
+	<string>휴지통으로 이동…</string>
+	<key>Move “%@” to the Trash?</key>
+	<string>'%@'을(를) 휴지통으로 이동할까요?</string>
 	<key>New Recording</key>
 	<string>새 녹음</string>
 	<key>No</key>
@@ -458,8 +476,6 @@
 	<string>피크 정규화</string>
 	<key>People</key>
 	<string>인물</string>
-	<key>Pipeline</key>
-	<string>파이프라인</string>
 	<key>Places</key>
 	<string>장소</string>
 	<key>Planned Model</key>
@@ -504,7 +520,7 @@
 	<string>제공됨</string>
 	<key>Quantization</key>
 	<string>양자화</string>
-	<key>Reached The Model</key>
+	<key>Reached the Model</key>
 	<string>모델에 전달됨</string>
 	<key>Ready to Transcribe</key>
 	<string>전사 준비 완료</string>
@@ -516,6 +532,8 @@
 	<string>녹음</string>
 	<key>Recording %@</key>
 	<string>%@ 녹음 중</string>
+	<key>Recording Name</key>
+	<string>녹음 이름</string>
 	<key>Recording Not Found</key>
 	<string>녹음을 찾을 수 없습니다</string>
 	<key>Recording SHA-256</key>
@@ -532,14 +550,22 @@
 	<string>삭제</string>
 	<key>Remove %@</key>
 	<string>%@ 삭제</string>
+	<key>Remove from Library</key>
+	<string>라이브러리에서 제거</string>
 	<key>Remove this segment from the copy selection.</key>
 	<string>이 세그먼트를 복사 선택 항목에서 제거합니다.</string>
+	<key>Remove “%@” from the library?</key>
+	<string>'%@'을(를) 라이브러리에서 제거할까요?</string>
 	<key>Rename Speaker</key>
 	<string>화자 이름 바꾸기</string>
 	<key>Rename this speaker everywhere in the corrected transcript.</key>
 	<string>수정 전사문의 모든 위치에서 이 화자 이름을 바꿉니다.</string>
 	<key>Rename this speaker everywhere in this transcript.</key>
 	<string>이 전사문 전체에서 이 화자 이름을 바꿉니다.</string>
+	<key>Renames this recording in the library only. The audio file and the run folder keep their names.</key>
+	<string>이 녹음의 이름을 라이브러리에서만 바꿉니다. 오디오 파일과 실행 폴더의 이름은 그대로입니다.</string>
+	<key>Rename…</key>
+	<string>이름 변경…</string>
 	<key>Request Logs</key>
 	<string>요청 로그</string>
 	<key>Resolved</key>
@@ -554,14 +580,18 @@
 	<string>Finder에서 실행 보기</string>
 	<key>Reveal in Finder</key>
 	<string>Finder에서 보기</string>
+	<key>Review</key>
+	<string>확인 필요</string>
 	<key>Review Profiles</key>
 	<string>프로필 검토</string>
 	<key>Review This Segment</key>
 	<string>이 구간 확인</string>
 	<key>Review Uncertain Transcript</key>
 	<string>불확실한 전사문 검토</string>
-	<key>Review what the pipeline was unsure about here.</key>
-	<string>파이프라인이 확신하지 못한 부분을 확인합니다.</string>
+	<key>Review what Maccheroni was unsure about here.</key>
+	<string>Maccheroni가 확신하지 못한 부분을 확인합니다.</string>
+	<key>Reviewed</key>
+	<string>확인함</string>
 	<key>Revision</key>
 	<string>리비전</string>
 	<key>Run</key>
@@ -602,12 +632,14 @@
 	<string>배치당 세그먼트 수</string>
 	<key>Select this segment for copying.</key>
 	<string>복사할 세그먼트로 선택합니다.</string>
-	<key>Sent To The Model</key>
+	<key>Sent to the Model</key>
 	<string>모델에 보낸 것</string>
 	<key>Service-managed (limit unavailable)</key>
 	<string>서비스 관리됨(한도 미확인)</string>
 	<key>Settings Could Not Be Loaded</key>
 	<string>설정을 로드할 수 없습니다</string>
+	<key>Share</key>
+	<string>비율</string>
 	<key>Show or hide exact run and model details.</key>
 	<string>정확한 실행 및 모델 세부정보를 표시하거나 숨깁니다.</string>
 	<key>Show or hide how this run was produced.</key>
@@ -626,10 +658,14 @@
 	<string>원본 세그먼트 SHA-256</string>
 	<key>Spanish</key>
 	<string>스페인어</string>
+	<key>Speaker</key>
+	<string>화자</string>
 	<key>Speaker %@</key>
 	<string>화자 %@</string>
 	<key>Speaker Diarization</key>
 	<string>화자 분리</string>
+	<key>Speaker Proposal</key>
+	<string>화자 제안</string>
 	<key>Speaker Separation</key>
 	<string>화자 분리</string>
 	<key>Speaker name</key>
@@ -690,6 +726,8 @@
 	<string>용어 재현율</string>
 	<key>Terms</key>
 	<string>용어</string>
+	<key>Text</key>
+	<string>텍스트</string>
 	<key>Text only</key>
 	<string>텍스트만</string>
 	<key>The Hugging Face %@ command failed (exit %lld): %@</key>
@@ -712,6 +750,8 @@
 	<string>세그먼트 %lld의 내보낼 화자 이름이 비어 있습니다.</string>
 	<key>The exported text is empty for segment %lld.</key>
 	<string>세그먼트 %lld에 대해 내보낸 텍스트가 비어 있습니다.</string>
+	<key>The files this recording named are no longer on disk, so this removes its library entry and nothing else.</key>
+	<string>이 녹음의 파일이 디스크에 없으므로 라이브러리 항목만 제거합니다.</string>
 	<key>The folder Maccheroni saves recordings and runs in cannot be reached.</key>
 	<string>Maccheroni가 녹음과 실행 결과를 저장하는 폴더에 접근할 수 없습니다.</string>
 	<key>The glossary for this profile could not be used for this run.</key>
@@ -766,6 +806,8 @@
 	<string>응답한 음성 모델이 이 프로필이 고정한 모델과 정확히 일치하지 않아 그 출력을 받아들이지 않았습니다.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>이 프로필에 필요한 음성 인식 모델이 이 Mac에 설치되어 있지 않습니다.</string>
+	<key>The top speakers held exactly equal time in this segment.</key>
+	<string>이 구간에서 상위 화자들이 정확히 같은 시간을 차지했습니다.</string>
 	<key>The transcript could not be copied.</key>
 	<string>전사문을 복사할 수 없습니다.</string>
 	<key>The transcription engine could not start: %@</key>
@@ -780,6 +822,12 @@
 	<string>활성 녹음이 없습니다.</string>
 	<key>This Run</key>
 	<string>이 실행</string>
+	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>실행 결과를 휴지통으로 옮깁니다. 아무것도 삭제하지 않으며 Finder의 '되돌려놓기'로 복구할 수 있습니다.</string>
+	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>
+	<string>원본 오디오와 실행 결과를 함께 휴지통으로 옮깁니다. 아무것도 삭제하지 않으며 Finder의 '되돌려놓기'로 복구할 수 있습니다.</string>
+	<key>This moves the source audio to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>원본 오디오를 휴지통으로 옮깁니다. 아무것도 삭제하지 않으며 Finder의 '되돌려놓기'로 복구할 수 있습니다.</string>
 	<key>This name applies to every %@ segment in corrected exports.</key>
 	<string>이 이름은 수정된 내보내기의 모든 %@ 세그먼트에 적용됩니다.</string>
 	<key>This name applies to every %@ segment in exports.</key>
@@ -794,20 +842,18 @@
 	<string>이 실행은 제한된 분할 처리 후에도 MOSS 출력 한도에 도달했습니다. 다른 프로필을 선택하거나 더 짧은 사본을 사용한 후 다시 시도하세요.</string>
 	<key>This segment carries no recorded speaker evidence.</key>
 	<string>이 구간에는 기록된 화자 근거가 없습니다.</string>
-	<key>This segment was marked uncertain by the pipeline.</key>
-	<string>이 세그먼트는 파이프라인에서 불확실하다고 표시되었습니다.</string>
 	<key>This speaker held this much of the segment's speech.</key>
 	<string>이 구간 발화에서 이 화자가 차지한 비율입니다.</string>
 	<key>This stage covered only part of the recording.</key>
 	<string>이 단계는 녹음의 일부만 처리했습니다.</string>
 	<key>This stage stopped the run.</key>
 	<string>이 단계에서 실행이 멈췄습니다.</string>
+	<key>Time</key>
+	<string>시각</string>
 	<key>Timeline coverage %@, and this run named a speaker only above %@.</key>
 	<string>타임라인 커버리지는 %@이고, 이 실행은 %@를 넘을 때만 화자를 정했습니다.</string>
 	<key>Timeline coverage %@.</key>
 	<string>타임라인 커버리지 %@.</string>
-	<key>Took</key>
-	<string>소요 시간</string>
 	<key>Transcribed</key>
 	<string>전사됨</string>
 	<key>Transcribing</key>
@@ -830,6 +876,8 @@
 	<string>전사문 텍스트만 보냈습니다. 오디오는 이 Mac에 남았습니다.</string>
 	<key>Transcription</key>
 	<string>전사</string>
+	<key>Transcription Backend</key>
+	<string>전사 백엔드</string>
 	<key>Transcription Cancelled</key>
 	<string>전사가 취소되었습니다.</string>
 	<key>Transcription Failed</key>
@@ -872,10 +920,12 @@
 	<string>볼륨 준비 상태</string>
 	<key>Wait for the active transcription to finish.</key>
 	<string>활성 전사가 완료될 때까지 기다립니다.</string>
+	<key>Wait for this recording's transcription to finish before moving it to the Trash.</key>
+	<string>이 녹음의 전사가 끝난 뒤에 휴지통으로 옮기세요.</string>
 	<key>Wall Time</key>
 	<string>처리 시간</string>
-	<key>What The Pipeline Recorded</key>
-	<string>파이프라인이 기록한 내용</string>
+	<key>What Maccheroni Recorded</key>
+	<string>Maccheroni가 기록한 내용</string>
 	<key>Who Was Speaking</key>
 	<string>누가 말했는가</string>
 	<key>Wording</key>

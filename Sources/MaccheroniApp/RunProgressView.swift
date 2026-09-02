@@ -37,7 +37,7 @@ struct RunProgressView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.screen) {
                 header
                 if model.isMOSSLimitExhausted(record),
                    model.usesUnchangedMOSSConfiguration(record) {
@@ -79,18 +79,18 @@ struct RunProgressView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.small) {
             Label(headerTitle, systemImage: headerSymbol)
-                .font(.largeTitle)
+                .font(AppTheme.Typography.screenTitle)
                 .foregroundStyle(headerColor)
             Text(headerMessage)
-                .font(.body)
-                .foregroundStyle(.secondary)
+                .font(AppTheme.Typography.body)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let supporting = headerSupportingMessage {
                 Text(supporting)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(AppTheme.Typography.meta)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -99,16 +99,17 @@ struct RunProgressView: View {
     private var stageList: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(visibleStages, id: \.self) { stage in
-                HStack(spacing: 12) {
+                HStack(spacing: AppTheme.Spacing.medium) {
                     Image(systemName: stageSymbol(stage))
                         .frame(width: 20)
                         .foregroundStyle(stageColor(stage))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(stage.title)
+                            .font(AppTheme.Typography.sectionTitle)
                         if let elapsedS = recordProgress?.stageElapsedS[stage] {
                             Text(Duration.seconds(elapsedS), format: .time(pattern: .hourMinuteSecond))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(AppTheme.Typography.meta)
+                                .foregroundStyle(AppTheme.Palette.inkSecondary)
                                 .monospacedDigit()
                                 .accessibilityLabel(appLocalized("Elapsed"))
                         }
@@ -116,13 +117,13 @@ struct RunProgressView: View {
                            let snapshot = recordProgress,
                            snapshot.plannedChunks > 0 {
                             Text(appLocalized("Chunk \(snapshot.completedChunks) of \(snapshot.plannedChunks)"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(AppTheme.Typography.meta)
+                                .foregroundStyle(AppTheme.Palette.inkSecondary)
                         }
                         if let note = stageNote(stage) {
                             Text(note)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(AppTheme.Typography.meta)
+                                .foregroundStyle(AppTheme.Palette.inkSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -138,23 +139,23 @@ struct RunProgressView: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, AppTheme.Spacing.large)
         .background(Color(nsColor: .controlBackgroundColor), in: .rect(cornerRadius: 12))
     }
 
     private var runDetails: some View {
-        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+        Grid(alignment: .leading, horizontalSpacing: AppTheme.Spacing.large, verticalSpacing: AppTheme.Spacing.small) {
             if let snapshot = recordProgress {
                 GridRow {
                     Text(appLocalized("Elapsed"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
                     Text(Duration.seconds(snapshot.elapsedS), format: .time(pattern: .hourMinuteSecond))
                         .monospacedDigit()
                 }
                 if let modelID = snapshot.modelID {
                     GridRow {
                         Text(snapshot.modelLabel())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.Palette.inkSecondary)
                         Text(modelID)
                             .textSelection(.enabled)
                     }
@@ -162,7 +163,7 @@ struct RunProgressView: View {
                 if let message = snapshot.message, !message.isEmpty {
                     GridRow {
                         Text(appLocalized("Status"))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.Palette.inkSecondary)
                         Text(message)
                     }
                 }
@@ -170,21 +171,21 @@ struct RunProgressView: View {
             if let stage = diagnosis?.failedStage {
                 GridRow {
                     Text(appLocalized("Stopped At"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
                     Text(stage.title)
                 }
             }
             if let coverage = diagnosis?.coverage, coverage.inputDurationS > 0 {
                 GridRow {
                     Text(appLocalized("Transcribed"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
                     Text(coverage.transcribedLabel)
                         .monospacedDigit()
                 }
                 if let ranges = coverage.missingRangeLabel() {
                     GridRow {
                         Text(appLocalized("Not Transcribed"))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.Palette.inkSecondary)
                         Text(verbatim: ranges)
                             .monospacedDigit()
                     }
@@ -192,18 +193,18 @@ struct RunProgressView: View {
             }
             GridRow {
                 Text(appLocalized("Profile"))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
                 Text(record.profileID.title)
             }
             GridRow {
                 Text(appLocalized("Post-processing"))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
                 Text(record.postprocess.title)
             }
             if record.postprocess != .none {
                 GridRow {
                     Text(appLocalized("Operation"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
                     Text(PostprocessOperationChoice(
                         record.postprocessMode ?? .correction
                     ).title)
@@ -214,7 +215,7 @@ struct RunProgressView: View {
             {
                 GridRow {
                     Text(appLocalized("Target Language"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
                     if let language = AppLanguage(rawValue: target) {
                         Text(language.title)
                     } else {
@@ -223,7 +224,7 @@ struct RunProgressView: View {
                 }
             }
         }
-        .font(.callout)
+        .font(AppTheme.Typography.meta)
     }
 
     @ViewBuilder
@@ -236,8 +237,8 @@ struct RunProgressView: View {
                 .keyboardShortcut(.cancelAction)
                 Spacer()
                 Label(appLocalized("Cancelling keeps completed chunks and intermediate artifacts."), systemImage: "archivebox")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(AppTheme.Typography.meta)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
             }
         } else if model.isMOSSLimitExhausted(record),
                   model.usesUnchangedMOSSConfiguration(record) {
@@ -275,10 +276,10 @@ struct RunProgressView: View {
     }
 
     private var headerTitle: LocalizedStringResource {
-        if let diagnosis, diagnosis.disposition == .partial {
+        if let diagnosis, diagnosis.completion == .partial {
             return appLocalized("Partial Transcript")
         }
-        if let diagnosis, diagnosis.disposition == .unreadable {
+        if let diagnosis, diagnosis.completion == .unreadable {
             return appLocalized("Run Record Unreadable")
         }
         if model.isMOSSLimitExhausted(record) {
@@ -305,7 +306,7 @@ struct RunProgressView: View {
         if let cause {
             return cause.sentence()
         }
-        if let diagnosis, diagnosis.disposition == .partial {
+        if let diagnosis, diagnosis.completion == .partial {
             return appLocalized(
                 "Part of this recording was transcribed and the rest produced no text."
             )
@@ -322,7 +323,7 @@ struct RunProgressView: View {
     /// stays one sentence.
     private var headerSupportingMessage: LocalizedStringResource? {
         guard let diagnosis, diagnosis.isFailureLike else { return nil }
-        if diagnosis.disposition == .partial {
+        if diagnosis.completion == .partial {
             return appLocalized(
                 "The recovered transcript, the original audio, and every completed artifact were preserved. This run is recorded as partial, not complete."
             )
@@ -333,7 +334,7 @@ struct RunProgressView: View {
     }
 
     private var headerSymbol: String {
-        if let diagnosis, diagnosis.disposition == .partial {
+        if let diagnosis, diagnosis.completion == .partial {
             return "exclamationmark.triangle.fill"
         }
         if model.isMOSSLimitExhausted(record) {
@@ -347,17 +348,22 @@ struct RunProgressView: View {
         }
     }
 
+    /// The token set, not the system semantic colours. Rendered in the light
+    /// appearance the system orange measured **2.31:1** on the *Partial
+    /// Transcript* title — below even the 3:1 floor that applies to text this
+    /// large — and the system red 3.57:1. The open and error tokens are
+    /// chosen against the same grounds every other surface is.
     private var headerColor: Color {
-        if let diagnosis, diagnosis.disposition == .partial {
-            return .orange
+        if let diagnosis, diagnosis.completion == .partial {
+            return AppTheme.Palette.open
         }
         if model.isMOSSLimitExhausted(record) {
-            return .orange
+            return AppTheme.Palette.open
         }
         return switch record.state {
-        case .failed: .red
-        case .cancelled, .interrupted, .recorded: .secondary
-        default: .primary
+        case .failed: AppTheme.Palette.error
+        case .cancelled, .interrupted, .recorded: AppTheme.Palette.inkSecondary
+        default: AppTheme.Palette.ink
         }
     }
 
@@ -392,13 +398,18 @@ struct RunProgressView: View {
         return "circle"
     }
 
+    /// One colour per state, from the token set. A finished stage takes no
+    /// colour of its own: the check glyph is what says it finished, and the
+    /// token set has no green because a green check is not a state a reader
+    /// has to act on. What stays coloured is the stage that stopped the run
+    /// and the stage that covered only part of it.
     private func stageColor(_ stage: PipelineStage) -> Color {
         switch stageSymbol(stage) {
-        case "xmark.circle.fill": .red
-        case "exclamationmark.circle.fill": .orange
-        case "checkmark.circle.fill": .green
-        case "circle": .secondary
-        default: .accentColor
+        case "xmark.circle.fill": AppTheme.Palette.error
+        case "exclamationmark.circle.fill": AppTheme.Palette.open
+        case "checkmark.circle.fill": AppTheme.Palette.inkSecondary
+        case "circle": AppTheme.Palette.inkSecondary
+        default: AppTheme.Palette.accent
         }
     }
 }
@@ -408,7 +419,7 @@ extension RunFailureCause {
     /// arrive on the screen as the same words.
     func sentence(locale: Locale? = nil) -> LocalizedStringResource {
         switch self {
-        case .repetitionDegeneration:
+        case .repetitionLooping:
             appLocalized(
                 "Speech recognition stopped producing new words and repeated itself to the end of its output budget, so that stretch of audio produced no usable text.",
                 locale: locale
@@ -546,7 +557,7 @@ func runDurationLabel(_ seconds: Double) -> String {
 private struct MOSSConstraintRetryNotice: View {
     var body: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.medium) {
                 Text(appLocalized(
                     "An identical retry is disabled because it would use the same model, glossary, and chunk policy."
                 ))
@@ -554,7 +565,7 @@ private struct MOSSConstraintRetryNotice: View {
                 Text(appLocalized(
                     "Inspect the preserved run. For a new attempt, choose a different profile or transcribe a shorter copy. The original recording stays unchanged."
                 ))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -575,7 +586,7 @@ private struct RunFailureDetailBox: View {
     var body: some View {
         GroupBox {
             Text(verbatim: detail)
-                .font(.caption.monospaced())
+                .font(AppTheme.Typography.meta.monospaced())
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -85,7 +85,12 @@ struct RootView: View {
                 switch record.state {
                 case .done, .hasConflicts:
                     if let run = model.selectedRun {
-                        TranscriptView(model: model, record: record, run: run)
+                        TranscriptView(
+                            model: model,
+                            record: record,
+                            run: run,
+                            proposal: run.speakerProposal
+                        )
                     } else {
                         RunUnavailableView(
                             record: record,

@@ -4,6 +4,16 @@
 <dict>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
+	<key>%@ The system reported: %@</key>
+	<string>%@ システムからの報告: %@</string>
+	<key>%@ could not be moved because its folder is not writable. Nothing was moved.</key>
+	<string>%@ のフォルダに書き込めないため移動できませんでした。何も移動していません。</string>
+	<key>%@ could not be moved to the Trash, and part of it is in the Trash now. Put it back in the Finder. The recording is still in your library.</key>
+	<string>%@ をゴミ箱に移動できず、一部だけがゴミ箱にあります。Finder の「戻す」で元に戻してください。録音はライブラリに残っています。</string>
+	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
+	<string>%@ をゴミ箱に移動できませんでした。ファイルは元の場所のままで、録音はライブラリに残っています。</string>
+	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
+	<string>%@ はライブラリが想定する場所にないため、何も移動しませんでした。</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%2$@ 中 %1$@ (%3$@)</string>
 	<key>%@ of speech</key>
@@ -234,6 +244,8 @@
 	<string>ピン留めされたモデルをダウンロード…</string>
 	<key>Drop an audio file here</key>
 	<string>ここに音声ファイルをドロップします</string>
+	<key>Duration</key>
+	<string>所要時間</string>
 	<key>Edit Glossary</key>
 	<string>用語集の編集</string>
 	<key>Elapsed</key>
@@ -366,8 +378,8 @@
 	<string>Maccheroni はコマンドライン エンジンからの準備状況レポートを読み取れませんでした。</string>
 	<key>Maccheroni is processing the full recording locally.</key>
 	<string>Maccheroni は完全な録音をローカルで処理しています。</string>
-	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Model removal uses the macOS Trash.</key>
-	<string>Maccheroni は、録音、生のトランスクリプト、または完了した実行アーティファクトを削除したり上書きしたりすることはありません。モデルの削除には macOS のゴミ箱を使用します。</string>
+	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Removing a model or a recording uses the macOS Trash.</key>
+	<string>Maccheroni は、録音、生のトランスクリプト、または完了した実行アーティファクトを削除したり上書きしたりすることはありません。モデルや録音の削除には macOS のゴミ箱を使用します。</string>
 	<key>Maccheroni stopped this run and its record does not name a more specific cause.</key>
 	<string>Maccheroni はこの実行を停止しましたが、記録にはこれ以上具体的な原因が残っていません。</string>
 	<key>Maccheroni will not assign a speaker without acoustic evidence, so this stays as it is.</key>
@@ -392,6 +404,12 @@
 	<string>モデル</string>
 	<key>Move Model to Trash</key>
 	<string>モデルをゴミ箱に移動</string>
+	<key>Move to Trash</key>
+	<string>ゴミ箱に移動</string>
+	<key>Move to Trash…</key>
+	<string>ゴミ箱に移動…</string>
+	<key>Move “%@” to the Trash?</key>
+	<string>「%@」をゴミ箱に移動しますか？</string>
 	<key>New Recording</key>
 	<string>新規録音</string>
 	<key>No</key>
@@ -458,8 +476,6 @@
 	<string>ピークの正規化</string>
 	<key>People</key>
 	<string>人々</string>
-	<key>Pipeline</key>
-	<string>パイプライン</string>
 	<key>Places</key>
 	<string>場所</string>
 	<key>Planned Model</key>
@@ -504,7 +520,7 @@
 	<string>提供された</string>
 	<key>Quantization</key>
 	<string>量子化</string>
-	<key>Reached The Model</key>
+	<key>Reached the Model</key>
 	<string>モデルに届いたか</string>
 	<key>Ready to Transcribe</key>
 	<string>文字起こしの準備ができました</string>
@@ -516,6 +532,8 @@
 	<string>録音</string>
 	<key>Recording %@</key>
 	<string>録音中 %@</string>
+	<key>Recording Name</key>
+	<string>録音の名前</string>
 	<key>Recording Not Found</key>
 	<string>録音が見つかりません</string>
 	<key>Recording SHA-256</key>
@@ -532,14 +550,22 @@
 	<string>取り除く</string>
 	<key>Remove %@</key>
 	<string>取り除く %@</string>
+	<key>Remove from Library</key>
+	<string>ライブラリから削除</string>
 	<key>Remove this segment from the copy selection.</key>
 	<string>このセグメントをコピー対象から外します。</string>
+	<key>Remove “%@” from the library?</key>
+	<string>「%@」をライブラリから削除しますか？</string>
 	<key>Rename Speaker</key>
 	<string>スピーカーの名前を変更する</string>
 	<key>Rename this speaker everywhere in the corrected transcript.</key>
 	<string>修正されたトランスクリプト内のすべての場所で、この発言者の名前を変更します。</string>
 	<key>Rename this speaker everywhere in this transcript.</key>
 	<string>このトランスクリプト内のこの話者名をすべて変更します。</string>
+	<key>Renames this recording in the library only. The audio file and the run folder keep their names.</key>
+	<string>この録音の名前をライブラリ内でのみ変更します。音声ファイルと実行フォルダの名前はそのままです。</string>
+	<key>Rename…</key>
+	<string>名称変更…</string>
 	<key>Request Logs</key>
 	<string>リクエストログ</string>
 	<key>Resolved</key>
@@ -554,14 +580,18 @@
 	<string>Finder で実行を表示</string>
 	<key>Reveal in Finder</key>
 	<string>ファインダーで表示</string>
+	<key>Review</key>
+	<string>要確認</string>
 	<key>Review Profiles</key>
 	<string>プロファイルを確認</string>
 	<key>Review This Segment</key>
 	<string>このセグメントを確認</string>
 	<key>Review Uncertain Transcript</key>
 	<string>不確実な転写を確認する</string>
-	<key>Review what the pipeline was unsure about here.</key>
-	<string>処理が確信を持てなかった点をここで確認します。</string>
+	<key>Review what Maccheroni was unsure about here.</key>
+	<string>Maccheroni が確信を持てなかった点をここで確認します。</string>
+	<key>Reviewed</key>
+	<string>確認済み</string>
 	<key>Revision</key>
 	<string>リビジョン</string>
 	<key>Run</key>
@@ -602,12 +632,14 @@
 	<string>バッチあたりのセグメント数</string>
 	<key>Select this segment for copying.</key>
 	<string>コピー対象にこのセグメントを追加します。</string>
-	<key>Sent To The Model</key>
+	<key>Sent to the Model</key>
 	<string>モデルに送信した内容</string>
 	<key>Service-managed (limit unavailable)</key>
 	<string>サービス管理（上限は利用不可）</string>
 	<key>Settings Could Not Be Loaded</key>
 	<string>設定をロードできませんでした</string>
+	<key>Share</key>
+	<string>割合</string>
 	<key>Show or hide exact run and model details.</key>
 	<string>正確な実行およびモデルの詳細を表示または非表示にします。</string>
 	<key>Show or hide how this run was produced.</key>
@@ -626,10 +658,14 @@
 	<string>ソースセグメント SHA-256</string>
 	<key>Spanish</key>
 	<string>スペイン語</string>
+	<key>Speaker</key>
+	<string>話者</string>
 	<key>Speaker %@</key>
 	<string>話者 %@</string>
 	<key>Speaker Diarization</key>
 	<string>スピーカーのダイアライゼーション</string>
+	<key>Speaker Proposal</key>
+	<string>話者の提案</string>
 	<key>Speaker Separation</key>
 	<string>話者分離</string>
 	<key>Speaker name</key>
@@ -690,6 +726,8 @@
 	<string>用語のリコール</string>
 	<key>Terms</key>
 	<string>用語</string>
+	<key>Text</key>
+	<string>テキスト</string>
 	<key>Text only</key>
 	<string>テキストのみ</string>
 	<key>The Hugging Face %@ command failed (exit %lld): %@</key>
@@ -712,6 +750,8 @@
 	<string>セグメント %lld のエクスポートされたスピーカー名が空です。</string>
 	<key>The exported text is empty for segment %lld.</key>
 	<string>エクスポートされたテキストのセグメント %lld は空です。</string>
+	<key>The files this recording named are no longer on disk, so this removes its library entry and nothing else.</key>
+	<string>この録音のファイルはディスク上にないため、ライブラリの項目だけを削除します。</string>
 	<key>The folder Maccheroni saves recordings and runs in cannot be reached.</key>
 	<string>Maccheroni が録音と実行結果を保存するフォルダにアクセスできません。</string>
 	<key>The glossary for this profile could not be used for this run.</key>
@@ -766,6 +806,8 @@
 	<string>応答した音声モデルがこのプロフィールの固定モデルと一致しないため、その出力は拒否されました。</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>このプロファイルに必要な音声認識モデルがこの Mac にインストールされていません。</string>
+	<key>The top speakers held exactly equal time in this segment.</key>
+	<string>このセグメントでは上位の話者がまったく同じ長さを占めています。</string>
 	<key>The transcript could not be copied.</key>
 	<string>文字起こしをコピーできませんでした。</string>
 	<key>The transcription engine could not start: %@</key>
@@ -780,6 +822,12 @@
 	<string>アクティブな録音はありません。</string>
 	<key>This Run</key>
 	<string>この実行</string>
+	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>実行結果をゴミ箱に移動します。何も削除されず、Finder の「戻す」で元に戻せます。</string>
+	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>
+	<string>元の音声と実行結果をまとめてゴミ箱に移動します。何も削除されず、Finder の「戻す」で元に戻せます。</string>
+	<key>This moves the source audio to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>元の音声をゴミ箱に移動します。何も削除されず、Finder の「戻す」で元に戻せます。</string>
 	<key>This name applies to every %@ segment in corrected exports.</key>
 	<string>この名前は、修正されたエクスポート内のすべての %@ セグメントに適用されます。</string>
 	<key>This name applies to every %@ segment in exports.</key>
@@ -794,20 +842,18 @@
 	<string>この実行は、上限を設けた分割後も MOSS の出力上限に達しました。再試行する前に別のプロファイルを選ぶか、より短いコピーを使用してください。</string>
 	<key>This segment carries no recorded speaker evidence.</key>
 	<string>このセグメントには話者の記録された根拠がありません。</string>
-	<key>This segment was marked uncertain by the pipeline.</key>
-	<string>このセグメントはパイプラインによって不確実とマークされました。</string>
 	<key>This speaker held this much of the segment's speech.</key>
 	<string>このセグメントの発話のうち、この話者が占める割合です。</string>
 	<key>This stage covered only part of the recording.</key>
 	<string>この段階は録音の一部しか処理していません。</string>
 	<key>This stage stopped the run.</key>
 	<string>この段階で実行が停止しました。</string>
+	<key>Time</key>
+	<string>時刻</string>
 	<key>Timeline coverage %@, and this run named a speaker only above %@.</key>
 	<string>タイムラインの被覆率は %@ で、この実行は %@ を超えた場合にのみ話者を特定しました。</string>
 	<key>Timeline coverage %@.</key>
 	<string>タイムラインの被覆率は %@ です。</string>
-	<key>Took</key>
-	<string>所要時間</string>
 	<key>Transcribed</key>
 	<string>文字起こし済み</string>
 	<key>Transcribing</key>
@@ -830,6 +876,8 @@
 	<string>文字起こしのテキストのみ。音声はこの Mac から出ていません。</string>
 	<key>Transcription</key>
 	<string>転写</string>
+	<key>Transcription Backend</key>
+	<string>転写バックエンド</string>
 	<key>Transcription Cancelled</key>
 	<string>転写はキャンセルされました</string>
 	<key>Transcription Failed</key>
@@ -872,10 +920,12 @@
 	<string>ボリュームの状態</string>
 	<key>Wait for the active transcription to finish.</key>
 	<string>アクティブな文字起こしが完了するまで待ちます。</string>
+	<key>Wait for this recording's transcription to finish before moving it to the Trash.</key>
+	<string>この録音の文字起こしが完了してからゴミ箱に移動してください。</string>
 	<key>Wall Time</key>
 	<string>ウォールタイム</string>
-	<key>What The Pipeline Recorded</key>
-	<string>処理が記録した内容</string>
+	<key>What Maccheroni Recorded</key>
+	<string>Maccheroni が記録した内容</string>
 	<key>Who Was Speaking</key>
 	<string>誰が話していたか</string>
 	<key>Wording</key>

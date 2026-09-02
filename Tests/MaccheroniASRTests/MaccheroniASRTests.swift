@@ -550,7 +550,7 @@ import Testing
 
     @Test func vibeVoiceCollapseIsTypedApartAndCarriesTheRecoveredPrefix() async throws {
         let (runtime, scratch) = try fakeVibeVoiceLimitRuntime(
-            stopReason: "repetitionDegeneration",
+            stopReason: "repetitionLooping",
             partialPrefixJSON: vibeVoicePrefixJSON()
         )
         defer { try? FileManager.default.removeItem(at: scratch) }
@@ -568,10 +568,10 @@ import Testing
             maximumTokens: 7
         )
         guard case let .limit(limit) = outcome else {
-            Issue.record("expected a typed VibeVoice degeneration limit")
+            Issue.record("expected a typed VibeVoice looping limit")
             return
         }
-        #expect(limit.stopReason == .repetitionDegeneration)
+        #expect(limit.stopReason == .repetitionLooping)
         #expect(limit.stopReason.isLimitOutcome)
         let prefix = try #require(limit.partialPrefix)
         #expect(prefix.terminalCollapse)
@@ -582,23 +582,23 @@ import Testing
         #expect(prefix.segments.allSatisfy { $0.speaker == "UNASSIGNED" })
         #expect(prefix.segments[0].flags == ["backend_speaker_evidence"])
         #expect(prefix.segments[1].flags == [
-            "backend_speaker_evidence", "repetition_degenerate",
+            "backend_speaker_evidence", "repetition_looping",
         ])
-        await #expect(throws: ASRAdapterError.inferenceLimit(.repetitionDegeneration)) {
+        await #expect(throws: ASRAdapterError.inferenceLimit(.repetitionLooping)) {
             _ = try await adapter.transcribeDetailed(request)
         }
     }
 
-    @Test func vibeVoiceDegenerationWithoutRecoveryEvidenceIsRejected() async throws {
+    @Test func vibeVoiceLoopingWithoutRecoveryEvidenceIsRejected() async throws {
         let (runtime, scratch) = try fakeVibeVoiceLimitRuntime(
-            stopReason: "repetitionDegeneration"
+            stopReason: "repetitionLooping"
         )
         defer { try? FileManager.default.removeItem(at: scratch) }
         let audio = try syntheticAudio(in: scratch)
         let adapter = PinnedASRAdapter(.vibeVoice, runtime: runtime)
 
         await #expect(throws: ASRAdapterError.malformedOutput(
-            "ASR repetition-degeneration outcome carries no recovery evidence"
+            "ASR repetition-looping outcome carries no recovery evidence"
         )) {
             _ = try await adapter.transcribeAttempt(
                 ASRRequest(
@@ -627,7 +627,7 @@ import Testing
         ]
         for (name, prefixJSON) in inconsistent {
             let (runtime, scratch) = try fakeVibeVoiceLimitRuntime(
-                stopReason: "repetitionDegeneration",
+                stopReason: "repetitionLooping",
                 partialPrefixJSON: prefixJSON
             )
             defer { try? FileManager.default.removeItem(at: scratch) }

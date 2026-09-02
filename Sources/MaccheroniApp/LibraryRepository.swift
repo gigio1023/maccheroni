@@ -1,3 +1,4 @@
+import AppKit
 import CryptoKit
 import Foundation
 import MaccheroniCore
@@ -12,6 +13,15 @@ enum LibraryRepositoryError: Error, LocalizedError {
     case derivedManifestInvalid(String)
     case derivedLineageMismatch(String)
     case originalUnavailable
+    /// A file the move to the Trash was about to take is not there any more.
+    /// Raised before anything moves.
+    case trashTargetVanished(String)
+    /// A file's enclosing folder cannot be written, so the Trash could not
+    /// take it. Raised before anything moves.
+    case trashRefused(String)
+    /// The workspace refused or only partly performed the move. `restored`
+    /// says whether whatever did move was put back.
+    case trashFailed(name: String, restored: Bool, detail: String?)
 
     var errorDescription: String? {
         switch self {
@@ -27,9 +37,86 @@ enum LibraryRepositoryError: Error, LocalizedError {
             appString("A derived result does not match its source run: \(identifier)")
         case .originalUnavailable:
             appString("The original audio is not available.")
+        case let .trashTargetVanished(name):
+            appString("\(name) is no longer where the library expects it, so nothing was moved.")
+        case let .trashRefused(name):
+            appString("\(name) could not be moved because its folder is not writable. Nothing was moved.")
+        case let .trashFailed(name, restored, detail):
+            Self.trashFailureSentence(name: name, restored: restored, detail: detail)
         }
     }
+
+    private static func trashFailureSentence(
+        name: String,
+        restored: Bool,
+        detail: String?
+    ) -> String {
+        let head = restored
+            ? appString("\(name) could not be moved to the Trash. Its files are where they were, and the recording is still in your library.")
+            : appString("\(name) could not be moved to the Trash, and part of it is in the Trash now. Put it back in the Finder. The recording is still in your library.")
+        guard let detail, !detail.isEmpty else { return head }
+        return appString("\(head) The system reported: \(detail)")
+    }
 }
+
+/// Which of one recording's own files a move to the Trash would take,
+/// resolved against the disk when the confirmation opens so the sentence a
+/// reader agrees to names what is actually there.
+///
+/// A recording owns its source audio and its run directory and nothing else.
+/// Nothing shared is ever in a plan: not the library index, not the
+/// recordings or runs root, not a glossary, not a model cache.
+struct LibraryTrashPlan: Equatable, Sendable {
+    var recordID: UUID
+    var displayName: String
+    /// The source audio, when it is still where the record says it is.
+    var sourceURL: URL?
+    /// This recording's run directory, when it has one on disk.
+    var runURL: URL?
+
+    init(
+        recordID: UUID,
+        displayName: String,
+        sourceURL: URL? = nil,
+        runURL: URL? = nil
+    ) {
+        self.recordID = recordID
+        self.displayName = displayName
+        self.sourceURL = sourceURL
+        self.runURL = runURL
+    }
+
+    /// What the move would actually touch.
+    var targets: [URL] { [sourceURL, runURL].compactMap { $0 } }
+
+    /// Nothing this record names is on disk any more, so confirming drops the
+    /// library entry and moves no file. Removing an entry that points at
+    /// nothing removes nothing.
+    var movesNothing: Bool { targets.isEmpty }
+}
+
+/// What the workspace reported after being asked to move items to the Trash:
+/// which of them moved, and the failure if one came back.
+///
+/// Both halves are needed. `NSWorkspace.recycle` is not transactional — it can
+/// report a failure and still have moved some of the items — and putting those
+/// back is the only way "together or not at all" can hold.
+struct LibraryRecycleReport: Sendable {
+    /// Original URL to its new location inside the Trash.
+    var moved: [URL: URL]
+    /// The workspace's own message. Carried as text rather than as an error
+    /// value because it crosses a concurrency boundary.
+    var failure: String?
+
+    init(moved: [URL: URL] = [:], failure: String? = nil) {
+        self.moved = moved
+        self.failure = failure
+    }
+}
+
+/// Moves items to the Finder Trash. Injected so a test can drive the refusing
+/// and the partial paths without a real Trash.
+typealias LibraryRecycler = @Sendable ([URL]) async -> LibraryRecycleReport
 
 private enum LibraryStorageAccessError: Error, LocalizedError {
     case configuredBookmarkUnavailable
@@ -44,6 +131,10 @@ private struct VerifiedDerivedResult {
     var manifest: DerivedManifest
     var finishedAt: Date
     var loaded: LoadedRun
+    /// The marked speaker proposal this set carries, on a
+    /// `.speakerProposal` set only. It is never folded into `loaded`: a
+    /// proposal is a layer read beside the transcript, not a transcript.
+    var proposal: SpeakerProposalDocument? = nil
 }
 
 private struct VerifiedArtifactData {
@@ -189,6 +280,7 @@ struct LibraryRepository: Sendable {
     private let invalidRootIDs: Set<String>
     private let bookmarkAccess: LibraryBookmarkAccess
     private let onDerivedArtifactVerified: @Sendable (URL) throws -> Void
+    private let recycler: LibraryRecycler
 
     var indexURL: URL { root.appendingPathComponent("library.json") }
     var requestsRoot: URL { root.appendingPathComponent("Requests", isDirectory: true) }
@@ -203,7 +295,8 @@ struct LibraryRepository: Sendable {
         configuredBookmarksAvailable: Bool = true,
         invalidRootIDs: Set<String> = [],
         bookmarkAccess: LibraryBookmarkAccess = .system,
-        onDerivedArtifactVerified: @escaping @Sendable (URL) throws -> Void = { _ in }
+        onDerivedArtifactVerified: @escaping @Sendable (URL) throws -> Void = { _ in },
+        recycler: @escaping LibraryRecycler = LibraryRepository.workspaceRecycler
     ) {
         let standardizedRoot = root.standardizedFileURL
         self.root = standardizedRoot
@@ -219,6 +312,21 @@ struct LibraryRepository: Sendable {
         self.invalidRootIDs = invalidRootIDs
         self.bookmarkAccess = bookmarkAccess
         self.onDerivedArtifactVerified = onDerivedArtifactVerified
+        self.recycler = recycler
+    }
+
+    /// The real Trash. `NSWorkspace.recycle` reports both what moved and the
+    /// failure, and both are kept: a partial move has to be put back, and a
+    /// wrapper that dropped the moved map on error could not do that.
+    static let workspaceRecycler: LibraryRecycler = { urls in
+        await withCheckedContinuation { continuation in
+            NSWorkspace.shared.recycle(urls) { moved, error in
+                continuation.resume(returning: LibraryRecycleReport(
+                    moved: moved,
+                    failure: error?.localizedDescription
+                ))
+            }
+        }
     }
 
     static var local: LibraryRepository {
@@ -341,6 +449,75 @@ struct LibraryRepository: Sendable {
         } else {
             try FileManager.default.moveItem(at: temporary, to: indexURL)
         }
+    }
+
+    /// What a move to the Trash would take for this record, checked against
+    /// the disk now rather than trusted from the index, so the confirmation
+    /// never promises to move a file that is already gone.
+    func trashPlan(for record: LibraryRecord) -> LibraryTrashPlan {
+        let source = (try? resolveOriginal(for: record)) ?? record.sourceURL
+        let exists = { (url: URL) in FileManager.default.fileExists(atPath: url.path) }
+        return LibraryTrashPlan(
+            recordID: record.id,
+            displayName: record.displayName,
+            sourceURL: exists(source) ? source : nil,
+            runURL: record.runURL.flatMap { exists($0) ? $0 : nil }
+        )
+    }
+
+    /// Moves one recording's own files to the Finder Trash, together or not at
+    /// all.
+    ///
+    /// The Trash rather than a delete, so Finder's Put Back stays the recovery
+    /// path and judgment rule 3 holds: nothing here erases or overwrites an
+    /// original. `NSWorkspace.recycle` offers no transaction, so the move is
+    /// checked before it starts and put back if it still comes back partial.
+    /// A plan that moves nothing succeeds — dropping a library entry whose
+    /// files are already gone removes nothing.
+    func moveToTrash(_ plan: LibraryTrashPlan) async throws {
+        let targets = plan.targets
+        guard !targets.isEmpty else { return }
+        for url in targets {
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw LibraryRepositoryError.trashTargetVanished(url.lastPathComponent)
+            }
+            guard FileManager.default.isWritableFile(
+                atPath: url.deletingLastPathComponent().path
+            ) else {
+                throw LibraryRepositoryError.trashRefused(url.lastPathComponent)
+            }
+        }
+        let report = await recycler(targets)
+        let unmoved = targets.filter { report.moved[$0] == nil }
+        guard unmoved.isEmpty, report.failure == nil else {
+            throw LibraryRepositoryError.trashFailed(
+                name: plan.displayName,
+                restored: putBack(report.moved),
+                detail: report.failure
+            )
+        }
+    }
+
+    /// Best-effort return of a partial move, so a recording's files are never
+    /// left split between the Trash and their folder. Finder's own Put Back
+    /// remains available for whatever this cannot return, which is why the
+    /// outcome is reported rather than swallowed.
+    private func putBack(_ moved: [URL: URL]) -> Bool {
+        var complete = true
+        for (original, trashed) in moved {
+            guard FileManager.default.fileExists(atPath: trashed.path),
+                  !FileManager.default.fileExists(atPath: original.path)
+            else {
+                complete = false
+                continue
+            }
+            do {
+                try FileManager.default.moveItem(at: trashed, to: original)
+            } catch {
+                complete = false
+            }
+        }
+        return complete
     }
 
     func bookmark(for url: URL) throws -> Data {
@@ -521,6 +698,10 @@ struct LibraryRepository: Sendable {
                 }
             }
         } else if postprocessMode == .translation {
+            // Kept before the translated text is written over it. Discarding
+            // it here was the reason the source-language transcript could not
+            // be shown beside a translation.
+            mergedTranscript = transcript
             guard let provenance = manifest.postprocess,
                   let mergedArtifact = manifest.artifacts.first(where: {
                     $0.kind == "merged_segments"
@@ -575,7 +756,8 @@ struct LibraryRepository: Sendable {
             manifest: manifest,
             transcript: transcript,
             conflicts: conflicts,
-            segments: segments
+            segments: segments,
+            sourceTranscript: mergedTranscript
         )
         return try applyingFreshestDerivedResult(
             to: loaded,
@@ -583,7 +765,6 @@ struct LibraryRepository: Sendable {
             canonicalConflicts: canonicalConflicts
         )
     }
-
     private func applyingFreshestDerivedResult(
         to sourceResult: LoadedRun,
         sourceRunURL: URL,
@@ -625,63 +806,164 @@ struct LibraryRepository: Sendable {
         }
         guard !directories.isEmpty else { return sourceResult }
 
-        let verifiedSource = try RunIntegrityVerifier.verifyCompletedRun(at: sourceRunURL)
-        var results: [VerifiedDerivedResult] = []
+        // `verifyMergedRun` rather than `verifyCompletedRun`, per D49. Every
+        // integrity check is identical; the single gate it drops is coverage
+        // completeness, and that gate is reimposed below for the correction and
+        // translation families D39 wrote it for. Without this a run that merely
+        // *had* a derived set beside it failed to open whenever its own ASR
+        // coverage was partial, which is the state the real 20.7-minute
+        // recording is in.
+        let verifiedSource = try RunIntegrityVerifier.verifyMergedRun(at: sourceRunURL)
+        var textResults: [VerifiedDerivedResult] = []
+        var proposalResults: [VerifiedDerivedResult] = []
+        var unreadable: [UnreadableDerivedSet] = []
         for directory in directories {
-            if let result = try loadVerifiedDerivedResult(
+            switch try readDerivedSet(
                 at: directory,
                 source: verifiedSource,
                 canonicalConflicts: canonicalConflicts
             ) {
-                results.append(result)
+            case .skipped:
+                continue
+            case let .unreadable(record):
+                unreadable.append(record)
+            case let .verified(result):
+                switch result.manifest.operation.kind {
+                case .textPostprocess: textResults.append(result)
+                case .speakerProposal: proposalResults.append(result)
+                }
             }
         }
-        results.sort {
-            if $0.finishedAt == $1.finishedAt { return $0.manifest.derivedID > $1.manifest.derivedID }
-            return $0.finishedAt > $1.finishedAt
+        func freshestFirst(
+            _ results: [VerifiedDerivedResult]
+        ) -> [VerifiedDerivedResult] {
+            results.sorted {
+                if $0.finishedAt == $1.finishedAt {
+                    return $0.manifest.derivedID > $1.manifest.derivedID
+                }
+                return $0.finishedAt > $1.finishedAt
+            }
         }
-        guard let freshest = results.first else { return sourceResult }
+        textResults = freshestFirst(textResults)
+        proposalResults = freshestFirst(proposalResults)
+        unreadable.sort { $0.id < $1.id }
 
-        let summaries = results.map { result in
+        // Two selections, not one. D39's "freshest set wins" was written when
+        // every derived set replaced the transcript's text. A speaker proposal
+        // replaces no text, so letting it compete for the same slot would hide
+        // a correction behind a set that corrected nothing. Each family
+        // therefore has its own current member.
+        let currentText = textResults.first
+        let currentProposal = proposalResults.first
+        guard currentText != nil || currentProposal != nil || !unreadable.isEmpty
+        else {
+            return sourceResult
+        }
+
+        let summaries = freshestFirst(textResults + proposalResults).map { result in
             DerivedResultSummary(
                 id: result.manifest.derivedID,
                 createdAt: result.finishedAt,
                 operation: result.manifest.operation.mode,
+                kind: result.manifest.operation.kind,
                 targetLanguage: result.manifest.operation.targetLanguage,
                 glossarySHA256: result.manifest.operation.glossarySHA256,
                 directory: result.directory,
-                isCurrent: result.manifest.derivedID == freshest.manifest.derivedID
+                isCurrent: result.manifest.derivedID == currentText?.manifest.derivedID
+                    || result.manifest.derivedID == currentProposal?.manifest.derivedID,
+                // Counted from the set's own verified document, not from the
+                // layer the transcript ends up showing: only one proposal set
+                // is loaded as a document, and the reader has to tell it from
+                // the one that is not.
+                speakerProposalCounts: result.proposal.map {
+                    SpeakerProposalCounts(
+                        proposed: $0.proposals.count,
+                        declined: $0.declined.count
+                    )
+                }
             )
         }
-        var loaded = freshest.loaded
+        var loaded = currentText?.loaded ?? sourceResult
         loaded.derivedResults = summaries
+        loaded.speakerProposal = currentProposal?.proposal
+        loaded.unreadableDerivedSets = unreadable
         return loaded
     }
 
-    private func loadVerifiedDerivedResult(
+    /// What reading one derived set produced.
+    ///
+    /// Three outcomes, kept distinct on purpose. `.verified` is a set this
+    /// build can read. `.skipped` is a set that never sealed successfully,
+    /// which has always been passed over. `.unreadable` is a set this build
+    /// does not understand: it is reported rather than applied, and it does not
+    /// stop the source run from opening. That last case is why this function
+    /// exists in this shape — an unrecognised derived family used to fail the
+    /// manifest decode and take `loadRun` down with it, so a run that merely
+    /// had a speaker proposal beside it could not be opened at all.
+    private enum DerivedSetReadResult {
+        case verified(VerifiedDerivedResult)
+        case skipped
+        case unreadable(UnreadableDerivedSet)
+    }
+
+    private func readDerivedSet(
         at directory: URL,
         source: VerifiedRunSource,
         canonicalConflicts: [MergeConflict]
-    ) throws -> VerifiedDerivedResult? {
+    ) throws -> DerivedSetReadResult {
         let manifestURL = directory.appendingPathComponent("manifest.json")
+        let manifestData: Data
+        do {
+            manifestData = try Data(contentsOf: manifestURL)
+        } catch {
+            throw LibraryRepositoryError.derivedManifestInvalid(
+                directory.lastPathComponent
+            )
+        }
         let manifest: DerivedManifest
         do {
             manifest = try JSONDecoder().decode(
                 DerivedManifest.self,
-                from: Data(contentsOf: manifestURL)
+                from: manifestData
             )
         } catch {
-            throw LibraryRepositoryError.derivedManifestInvalid(directory.lastPathComponent)
+            // A manifest naming a derived family this build has no case for
+            // fails to decode exactly like a corrupt one. Separating them is
+            // what lets a newer family be reported while a corrupt manifest
+            // still fails loudly.
+            if let kind = unrecognisedDerivedKind(in: manifestData) {
+                return .unreadable(
+                    UnreadableDerivedSet(
+                        id: directory.lastPathComponent,
+                        reason: .unrecognisedKind(kind)
+                    )
+                )
+            }
+            throw LibraryRepositoryError.derivedManifestInvalid(
+                directory.lastPathComponent
+            )
         }
         guard manifest.derivedID == directory.lastPathComponent,
               manifest.schemaVersion == MaccheroniSchema.version
         else {
             throw LibraryRepositoryError.derivedManifestInvalid(directory.lastPathComponent)
         }
-        guard manifest.status == .succeeded, manifest.failure == nil else { return nil }
-        let sourceHashMatches = manifest.operation.mode == .translation
-            ? postprocessSourceHash(manifest) == source.lineage.segmentsSHA256
-            : postprocessSourceHash(manifest) == nil
+        guard manifest.status == .succeeded, manifest.failure == nil else {
+            return .skipped
+        }
+        // A correction rewrites the canonical segments and records no source
+        // hash of its own; a translation and a speaker proposal both read them
+        // and record the hash they read.
+        let expectedPostprocessSourceHash: String? = switch manifest.operation.kind {
+        case .speakerProposal:
+            source.lineage.segmentsSHA256
+        case .textPostprocess:
+            manifest.operation.mode == .translation
+                ? source.lineage.segmentsSHA256
+                : nil
+        }
+        let sourceHashMatches =
+            postprocessSourceHash(manifest) == expectedPostprocessSourceHash
         let glossaryIsConsistent = manifest.operation.glossarySHA256 == nil
             ? manifest.operation.glossaryItemCount == 0
             : manifest.operation.glossaryItemCount > 0
@@ -732,65 +1014,91 @@ struct LibraryRepository: Sendable {
                 root: directory
             )
         }
+        guard let finishedAt = derivedDate(manifest.timing.finishedAt) else {
+            throw LibraryRepositoryError.derivedManifestInvalid(manifest.derivedID)
+        }
 
         var document = source.document
         var conflicts = canonicalConflicts
-        switch manifest.operation.mode {
-        case .correction:
-            guard manifest.artifacts.count == 2,
-                  manifest.operation.targetLanguage == nil,
-                  artifactPaths == [
-                    "postprocess/segments.json",
-                    "postprocess/conflicts.json",
-                  ],
-                  let segmentsArtifact = artifactData["postprocess_segments"],
-                  let conflictsArtifact = artifactData["postprocess_conflicts"]
-            else {
-                throw LibraryRepositoryError.derivedManifestInvalid(manifest.derivedID)
+        var proposal: SpeakerProposalDocument?
+
+        switch manifest.operation.kind {
+        case .textPostprocess:
+            // D49 relaxed the coverage gate for the speaker-proposal family
+            // only. Correction and translation rewrite or mirror every segment,
+            // so a transcript with a hole in it would produce a set claiming
+            // coverage it does not have. They keep the gate, and the same error
+            // `verifyCompletedRun` used to raise for them.
+            guard source.coverageIsComplete else {
+                throw RunIntegrityError.sourceRunNotComplete
             }
-            document = try SegmentsDocumentContract.decode(segmentsArtifact.data)
-            let postprocessConflicts = try JSONDecoder().decode(
-                [PostprocessConflict].self,
-                from: conflictsArtifact.data
-            )
-            try validatePostprocess(
-                document,
-                against: source.document,
-                conflicts: postprocessConflicts,
-                artifactName: segmentsArtifact.url.lastPathComponent
-            )
-            conflicts = merging(postprocessConflicts, into: conflicts)
-        case .translation:
-            guard manifest.artifacts.count == 1,
-                  manifest.operation.targetLanguage?.range(
-                    of: "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
-                    options: .regularExpression
-                  ) != nil,
-                  artifactPaths == ["postprocess/translation.json"],
-                  let translationArtifact = artifactData["postprocess_translation"]
-            else {
-                throw LibraryRepositoryError.derivedManifestInvalid(manifest.derivedID)
+            switch manifest.operation.mode {
+            case .correction:
+                guard manifest.artifacts.count == 2,
+                      manifest.operation.targetLanguage == nil,
+                      artifactPaths == [
+                        "postprocess/segments.json",
+                        "postprocess/conflicts.json",
+                      ],
+                      let segmentsArtifact = artifactData["postprocess_segments"],
+                      let conflictsArtifact = artifactData["postprocess_conflicts"]
+                else {
+                    throw LibraryRepositoryError.derivedManifestInvalid(manifest.derivedID)
+                }
+                document = try SegmentsDocumentContract.decode(segmentsArtifact.data)
+                let postprocessConflicts = try JSONDecoder().decode(
+                    [PostprocessConflict].self,
+                    from: conflictsArtifact.data
+                )
+                try validatePostprocess(
+                    document,
+                    against: source.document,
+                    conflicts: postprocessConflicts,
+                    artifactName: segmentsArtifact.url.lastPathComponent
+                )
+                conflicts = merging(postprocessConflicts, into: conflicts)
+            case .translation:
+                guard manifest.artifacts.count == 1,
+                      manifest.operation.targetLanguage?.range(
+                        of: "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+                        options: .regularExpression
+                      ) != nil,
+                      artifactPaths == ["postprocess/translation.json"],
+                      let translationArtifact = artifactData["postprocess_translation"]
+                else {
+                    throw LibraryRepositoryError.derivedManifestInvalid(manifest.derivedID)
+                }
+                let translation = try JSONDecoder().decode(
+                    TranslationDocument.self,
+                    from: translationArtifact.data
+                )
+                try validateTranslation(
+                    translation,
+                    against: source.document,
+                    provenance: postprocess,
+                    sourceSegmentsSHA256: source.lineage.segmentsSHA256,
+                    artifactName: translationArtifact.url.lastPathComponent
+                )
+                for value in translation.translations {
+                    document.segments[value.segmentIndex].text = value.translatedText
+                }
+                for conflict in conflicts where document.segments.indices.contains(conflict.segmentIndex) {
+                    var flags = document.segments[conflict.segmentIndex].flags ?? []
+                    if !flags.contains("uncertain") { flags.append("uncertain") }
+                    document.segments[conflict.segmentIndex].flags = flags
+                }
+                conflicts.removeAll()
             }
-            let translation = try JSONDecoder().decode(
-                TranslationDocument.self,
-                from: translationArtifact.data
+        case .speakerProposal:
+            // Nothing in `document` or `conflicts` changes: a proposal is a
+            // layer read beside the acoustic record, never written into it.
+            proposal = try verifiedSpeakerProposal(
+                manifest: manifest,
+                artifactPaths: artifactPaths,
+                artifactData: artifactData,
+                source: source,
+                canonicalConflicts: canonicalConflicts
             )
-            try validateTranslation(
-                translation,
-                against: source.document,
-                provenance: postprocess,
-                sourceSegmentsSHA256: source.lineage.segmentsSHA256,
-                artifactName: translationArtifact.url.lastPathComponent
-            )
-            for value in translation.translations {
-                document.segments[value.segmentIndex].text = value.translatedText
-            }
-            for conflict in conflicts where document.segments.indices.contains(conflict.segmentIndex) {
-                var flags = document.segments[conflict.segmentIndex].flags ?? []
-                if !flags.contains("uncertain") { flags.append("uncertain") }
-                document.segments[conflict.segmentIndex].flags = flags
-            }
-            conflicts.removeAll()
         }
 
         let conflictsBySegment = Dictionary(
@@ -808,24 +1116,221 @@ struct LibraryRepository: Sendable {
                 conflict: conflictsBySegment[index]
             )
         }
-        guard let finishedAt = derivedDate(manifest.timing.finishedAt) else {
-            throw LibraryRepositoryError.derivedManifestInvalid(manifest.derivedID)
-        }
-        return VerifiedDerivedResult(
-            directory: directory,
-            manifest: manifest,
-            finishedAt: finishedAt,
-            loaded: LoadedRun(
-                manifest: source.manifest,
-                transcript: document,
-                conflicts: conflicts,
-                segments: segments,
-                resultID: manifest.derivedID,
-                resultPostprocess: postprocess,
-                resultOperation: manifest.operation
+        return .verified(
+            VerifiedDerivedResult(
+                directory: directory,
+                manifest: manifest,
+                finishedAt: finishedAt,
+                loaded: LoadedRun(
+                    manifest: source.manifest,
+                    transcript: document,
+                    conflicts: conflicts,
+                    segments: segments,
+                    sourceTranscript: document == source.document ? nil : source.document,
+                    resultID: manifest.derivedID,
+                    resultPostprocess: postprocess,
+                    resultOperation: manifest.operation
+                ),
+                proposal: proposal
             )
         )
     }
+
+    /// The `operation.kind` of a derived manifest this build cannot decode,
+    /// when an unrecognised kind is the reason it cannot. `nil` for every other
+    /// decoding failure, so only this one cause is read as "newer" rather than
+    /// "broken".
+    private func unrecognisedDerivedKind(in manifestData: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: manifestData),
+              let root = object as? [String: Any],
+              let operation = root["operation"] as? [String: Any],
+              let kind = operation["kind"] as? String,
+              DerivedOperationKind(rawValue: kind) == nil
+        else { return nil }
+        return kind
+    }
+
+    /// The speaker-proposal artifact of a derived set, verified against the
+    /// source run it names (D46, D49, D50).
+    ///
+    /// The artifact hash proves the bytes are the ones the manifest lists. It
+    /// does not prove the manifest and the source run agree, so every check the
+    /// CLI applies while writing a proposal is applied again while reading one.
+    private func verifiedSpeakerProposal(
+        manifest: DerivedManifest,
+        artifactPaths: Set<String>,
+        artifactData: [String: VerifiedArtifactData],
+        source: VerifiedRunSource,
+        canonicalConflicts: [MergeConflict]
+    ) throws -> SpeakerProposalDocument {
+        guard manifest.artifacts.count == 1,
+              manifest.operation.targetLanguage == nil,
+              manifest.operation.glossarySHA256 == nil,
+              manifest.operation.glossaryItemCount == 0,
+              artifactPaths == ["speaker/proposals.json"],
+              let artifact = artifactData["speaker_proposals"]
+        else {
+            throw LibraryRepositoryError.derivedManifestInvalid(manifest.derivedID)
+        }
+        // D49's two conditions, checked rather than assumed: the manifest
+        // records the source coverage the proposal was made over, and that
+        // record is the coverage the source run actually has.
+        guard manifest.operation.sourceCoverage == source.coverage,
+              manifest.operation.sourceCoverageComplete == source.coverageIsComplete
+        else {
+            throw LibraryRepositoryError.derivedLineageMismatch(manifest.derivedID)
+        }
+        let document: SpeakerProposalDocument
+        do {
+            document = try JSONDecoder().decode(
+                SpeakerProposalDocument.self,
+                from: artifact.data
+            )
+        } catch {
+            throw LibraryRepositoryError.derivedManifestInvalid(manifest.derivedID)
+        }
+        guard document.schemaVersion == MaccheroniSchema.version,
+              document.layer == SpeakerProposalDocument.layer,
+              document.sourceSegmentsSHA256 == source.lineage.segmentsSHA256,
+              document.sourceCoverage == source.coverage,
+              document.unattributedSpeakers == UnattributedSpeaker.labels,
+              document.batches.count == manifest.postprocess?.batching?.batchesPlanned
+        else {
+            throw LibraryRepositoryError.derivedLineageMismatch(manifest.derivedID)
+        }
+
+        // Rebuilt from the source run rather than read out of the artifact, so
+        // the proposal is checked against the acoustics rather than against
+        // itself.
+        let expected = speakerEvidenceByIndex(
+            source: source,
+            conflicts: canonicalConflicts
+        )
+        var seen = Set<Int>()
+        let knownSpeakers = Set(source.document.segments.map(\.speaker))
+            .subtracting(UnattributedSpeaker.labels)
+
+        func check(
+            segmentIndex: Int,
+            reason: String,
+            outcome: String,
+            coverage: Double,
+            candidates: [SpeakerCandidateEvidence]
+        ) throws {
+            guard seen.insert(segmentIndex).inserted,
+                  !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  let record = expected[segmentIndex],
+                  record.outcome == outcome,
+                  record.candidates == candidates,
+                  record.timelineCoverage == coverage
+            else {
+                throw LibraryRepositoryError.derivedLineageMismatch(manifest.derivedID)
+            }
+        }
+
+        for proposal in document.proposals {
+            try check(
+                segmentIndex: proposal.segmentIndex,
+                reason: proposal.reason,
+                outcome: proposal.acousticOutcome,
+                coverage: proposal.acousticTimelineCoverage,
+                candidates: proposal.acousticCandidates
+            )
+            // Judgment rule 4 as amended by D46: a proposal completes acoustic
+            // evidence and never replaces it. The segment must still be
+            // unattributed in the source, and the proposed speaker must be one
+            // the acoustics put in play.
+            guard UnattributedSpeaker.isUnattributed(
+                source.document.segments[proposal.segmentIndex].speaker
+            ) else {
+                throw LibraryRepositoryError.derivedLineageMismatch(manifest.derivedID)
+            }
+            let allowed = proposal.acousticCandidates.isEmpty
+                ? knownSpeakers
+                : Set(proposal.acousticCandidates.map(\.speaker))
+            guard allowed.contains(proposal.proposedSpeaker) else {
+                throw LibraryRepositoryError.derivedLineageMismatch(manifest.derivedID)
+            }
+            // D50, enforced only where the document claims to have run under
+            // it. A set written before the constraint existed carries no
+            // `constraint` and is not retroactively judged by it.
+            if document.constraint == .confirmOrDecline {
+                guard SpeakerProposalConstraint.topRankedCandidate(
+                    among: proposal.acousticCandidates
+                ) == proposal.proposedSpeaker else {
+                    throw LibraryRepositoryError.derivedLineageMismatch(manifest.derivedID)
+                }
+            }
+        }
+        for decline in document.declined {
+            try check(
+                segmentIndex: decline.segmentIndex,
+                reason: decline.reason,
+                outcome: decline.acousticOutcome,
+                coverage: decline.acousticTimelineCoverage,
+                candidates: decline.acousticCandidates
+            )
+        }
+        // Exactly once over proposals plus declined, across every segment the
+        // source left unattributed. A proposal set that quietly skipped
+        // segments would read as though they had never been examined.
+        guard seen == Set(expected.keys) else {
+            throw LibraryRepositoryError.derivedLineageMismatch(manifest.derivedID)
+        }
+        return document
+    }
+
+    /// One acoustic evidence record per unattributed segment, rebuilt from the
+    /// source run's merged segments and merged conflicts. This is the same
+    /// derivation the CLI hands a proposer, restated on the reading side.
+    private func speakerEvidenceByIndex(
+        source: VerifiedRunSource,
+        conflicts: [MergeConflict]
+    ) -> [Int: SegmentSpeakerEvidence] {
+        // A segment can raise both an ambiguous-speaker and an
+        // overlapping-speech record carrying the same attribution. The
+        // ambiguous-speaker record is the one that explains why no speaker was
+        // named, so it wins.
+        var attributionByIndex: [Int: SpeakerAttribution] = [:]
+        for conflict in conflicts {
+            guard let attribution = conflict.speakerAttribution else { continue }
+            if conflict.kind == .ambiguousSpeaker
+                || attributionByIndex[conflict.segmentIndex] == nil
+            {
+                attributionByIndex[conflict.segmentIndex] = attribution
+            }
+        }
+        var evidence: [Int: SegmentSpeakerEvidence] = [:]
+        for index in source.document.segments.indices
+            where UnattributedSpeaker.isUnattributed(
+                source.document.segments[index].speaker
+            )
+        {
+            guard let attribution = attributionByIndex[index] else {
+                evidence[index] = SegmentSpeakerEvidence(
+                    segmentIndex: index,
+                    outcome: "no_acoustic_record",
+                    candidates: [],
+                    timelineCoverage: 0
+                )
+                continue
+            }
+            evidence[index] = SegmentSpeakerEvidence(
+                segmentIndex: index,
+                outcome: attribution.outcome.rawValue,
+                candidates: attribution.candidates.map {
+                    SpeakerCandidateEvidence(
+                        speaker: $0.speaker,
+                        overlapS: $0.overlapS,
+                        share: $0.share
+                    )
+                },
+                timelineCoverage: attribution.timelineCoverage
+            )
+        }
+        return evidence
+    }
+
 
     private func postprocessSourceHash(_ manifest: DerivedManifest) -> String? {
         manifest.postprocess?.sourceSegmentsSHA256
@@ -1235,7 +1740,7 @@ struct LibraryRepository: Sendable {
 /// `chunks_completed` can equal `chunks_planned` on a run that never covered
 /// its input (`docs/engineering-constraint-policy.md`, the promotion block).
 /// Nothing in this diagnosis reads a chunk count.
-enum RunDisposition: Hashable, Sendable {
+enum RunCompletionOutcome: Hashable, Sendable {
     case succeeded
     case partial
     case failed
@@ -1252,7 +1757,7 @@ enum RunDisposition: Hashable, Sendable {
 enum RunFailureCause: Hashable, CaseIterable, Sendable {
     /// The decoder stopped producing new content and repeated itself to the
     /// end of its output budget.
-    case repetitionDegeneration
+    case repetitionLooping
     /// A limit outcome on a non-MOSS backend that recovery could not clear.
     case asrLimitExhausted
     /// The MOSS recovery tree was spent. Kept apart because the screen offers
@@ -1288,7 +1793,16 @@ extension RunFailureCause {
     /// a code; they never override one.
     static func classify(code: String, message: String) -> RunFailureCause {
         switch code {
-        case "ASR_REPETITION_DEGENERATION": return .repetitionDegeneration
+        // `ASR_REPETITION_DEGENERATION` is the name this code was written
+        // under before the 2026-09-02 terminology rename to
+        // `ASR_REPETITION_LOOPING`. A run's manifest is sealed when the run
+        // ends and no stage rewrites it (PROJECT.md judgment rule 3), so every
+        // run recorded before that day still carries the old spelling on disk
+        // and always will. The alias is what keeps those runs saying what they
+        // said: without it the screen falls through to `.unspecified`, loses
+        // the sentence naming the cause, and loses the Stopped At row with it.
+        case "ASR_REPETITION_LOOPING", "ASR_REPETITION_DEGENERATION":
+            return .repetitionLooping
         case "ASR_LIMIT_EXHAUSTED": return .asrLimitExhausted
         case "MOSS_LIMIT_EXHAUSTED": return .mossLimitExhausted
         case "SOURCE_INTEGRITY_ERROR": return .integrityMismatch
@@ -1421,7 +1935,7 @@ struct RunCoverageSummary: Equatable, Sendable {
 /// The failure screen's whole input: what happened, where it stopped, how far
 /// the checklist got, and how much audio was transcribed.
 struct RunOutcome: Equatable, Sendable {
-    var disposition: RunDisposition
+    var completion: RunCompletionOutcome
     var cause: RunFailureCause?
     var failedStage: PipelineStage?
     var stageStatuses: [PipelineStage: RunStageStatus]
@@ -1431,8 +1945,8 @@ struct RunOutcome: Equatable, Sendable {
     var detail: String?
 
     var isFailureLike: Bool {
-        disposition == .failed || disposition == .partial
-            || disposition == .unreadable
+        completion == .failed || completion == .partial
+            || completion == .unreadable
     }
 
     func status(of stage: PipelineStage) -> RunStageStatus {
@@ -1467,7 +1981,7 @@ extension RunOutcome {
         switch cause {
         case .audioNotPreparable: .preprocessing
         case .diarizationRejectedTimeline: .diarization
-        case .repetitionDegeneration, .asrLimitExhausted, .mossLimitExhausted,
+        case .repetitionLooping, .asrLimitExhausted, .mossLimitExhausted,
              .asrTimedOut, .asrOutputUnusable, .modelIdentityMismatch:
             .asr
         case .mergeRejected: .merge
@@ -1523,20 +2037,20 @@ extension RunOutcome {
             missingDurationS: partialCoverage?.missingDurationS
         )
 
-        let disposition: RunDisposition = switch manifest.status {
+        let completion: RunCompletionOutcome = switch manifest.status {
         case .succeeded: .succeeded
         case .partial: .partial
         case .canceled: .canceled
         case .failed: .failed
         }
 
-        guard disposition != .succeeded else {
+        guard completion != .succeeded else {
             var statuses: [PipelineStage: RunStageStatus] = [:]
             for stage in stages {
                 statuses[stage] = completed.contains(stage) ? .finished : .notReached
             }
             return RunOutcome(
-                disposition: .succeeded,
+                completion: .succeeded,
                 cause: nil,
                 failedStage: nil,
                 stageStatuses: statuses,
@@ -1546,23 +2060,23 @@ extension RunOutcome {
         }
 
         let cause: RunFailureCause? = manifest.failure.map {
-            classify(disposition: disposition, failure: $0)
+            classify(completion: completion, failure: $0)
         }
         let failedStage = resolveFailedStage(
             cause: cause,
             completed: completed,
             stages: stages,
-            disposition: disposition
+            completion: completion
         )
         let statuses = stageStatuses(
             stages: stages,
             completed: completed,
             failedStage: failedStage,
-            disposition: disposition,
+            completion: completion,
             coverage: coverage
         )
         return RunOutcome(
-            disposition: disposition,
+            completion: completion,
             cause: cause,
             failedStage: failedStage,
             stageStatuses: statuses,
@@ -1572,10 +2086,10 @@ extension RunOutcome {
     }
 
     private static func classify(
-        disposition: RunDisposition,
+        completion: RunCompletionOutcome,
         failure: Failure
     ) -> RunFailureCause {
-        disposition == .canceled
+        completion == .canceled
             ? .canceled
             : RunFailureCause.classify(code: failure.code, message: failure.message)
     }
@@ -1584,9 +2098,9 @@ extension RunOutcome {
         cause: RunFailureCause?,
         completed: Set<PipelineStage>,
         stages: [PipelineStage],
-        disposition: RunDisposition
+        completion: RunCompletionOutcome
     ) -> PipelineStage? {
-        guard disposition != .canceled else { return nil }
+        guard completion != .canceled else { return nil }
         if let cause, let named = namedStage(for: cause), stages.contains(named) {
             return named
         }
@@ -1597,16 +2111,16 @@ extension RunOutcome {
         stages: [PipelineStage],
         completed: Set<PipelineStage>,
         failedStage: PipelineStage?,
-        disposition: RunDisposition,
+        completion: RunCompletionOutcome,
         coverage: RunCoverageSummary?
     ) -> [PipelineStage: RunStageStatus] {
         var statuses: [PipelineStage: RunStageStatus] = [:]
         let failedIndex = failedStage.flatMap { stages.firstIndex(of: $0) }
         for (index, stage) in stages.enumerated() {
             if let failedIndex, index == failedIndex {
-                statuses[stage] = disposition == .partial ? .incomplete : .failed
+                statuses[stage] = completion == .partial ? .incomplete : .failed
             } else if completed.contains(stage) {
-                let short = disposition == .partial
+                let short = completion == .partial
                     && stage == .asr
                     && coverage?.isShortOfInput == true
                 statuses[stage] = short ? .incomplete : .finished
@@ -1631,7 +2145,7 @@ extension RunOutcome {
         // has a known ending. Nothing here should invent a failure for it.
         guard recordState != .cancelled, recordState != .interrupted else {
             return RunOutcome(
-                disposition: .canceled,
+                completion: .canceled,
                 cause: nil,
                 failedStage: nil,
                 stageStatuses: statuses,
@@ -1651,7 +2165,7 @@ extension RunOutcome {
             }
         statuses[.preparing] = .failed
         return RunOutcome(
-            disposition: runDirectoryExists ? .unreadable : .failed,
+            completion: runDirectoryExists ? .unreadable : .failed,
             cause: narrowed
                 ?? (runDirectoryExists ? .unreadableRunRecord : .missingFile),
             failedStage: .preparing,

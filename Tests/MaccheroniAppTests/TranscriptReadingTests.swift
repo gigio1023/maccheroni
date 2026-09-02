@@ -1,7 +1,9 @@
+import AppKit
 import Foundation
 import MaccheroniCore
 import MaccheroniMerge
 import MaccheroniPostprocess
+import SwiftUI
 import Testing
 @testable import MaccheroniApp
 
@@ -130,8 +132,125 @@ struct TranscriptReadingTests {
         #expect(roster.index(of: "0") == 0)
         #expect(roster.index(of: "1") == 1)
         #expect(roster.index(of: SpeakerRoster.unnamed) == nil)
-        #expect(roster.color(for: "0") != roster.color(for: "1"))
+        #expect(
+            AppTheme.Palette.speakerSwatch(atRosterIndex: 0)
+                != AppTheme.Palette.speakerSwatch(atRosterIndex: 1)
+        )
         #expect(roster.color(for: SpeakerRoster.unnamed) == AppTheme.Palette.unattributed)
+    }
+
+    // MARK: Tokens
+
+    /// Every colour a reader reads meets 4.5:1 on both grounds, and the
+    /// grounds are the ones the renders measured: white and #1E1E1E. This
+    /// checks the token table's values; the rendered pixels are checked by the
+    /// offscreen render pass, which is the check of record under D48.
+    @Test
+    func everyInkAndSpeakerColourMeetsTheTextFloorInBothAppearances() {
+        let textSwatches = [
+            AppTheme.Palette.inkSecondarySwatch,
+            AppTheme.Palette.accentSwatch,
+            AppTheme.Palette.openSwatch,
+            AppTheme.Palette.errorSwatch,
+        ] + AppTheme.Palette.speakerSwatches
+
+        #expect(AppTheme.Palette.speakerSwatches.count == 7)
+        for swatch in textSwatches {
+            #expect(WCAG.contrast(swatch.light, against: "#FFFFFF") >= 4.5, "\(swatch.light) on white")
+            #expect(WCAG.contrast(swatch.dark, against: "#1E1E1E") >= 4.5, "\(swatch.dark) on #1E1E1E")
+        }
+        // A speaker keeps its hue across appearances, and no two speakers
+        // share a value in either.
+        #expect(Set(AppTheme.Palette.speakerSwatches.map(\.light)).count == 7)
+        #expect(Set(AppTheme.Palette.speakerSwatches.map(\.dark)).count == 7)
+        // The eighth speaker wraps rather than crashing.
+        #expect(AppTheme.Palette.speakerSwatch(atRosterIndex: 7) == AppTheme.Palette.speakerSwatch(atRosterIndex: 0))
+    }
+
+    @Test
+    func theGutterLeavesTheTextColumnItsMeasure() {
+        let gutter = AppTheme.Layout.gutterWidth
+
+        #expect(Int(gutter) == 14 + 8 + 48 + 8 + 132 + 8 + 76 + 12)
+        #expect(AppTheme.Layout.textWidth(rowWidth: 860 - 48) == 812 - gutter)
+        #expect(AppTheme.Layout.textWidth(rowWidth: 100) == 0)
+        #expect(AppTheme.Radius.control == 4)
+        #expect(AppTheme.Radius.chip == 2)
+    }
+
+    @Test
+    func theReviewChipIsNeutralUnlessAWordingMustBeChosen() {
+        let pending = TranscriptReviewChip.State(needsReview: true, hasWordingToChoose: false)
+        let wording = TranscriptReviewChip.State(needsReview: true, hasWordingToChoose: true)
+        let resolved = TranscriptReviewChip.State(needsReview: false, hasWordingToChoose: true)
+
+        #expect(!pending.isOpen)
+        #expect(wording.isOpen)
+        // A resolved segment is never open, whatever it once offered.
+        #expect(!resolved.isOpen)
+    }
+
+    @Test
+    func onTheRealShapeEveryChipIsNeutralBecauseNoWordingIsInPlay() {
+        let fixture = TranscriptFixtures.meetingShaped()
+        let flagged = fixture.run.segments.filter {
+            TranscriptFlagVocabulary.marksUncertainty($0.segment.flags ?? [])
+        }
+
+        #expect(flagged.count == 192)
+        let open = flagged.count { !TranscriptReviewTarget(item: $0).textAlternatives.isEmpty }
+        #expect(open == 0)
+    }
+
+    /// The density the table was built for, measured by rendering one row the
+    /// way the offscreen harness does. A one-line attributed segment is one
+    /// line tall: 12 + 18 + 12 + 1. An unnamed one adds the figures line and
+    /// the band under the speaker cell and measures 69 on the real run.
+    @Test @MainActor
+    func aOneLineSegmentIsOneLineTallAndAnUnnamedOneStaysCompact() {
+        let fixture = TranscriptFixtures.meetingShaped()
+        let roster = SpeakerRoster(segments: fixture.run.transcript.segments)
+        let rowWidth: CGFloat = 812
+        func height(_ item: TranscriptSegment, isFocused: Bool = false) -> CGFloat {
+            let attribution = SegmentAttributionSummary(item: item)
+            let row = TranscriptSegmentRow(
+                item: item,
+                attribution: attribution,
+                proposal: nil,
+                displaySpeaker: SpeakerRoster.fallbackName(for: item.segment.speaker, locale: Locale(identifier: "en")),
+                speakerName: { SpeakerRoster.fallbackName(for: $0, locale: Locale(identifier: "en")) },
+                speakerColor: { roster.color(for: $0) },
+                text: "One line.",
+                reviewState: TranscriptReviewChip.State(needsReview: true, hasWordingToChoose: false),
+                isFocused: isFocused,
+                isPlaying: false,
+                isSelected: false,
+                isLast: false,
+                play: {},
+                select: {},
+                rename: {},
+                review: {}
+            )
+            let renderer = ImageRenderer(
+                content: row.frame(width: rowWidth).environment(\.locale, Locale(identifier: "en"))
+            )
+            renderer.scale = 1
+            renderer.proposedSize = ProposedViewSize(width: rowWidth, height: nil)
+            return CGFloat(renderer.cgImage?.height ?? 0)
+        }
+        let attributed = try! #require(fixture.run.segments.first { SpeakerRoster.isAttributed($0.segment.speaker) })
+        let unnamed = try! #require(fixture.run.segments.first { !SpeakerRoster.isAttributed($0.segment.speaker) })
+
+        let one = height(attributed)
+        let evidence = height(unnamed)
+        #expect(one > 0)
+        #expect(one <= 44, "attributed one-line row \(one)")
+        #expect(evidence <= 70, "unnamed one-line row \(evidence)")
+        // Focus adds the reason sentence under the text and nothing else —
+        // no box, no padding — so it never shrinks the row and, on a one-line
+        // segment whose gutter is already the taller column, does not grow it.
+        #expect(height(unnamed, isFocused: true) >= evidence)
+        #expect(height(unnamed, isFocused: true) <= evidence + 20)
     }
 
     @Test
@@ -360,7 +479,7 @@ struct TranscriptReadingTests {
     }
 
     @Test
-    func theReviewStepperWalksOnlyUnresolvedSegmentsAndWrapsAtBothEnds() {
+    func theReviewNavigatorWalksOnlyUnresolvedSegmentsAndWrapsAtBothEnds() {
         let queue = [3, 11, 42]
 
         #expect(TranscriptReviewQueue.step(from: nil, in: queue, direction: 1) == 3)
@@ -518,7 +637,7 @@ struct TranscriptReadingTests {
 
     // MARK: The reason sentence stays off the rows
 
-    @Test
+    @Test @MainActor
     func aMissingOutcomeNeverPrintsItsReasonOnEveryRow() {
         // The regression this pins: `nil != .noDominantSpeaker` is true, so a
         // predicate written that way put the sentence back under all 110
@@ -541,7 +660,7 @@ struct TranscriptReadingTests {
         #expect(SpeakerEvidenceBlock.showsReason(for: noRecord, isFocused: true))
     }
 
-    @Test
+    @Test @MainActor
     func theCommonOutcomeStaysOffTheRowsAndTheRareOnesStayOnThem() {
         func summary(_ outcome: SpeakerAttributionOutcome) -> SegmentAttributionSummary {
             SegmentAttributionSummary(
@@ -563,8 +682,8 @@ struct TranscriptReadingTests {
     @Test
     func aTranslationSaysOnceWhyItsRowsCarryNoEvidence() {
         let english = Locale(identifier: "en")
-        let notLoaded = TranscriptEvidenceGap.notLoadedWithTranslation.sentence(locale: english)
-        let noRecord = TranscriptEvidenceGap.someSegmentsHaveNoRecord.sentence(locale: english)
+        let notLoaded = TranscriptMissingEvidence.notLoadedWithTranslation.sentence(locale: english)
+        let noRecord = TranscriptMissingEvidence.someSegmentsHaveNoRecord.sentence(locale: english)
 
         #expect(notLoaded.contains("The source run still has it"))
         #expect(notLoaded != noRecord)
@@ -663,7 +782,9 @@ struct TranscriptReadingTests {
 
     @Test
     func aDeclinedSegmentCannotBeRenderedAsAnAssignment() {
-        let declined = SegmentSpeakerProposal.declined(reason: "Too little context.")
+        let declined = SegmentSpeakerProposal.declined(
+            SegmentSpeakerProposal.Decline(reason: "Too little context.")
+        )
         let proposed = SegmentSpeakerProposal.proposed(
             speaker: "0",
             reason: "Answers the question at 00:31."
@@ -672,6 +793,307 @@ struct TranscriptReadingTests {
         #expect(declined.proposedSpeaker == nil)
         #expect(proposed.proposedSpeaker == "0")
         #expect(declined.reason == "Too little context.")
+    }
+
+    /// P9 found that the view model flattened a decline to its sentence, which
+    /// dropped the three fields D50's constraint writes so a later measurement
+    /// can tell what the constraint did from what the model did. Each is named
+    /// individually, because whole-value equality would still hold if a later
+    /// change dropped one on both sides.
+    @Test
+    func aDeclineCarriesItsCauseTopRankedCandidateAndModelAnswerThroughToTheRow() throws {
+        let fixture = TranscriptFixtures.meetingShaped()
+        let document = TranscriptFixtures.proposalDocument(for: fixture.run)
+        let layer = TranscriptProposalLayer(document: document)
+
+        for record in document.declined {
+            let decline = try #require(
+                layer.proposal(at: record.segmentIndex)?.decline,
+                "segment \(record.segmentIndex)"
+            )
+            #expect(decline.reason == record.reason)
+            #expect(decline.cause == record.cause)
+            #expect(decline.topRankedCandidate == record.topRankedCandidate)
+            #expect(decline.modelAnswer == record.modelAnswer)
+        }
+
+        // Not vacuous: the fixture carries all three causes the real D50 run
+        // produced, a top-ranked candidate on the model's own decline, and a kept model
+        // answer on the two the constraint decided.
+        let causes = Set(document.declined.compactMap(\.cause))
+        #expect(causes == [.modelDeclined, .noTopRankedCandidate, .noAcousticCandidates])
+        #expect(document.declined.contains { $0.topRankedCandidate != nil })
+        #expect(document.declined.contains { $0.modelAnswer != nil })
+    }
+
+    /// The cause reaches the reader as a sentence this app owns, in the
+    /// reader's own language, and only for the two causes the constraint
+    /// decided. No new key was minted for it: both sentences already existed
+    /// for the acoustic outcome that produced the decline.
+    @Test
+    func aDeclinesCauseIsSaidInTheReadersOwnLanguage() {
+        let english = Locale(identifier: "en")
+        let korean = Locale(identifier: "ko")
+        func decline(
+            _ cause: SpeakerProposalDeclineCause?,
+            answer: SpeakerProposalDecision? = nil
+        ) -> SegmentSpeakerProposal.Decline {
+            SegmentSpeakerProposal.Decline(
+                reason: "Declined under confirm-or-decline: … The model also declined: it is unclear.",
+                cause: cause,
+                topRankedCandidate: nil,
+                modelAnswer: answer
+            )
+        }
+        let modelDecline = SpeakerProposalDecision(
+            segmentIndex: 7,
+            proposedSpeaker: "",
+            disposition: .decline,
+            reason: "it is unclear."
+        )
+
+        #expect(
+            decline(.noAcousticCandidates, answer: modelDecline)
+                .sentences(locale: english)
+                == [
+                    "No speaker was active on the speaker timeline during this segment.",
+                    "it is unclear.",
+                ]
+        )
+        #expect(
+            decline(.noTopRankedCandidate, answer: modelDecline)
+                .sentences(locale: english)
+                == [
+                    "No speaker held enough of this segment's speech, so none was named.",
+                    "it is unclear.",
+                ]
+        )
+        // A model decline is the model's own reasoning; the app has nothing to
+        // add and says nothing, which is what tells the two apart on the row.
+        #expect(decline(.modelDeclined).causeSentence(locale: english) == nil)
+        #expect(decline(.noDecision).causeSentence(locale: english) == nil)
+
+        let koreanSentences = decline(.noTopRankedCandidate, answer: modelDecline)
+            .sentences(locale: korean)
+        #expect(koreanSentences[0] == "이 구간 발화를 충분히 차지한 화자가 없어 화자를 정하지 않았습니다.")
+        #expect(koreanSentences[1] == "it is unclear.")
+    }
+
+    /// The case D50 exists to preserve. When the model named somebody the
+    /// constraint refused, the artifact's own sentence names both that speaker
+    /// and the top-ranked candidate, so it is printed whole rather than replaced by
+    /// a sentence that would mention neither.
+    @Test
+    func aPreservedDisagreementKeepsTheSentenceThatNamesBothAnswers() {
+        let english = Locale(identifier: "en")
+        let overturn = "Declined under confirm-or-decline: the language evidence pointed to speaker 1, but the top-ranked candidate is speaker 0 at 56% of the overlapped speech, and a proposal may only confirm that candidate. The model's reason: 1 answers the question."
+        let disagreed = SegmentSpeakerProposal.Decline(
+            reason: overturn,
+            cause: .modelDisagreedWithTopRankedCandidate,
+            topRankedCandidate: "0",
+            modelAnswer: SpeakerProposalDecision(
+                segmentIndex: 12,
+                proposedSpeaker: "1",
+                disposition: .propose,
+                reason: "1 answers the question."
+            )
+        )
+        #expect(disagreed.sentences(locale: english) == [overturn])
+        #expect(disagreed.sentences(locale: english, omittingCause: true) == [overturn])
+
+        // The same holds when the constraint declined for a structural reason
+        // and the model had still named somebody: replacing the sentence would
+        // erase the name the model proposed.
+        let proposedOverTie = SegmentSpeakerProposal.Decline(
+            reason: "Declined under confirm-or-decline: the acoustic candidates 0 and 1 hold equal overlap, so there is no top-ranked candidate to confirm. The model proposed speaker 1: 1 is mid-answer.",
+            cause: .noTopRankedCandidate,
+            topRankedCandidate: nil,
+            modelAnswer: SpeakerProposalDecision(
+                segmentIndex: 13,
+                proposedSpeaker: "1",
+                disposition: .propose,
+                reason: "1 is mid-answer."
+            )
+        )
+        #expect(proposedOverTie.sentences(locale: english) == [proposedOverTie.reason])
+    }
+
+    /// P11b left a tie legible only from two printed percentages, and rounding
+    /// is exactly what hides one. Both records below are real rows of the D50
+    /// set on the 2026-09-01 run: segment 38 is a true tie the constraint
+    /// declined, segment 7 is the model's own decline 73 milliseconds off
+    /// level. They print the same two percentages and must not print the same
+    /// sentence.
+    @Test
+    func anExactTieSaysSoWhereANearTieDoesNot() {
+        let english = Locale(identifier: "en")
+        let korean = Locale(identifier: "ko")
+        let tieSentence = "The top speakers held exactly equal time in this segment."
+        let tie = SegmentSpeakerProposal.Decline(
+            reason: "Declined under confirm-or-decline: the acoustic candidates 0 and 1 hold equal overlap, so there is no top-ranked candidate to confirm. The model also declined: 공동 발화가 동률이라 선두 화자가 없습니다.",
+            cause: .noTopRankedCandidate,
+            topRankedCandidate: nil,
+            modelAnswer: SpeakerProposalDecision(
+                segmentIndex: 38,
+                proposedSpeaker: "",
+                disposition: .decline,
+                reason: "공동 발화가 동률이라 선두 화자가 없습니다."
+            ),
+            candidates: [
+                SpeakerCandidateEvidence(speaker: "0", overlapS: 3.800_000_000_000_011_4, share: 0.5),
+                SpeakerCandidateEvidence(speaker: "1", overlapS: 3.800_000_000_000_011_4, share: 0.5),
+            ]
+        )
+        let nearTie = SegmentSpeakerProposal.Decline(
+            reason: "내용만으로는 발화자를 0으로 확인할 수 없습니다.",
+            cause: .modelDeclined,
+            topRankedCandidate: "0",
+            candidates: [
+                SpeakerCandidateEvidence(
+                    speaker: "0",
+                    overlapS: 11.903_999_999_999_996,
+                    share: 0.501_537_813_355_803_5
+                ),
+                SpeakerCandidateEvidence(
+                    speaker: "1",
+                    overlapS: 11.831_000_000_000_003,
+                    share: 0.498_462_186_644_196_5
+                ),
+            ]
+        )
+
+        // The premise: what the row prints for the two is identical.
+        #expect(
+            SegmentAttributionSummary.percent(tie.candidates[0].share, locale: english)
+                == SegmentAttributionSummary.percent(
+                    nearTie.candidates[0].share,
+                    locale: english
+                )
+        )
+        #expect(tie.holdsEqualOverlap)
+        #expect(!nearTie.holdsEqualOverlap)
+
+        #expect(
+            tie.sentences(locale: english)
+                == [tieSentence, "공동 발화가 동률이라 선두 화자가 없습니다."]
+        )
+        #expect(
+            nearTie.sentences(locale: english)
+                == ["내용만으로는 발화자를 0으로 확인할 수 없습니다."]
+        )
+        #expect(!nearTie.sentences(locale: english).contains(tieSentence))
+        #expect(
+            tie.sentences(locale: korean).first
+                == "이 구간에서 상위 화자들이 정확히 같은 시간을 차지했습니다."
+        )
+
+        // The tie sentence never stands down for the acoustic reason. That
+        // reason names the run's dominant-share bar and is true of all 110
+        // unattributed segments, so it cannot carry the tie.
+        #expect(
+            tie.sentences(locale: english, omittingCause: true)
+                == [tieSentence, "공동 발화가 동률이라 선두 화자가 없습니다."]
+        )
+        #expect(
+            tieSentence != SegmentAttributionSummary(
+                speaker: SpeakerRoster.unnamed,
+                outcome: .noDominantSpeaker,
+                candidates: [],
+                timelineCoverage: 1,
+                thresholds: SpeakerAttributionThresholds(
+                    dominantSpeakerShare: 0.60,
+                    minimumTimelineCoverage: 0.50
+                )
+            ).reason(locale: english)
+        )
+    }
+
+    /// The tie is read off the candidates, so the candidates have to reach the
+    /// row. A `no_top_ranked_candidate` decline that arrived without them would
+    /// silently fall back to the threshold sentence and look correct.
+    @Test
+    func theLayerCarriesTheCandidatesTheTieIsReadFrom() throws {
+        let english = Locale(identifier: "en")
+        let fixture = TranscriptFixtures.meetingShaped()
+        let document = TranscriptFixtures.proposalDocument(for: fixture.run)
+        let layer = TranscriptProposalLayer(document: document)
+
+        for record in document.declined {
+            let decline = try #require(
+                layer.proposal(at: record.segmentIndex)?.decline,
+                "segment \(record.segmentIndex)"
+            )
+            #expect(decline.candidates == record.acousticCandidates)
+        }
+
+        let ties = document.declined.filter { $0.cause == .noTopRankedCandidate }
+        #expect(!ties.isEmpty)
+        for record in ties {
+            let decline = try #require(
+                layer.proposal(at: record.segmentIndex)?.decline
+            )
+            #expect(decline.holdsEqualOverlap, "segment \(record.segmentIndex)")
+            #expect(
+                decline.sentences(locale: english).first
+                    == "The top speakers held exactly equal time in this segment."
+            )
+        }
+    }
+
+    /// An artifact written before the constraint carries no cause, and reads
+    /// exactly as it did before this change: the artifact's own sentence,
+    /// once.
+    @Test
+    func aDeclineWithoutACauseReadsAsItAlwaysDid() {
+        let english = Locale(identifier: "en")
+        let old = SegmentSpeakerProposal.declined(
+            SegmentSpeakerProposal.Decline(
+                reason: "Both speakers are mid-sentence here."
+            )
+        )
+        #expect(old.sentences(locale: english) == ["Both speakers are mid-sentence here."])
+        #expect(
+            old.sentences(locale: english, omittingCause: true)
+                == ["Both speakers are mid-sentence here."]
+        )
+        #expect(old.decline?.cause == nil)
+        #expect(old.decline?.topRankedCandidate == nil)
+        #expect(old.decline?.modelAnswer == nil)
+    }
+
+    /// The row prints the acoustic reason and the proposal's sentences in one
+    /// column, and the cause sentence restates that reason. When the row is
+    /// already printing it, the cause sentence stands down — but the model's
+    /// own words never do, because nothing else on the row carries them.
+    @Test
+    func theCauseSentenceStandsDownWhereTheAcousticReasonAlreadySaysIt() {
+        let english = Locale(identifier: "en")
+        let decline = SegmentSpeakerProposal.Decline(
+            reason: "Declined under confirm-or-decline: no diarization turn overlapped this segment, so there is no top-ranked candidate to confirm. The model also declined: this stretch is silence.",
+            cause: .noAcousticCandidates,
+            topRankedCandidate: nil,
+            modelAnswer: SpeakerProposalDecision(
+                segmentIndex: 9,
+                proposedSpeaker: "",
+                disposition: .decline,
+                reason: "this stretch is silence."
+            )
+        )
+        let full = decline.sentences(locale: english)
+        let trimmed = decline.sentences(locale: english, omittingCause: true)
+
+        #expect(full.count == 2)
+        #expect(trimmed == ["this stretch is silence."])
+        // The sentence that stands down is exactly the one the row's acoustic
+        // reason already prints for this outcome.
+        #expect(
+            full[0] == SegmentAttributionSummary(
+                speaker: SpeakerRoster.unnamed,
+                outcome: .noOverlappingTurn,
+                candidates: [],
+                timelineCoverage: 0
+            ).reason(locale: english)
+        )
     }
 
     @Test
@@ -1023,9 +1445,91 @@ enum TranscriptFixtures {
     /// In memory only. A speaker-proposal derived run is not written to disk
     /// here, because the library repository still rejects that artifact set and
     /// a source run carrying one fails to open at all until that is fixed.
+    static let declineCauses: [SpeakerProposalDeclineCause] = [
+        .modelDeclined, .noTopRankedCandidate, .noAcousticCandidates,
+    ]
+
+    /// The same candidates holding exactly equal overlap, which is the state
+    /// `no_top_ranked_candidate` records: 23 of the 51 declines on the 2026-09-01
+    /// run are this. Equality is on the seconds, not on the percentages the
+    /// row prints, because those round.
+    static func levelled(
+        _ candidates: [SpeakerCandidateEvidence]
+    ) -> [SpeakerCandidateEvidence] {
+        guard !candidates.isEmpty else { return candidates }
+        let count = Double(candidates.count)
+        let each = candidates.reduce(0.0) { $0 + $1.overlapS } / count
+        return candidates.map {
+            SpeakerCandidateEvidence(speaker: $0.speaker, overlapS: each, share: 1 / count)
+        }
+    }
+
+    /// One declined record in the shape the runner writes under
+    /// confirm-or-decline: the model's own words when the model declined, and
+    /// the runner's English restatement plus the model's kept answer when the
+    /// constraint decided before the answer was read.
+    static func decline(
+        at index: Int,
+        cause: SpeakerProposalDeclineCause,
+        outcome: String,
+        coverage: Double,
+        candidates: [SpeakerCandidateEvidence]
+    ) -> SpeakerProposalDecline {
+        let topRanked = SpeakerProposalConstraint.topRankedCandidate(among: candidates)
+        switch cause {
+        case .modelDeclined:
+            return SpeakerProposalDecline(
+                segmentIndex: index,
+                reason: "Both speakers are mid-sentence here and the surrounding turns do not settle it.",
+                acousticOutcome: outcome,
+                acousticTimelineCoverage: coverage,
+                acousticCandidates: candidates,
+                cause: .modelDeclined,
+                topRankedCandidate: topRanked
+            )
+        case .noTopRankedCandidate:
+            // The runner writes this cause only where no top-ranked candidate can be picked
+            // out of the candidates, so the record carries a real tie rather
+            // than whatever the source conflict happened to hold. The tie is
+            // read off these numbers, and a fixture that only *said* tie in
+            // its sentence would have left the tie sentence untested.
+            return SpeakerProposalDecline(
+                segmentIndex: index,
+                reason: "Declined under confirm-or-decline: the acoustic candidates 0 and 1 hold equal overlap, so there is no top-ranked candidate to confirm. The model also declined: the turns are simultaneous.",
+                acousticOutcome: outcome,
+                acousticTimelineCoverage: coverage,
+                acousticCandidates: levelled(candidates),
+                cause: .noTopRankedCandidate,
+                topRankedCandidate: nil,
+                modelAnswer: SpeakerProposalDecision(
+                    segmentIndex: index,
+                    proposedSpeaker: "",
+                    disposition: .decline,
+                    reason: "the turns are simultaneous."
+                )
+            )
+        default:
+            return SpeakerProposalDecline(
+                segmentIndex: index,
+                reason: "Declined under confirm-or-decline: no diarization turn overlapped this segment, so there is no top-ranked candidate to confirm. The model also declined: this stretch is silence.",
+                acousticOutcome: outcome,
+                acousticTimelineCoverage: coverage,
+                acousticCandidates: candidates,
+                cause: .noAcousticCandidates,
+                topRankedCandidate: nil,
+                modelAnswer: SpeakerProposalDecision(
+                    segmentIndex: index,
+                    proposedSpeaker: "",
+                    disposition: .decline,
+                    reason: "this stretch is silence."
+                )
+            )
+        }
+    }
+
     static func proposalDocument(for run: LoadedRun) -> SpeakerProposalDocument {
         var proposals: [SpeakerProposal] = []
-        var declined: [SpeakerProposalDeclination] = []
+        var declined: [SpeakerProposalDecline] = []
         let unattributed = run.segments.filter {
             !SpeakerRoster.isAttributed($0.segment.speaker)
         }
@@ -1043,13 +1547,16 @@ enum TranscriptFixtures {
             // 12 of 110 come back with a reason instead of a speaker, which is
             // roughly the one-in-nine P4 measured.
             if rank % 9 == 4, declined.count < 12 {
+                // The three causes D50's constraint actually produced on the
+                // real run, in the proportion they appeared: a model decline,
+                // a tie with no top-ranked candidate, and a segment nothing overlapped.
                 declined.append(
-                    SpeakerProposalDeclination(
-                        segmentIndex: item.index,
-                        reason: "Both speakers are mid-sentence here and the surrounding turns do not settle it.",
-                        acousticOutcome: outcome,
-                        acousticTimelineCoverage: coverage,
-                        acousticCandidates: candidates
+                    decline(
+                        at: item.index,
+                        cause: Self.declineCauses[declined.count % Self.declineCauses.count],
+                        outcome: outcome,
+                        coverage: coverage,
+                        candidates: candidates
                     )
                 )
             } else {
@@ -1072,7 +1579,7 @@ enum TranscriptFixtures {
                 complete: false,
                 inputDurationS: recordingDurationS,
                 processedDurationS: 1_212.52,
-                message: "promoted 1212.520 s of 1243.080 s; 1 range(s) produced no transcript after repetition degeneration exhausted recovery: [871.552, 902.112) s"
+                message: "promoted 1212.520 s of 1243.080 s; 1 range(s) produced no transcript after repetition looping exhausted recovery: [871.552, 902.112) s"
             ),
             proposals: proposals,
             declined: declined,
@@ -1153,4 +1660,24 @@ private final class InertRecorder: RecordingControlling {
     }
 
     func cancel() async {}
+}
+
+/// WCAG 2.x relative luminance and contrast ratio, for the token table.
+enum WCAG {
+    static func contrast(_ hex: String, against ground: String) -> Double {
+        let a = luminance(hex)
+        let b = luminance(ground)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    private static func luminance(_ hex: String) -> Double {
+        let color = NSColor(hex: hex)
+        func channel(_ value: CGFloat) -> Double {
+            let v = Double(value)
+            return v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel(color.redComponent)
+            + 0.7152 * channel(color.greenComponent)
+            + 0.0722 * channel(color.blueComponent)
+    }
 }

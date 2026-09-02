@@ -81,7 +81,7 @@ struct TranscriptView: View {
 
     /// Why unnamed rows carry no evidence, when that is true of them as a
     /// group. `nil` when every unnamed segment has its candidates.
-    private var evidenceGap: TranscriptEvidenceGap? {
+    private var missingEvidence: TranscriptMissingEvidence? {
         let unnamed = run.segments.filter { !SpeakerRoster.isAttributed($0.segment.speaker) }
         guard !unnamed.isEmpty else { return nil }
         if isTranslation { return .notLoadedWithTranslation }
@@ -96,7 +96,9 @@ struct TranscriptView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
+            // The boundary between the two grammars: product UI above it, the
+            // editorial table below.
+            AppHairline()
             segmentList
         }
         .navigationTitle(record.displayName)
@@ -266,7 +268,7 @@ struct TranscriptView: View {
                 reviewQueue: reviewQueue,
                 focusedSegmentIndex: focusedSegmentIndex,
                 step: { step($0) },
-                evidenceGap: evidenceGap,
+                missingEvidence: missingEvidence,
                 playback: playback,
                 totalDurationS: max(record.durationS, run.manifest.coverage.inputDurationS),
                 togglePlayback: {
@@ -286,7 +288,7 @@ struct TranscriptView: View {
                         : "checkmark.circle.fill"
                 )
                 .font(AppTheme.Typography.meta)
-                .foregroundStyle(copyFeedback.isError ? Color.red : Color.secondary)
+                .foregroundStyle(copyFeedback.isError ? AppTheme.Palette.error : AppTheme.Palette.inkSecondary)
                 .transition(.opacity)
             }
             postprocessStatus
@@ -296,9 +298,10 @@ struct TranscriptView: View {
         // chrome over a centred column put 261 points between the layer bar and
         // the first segment it switches, and a reader crosses that on every
         // pass down the page.
-        .frame(maxWidth: 860, alignment: .leading)
+        .frame(maxWidth: AppTheme.Layout.measure, alignment: .leading)
         .padding(.horizontal, AppTheme.Spacing.screen)
-        .padding(.vertical, AppTheme.Spacing.large)
+        .padding(.top, AppTheme.Spacing.large)
+        .padding(.bottom, AppTheme.Spacing.medium)
         .frame(maxWidth: .infinity)
     }
 
@@ -320,7 +323,7 @@ struct TranscriptView: View {
                 ProgressView().controlSize(.small)
                 Text(PostprocessOperationChoice(active.operation).title)
                 if let modelID = active.progress.modelID {
-                    Text(verbatim: modelID).foregroundStyle(.secondary)
+                    Text(verbatim: modelID).foregroundStyle(AppTheme.Palette.inkSecondary)
                 }
                 Button(appLocalized("Cancel"), role: .cancel) {
                     model.cancelTranscription()
@@ -330,7 +333,7 @@ struct TranscriptView: View {
         } else if let failure = model.existingRunPostprocessFailure(for: record.id) {
             Label(failure, systemImage: "exclamationmark.triangle.fill")
                 .font(AppTheme.Typography.meta)
-                .foregroundStyle(.red)
+                .foregroundStyle(AppTheme.Palette.error)
                 .textSelection(.enabled)
         }
     }
@@ -712,7 +715,7 @@ struct SegmentAttributionSummary: Equatable, Sendable {
 /// Why the rows below carry no acoustic evidence, said once above them rather
 /// than repeated on each. Both cases are ordinary states of a loaded run, not
 /// errors, so this reads as a note and not as a warning.
-enum TranscriptEvidenceGap: Equatable, Sendable {
+enum TranscriptMissingEvidence: Equatable, Sendable {
     /// A translation result replaces the text and drops the conflicts the
     /// evidence rides on. Nothing is lost on disk.
     case notLoadedWithTranslation
@@ -748,17 +751,171 @@ enum TranscriptEvidenceGap: Equatable, Sendable {
 /// are different kinds of claim, judgment rule 4 turns on keeping them apart,
 /// and one type holding both is how they stop being apart.
 enum SegmentSpeakerProposal: Equatable, Sendable {
+    /// Everything the layer recorded about one declined segment.
+    ///
+    /// A decline used to arrive here as a bare sentence, which threw away the
+    /// three fields D50's constraint writes precisely so a later measurement
+    /// can tell what the constraint did from what the model did: the
+    /// machine-readable `cause`, the `topRankedCandidate` the model was asked to
+    /// confirm, and the model's own `modelAnswer` whenever the constraint
+    /// rather than the model decided the outcome.
+    struct Decline: Equatable, Sendable {
+        /// The sentence the artifact carries. On a decline the constraint
+        /// made, this is the runner's own English wording; on a decline the
+        /// model made, it is the model's words in the transcript's language.
+        var reason: String
+        /// Absent on artifacts written before the confirm-or-decline
+        /// constraint of 2026-09-02, which is why every reading of it treats
+        /// `nil` as "say what the artifact said and nothing more".
+        var cause: SpeakerProposalDeclineCause? = nil
+        /// The top-ranked candidate the model was asked to confirm, when one
+        /// existed. Not printed again: it is already the top row of the
+        /// segment's share figures, by name and by share.
+        var topRankedCandidate: String? = nil
+        /// The model's own decision when the constraint, not the model,
+        /// decided. A disagreement lives here and must survive to the reader.
+        var modelAnswer: SpeakerProposalDecision? = nil
+        /// The acoustic candidates this decline was measured against, carried
+        /// so the sentence can tell an exact tie from a near one. Empty on
+        /// artifacts written before the constraint, and on the cause that has
+        /// no candidates at all.
+        var candidates: [SpeakerCandidateEvidence] = []
+
+        /// True when the model's own decline adds nothing this app's cause
+        /// sentence does not already say, so printing both says one fact
+        /// twice.
+        ///
+        /// It is exactly the no-candidates case, and for a structural reason
+        /// rather than by comparing wordings: with no acoustic candidates the
+        /// model was never asked to confirm anybody, so its decline can only
+        /// restate that the segment has no speaker. The rendered rows say it
+        /// plainly — "No speaker was active on the speaker timeline during
+        /// this segment." followed by "The segment is silence and has no
+        /// top-ranked candidate to confirm.", both in English, both the same
+        /// fact. A tie is the opposite case and never folds: there the model
+        /// was asked about a real pair of candidates and its answer is the
+        /// evidence P11b kept.
+        var modelRestatesCause: Bool {
+            cause == .noAcousticCandidates && modelAnswer?.disposition == .decline
+        }
+
+        /// True when the top candidates hold the same overlap and no top-ranked candidate
+        /// can be picked out of them.
+        ///
+        /// This asks the proposer's own rule rather than restating it, so the
+        /// row can never call a tie the artifact did not, or miss one it did:
+        /// `topRankedCandidate(among:)` returns a speaker only when exactly one
+        /// candidate is within a nanosecond of the largest overlap, and `nil`
+        /// otherwise. The comparison is on the overlapped seconds the merger
+        /// measured, never on the percentages the row prints — those round,
+        /// and rounding is what hides a tie. On the 2026-09-01 run a model
+        /// decline at 0.5015 / 0.4985 and a true tie at 0.5000 / 0.5000 both
+        /// print as 50 % / 50 %.
+        var holdsEqualOverlap: Bool {
+            !candidates.isEmpty
+                && SpeakerProposalConstraint.topRankedCandidate(among: candidates) == nil
+        }
+
+        /// What this app can say in the reader's own language about why no
+        /// speaker was proposed, or `nil` when only the artifact's sentence
+        /// says it.
+        ///
+        /// Every sentence here already exists for the acoustic outcome that
+        /// caused the decline, except the tie, which had no wording anywhere:
+        /// a segment with no overlapping turn had no speaker active on the
+        /// timeline, and a segment whose top candidates hold equal overlap had
+        /// no speaker holding enough of the speech. The three causes that are
+        /// the *model's* answer rather than the constraint's rule get no
+        /// sentence, because the artifact's own wording is the model's
+        /// reasoning and no app sentence can stand in for it.
+        func causeSentence(locale: Locale? = nil) -> String? {
+            switch cause {
+            case .noAcousticCandidates:
+                appString(
+                    "No speaker was active on the speaker timeline during this segment.",
+                    locale: locale
+                )
+            case .noTopRankedCandidate where holdsEqualOverlap:
+                // The tie said as a tie. Nothing else on the row says it: the
+                // shares round to 50 % / 50 % and the threshold sentence
+                // below is true of every unattributed segment.
+                appString(
+                    "The top speakers held exactly equal time in this segment.",
+                    locale: locale
+                )
+            case .noTopRankedCandidate:
+                appString(
+                    "No speaker held enough of this segment's speech, so none was named.",
+                    locale: locale
+                )
+            case .modelDisagreedWithTopRankedCandidate, .modelDeclined, .noDecision, .none:
+                nil
+            }
+        }
+
+        /// The sentences that print under the segment's text, in order.
+        ///
+        /// When the constraint declined and the model declined too, the
+        /// artifact's sentence is the runner's English restatement of the
+        /// cause followed by the model's words; this app can say the first
+        /// half itself, so it does and keeps only the model's half verbatim.
+        /// When the model *proposed* somebody the constraint refused, the
+        /// artifact's sentence names both that speaker and the top-ranked candidate, and it
+        /// is kept whole — that disagreement is the evidence D50 exists to
+        /// preserve, and it is deliberately carried as a sentence rather than
+        /// as a name with a dot, which would put a non-acoustic answer beside
+        /// the acoustic candidates as if it were one of them.
+        ///
+        /// `omittingCause` is for a row that is already printing the acoustic
+        /// reason the cause sentence restates. See
+        /// `TranscriptSegmentRow.proposalSentences`. A tie's sentence is the
+        /// exception and never stands down: the acoustic reason it would defer
+        /// to names the run's dominant-share bar, which is true of all 110
+        /// unattributed segments, and says nothing about two candidates being
+        /// exactly level. Standing down there would put the fact back where
+        /// P11b found it, legible only from two rounded percentages that are
+        /// equal for a near-tie too.
+        func sentences(locale: Locale? = nil, omittingCause: Bool = false) -> [String] {
+            guard let cause = causeSentence(locale: locale),
+                  let answer = modelAnswer,
+                  answer.disposition == .decline,
+                  !answer.reason.isEmpty
+            else { return [reason] }
+            let omit = omittingCause && !holdsEqualOverlap
+            return omit ? [answer.reason] : [cause, answer.reason]
+        }
+    }
+
     case proposed(speaker: String, reason: String)
-    case declined(reason: String)
+    case declined(Decline)
 
     var proposedSpeaker: String? {
         if case let .proposed(speaker, _) = self { return speaker }
         return nil
     }
 
+    var decline: Decline? {
+        if case let .declined(decline) = self { return decline }
+        return nil
+    }
+
+    /// The artifact's own sentence, whichever state this is.
     var reason: String {
         switch self {
-        case let .proposed(_, reason), let .declined(reason): reason
+        case let .proposed(_, reason): reason
+        case let .declined(decline): decline.reason
+        }
+    }
+
+    /// What prints under the segment's text. A proposal has only the
+    /// proposer's reason; a decline may have the cause in this app's words
+    /// first. See `Decline.sentences(locale:omittingCause:)`.
+    func sentences(locale: Locale? = nil, omittingCause: Bool = false) -> [String] {
+        switch self {
+        case let .proposed(_, reason):
+            [reason]
+        case let .declined(decline):
+            decline.sentences(locale: locale, omittingCause: omittingCause)
         }
     }
 }
@@ -791,12 +948,20 @@ struct TranscriptProposalLayer: Equatable, Sendable {
                 candidates: proposal.acousticCandidates
             )
         }
-        for declination in document.declined {
-            proposals[declination.segmentIndex] = .declined(reason: declination.reason)
-            evidence[declination.segmentIndex] = InlineEvidence(
-                outcome: declination.acousticOutcome,
-                timelineCoverage: declination.acousticTimelineCoverage,
-                candidates: declination.acousticCandidates
+        for decline in document.declined {
+            proposals[decline.segmentIndex] = .declined(
+                SegmentSpeakerProposal.Decline(
+                    reason: decline.reason,
+                    cause: decline.cause,
+                    topRankedCandidate: decline.topRankedCandidate,
+                    modelAnswer: decline.modelAnswer,
+                    candidates: decline.acousticCandidates
+                )
+            )
+            evidence[decline.segmentIndex] = InlineEvidence(
+                outcome: decline.acousticOutcome,
+                timelineCoverage: decline.acousticTimelineCoverage,
+                candidates: decline.acousticCandidates
             )
         }
         bySegment = proposals
@@ -915,7 +1080,7 @@ struct TranscriptReviewTarget: Equatable, Sendable {
 
 // MARK: - Review queue
 
-/// Where the review stepper goes next. The count of unresolved segments is a
+/// Where the review navigator goes next. The count of unresolved segments is a
 /// control rather than a label, so this decides what the control does: it walks
 /// only unresolved segments, in transcript order, and wraps at both ends.
 enum TranscriptReviewQueue {
@@ -1221,10 +1386,25 @@ private struct TranscriptCopyFeedback: Equatable {
 // yellow placeholder glyph. So the scrolling parts of this screen are split
 // into views that can be rendered on their own, and every control here uses
 // `.plain`.
+//
+// Two grammars, one boundary. Everything in this section is product UI: a
+// control may carry a hairline border and the displayed tab an accent
+// underline. The row list further down is an editorial table and has none of
+// that. `AppHairline` is the rule between them.
+
+/// A one-point rule in the hairline colour.
+struct AppHairline: View {
+    var body: some View {
+        Rectangle()
+            .fill(AppTheme.Palette.hairline)
+            .frame(height: 1)
+            .accessibilityHidden(true)
+    }
+}
 
 /// Everything above the transcript that changes what the transcript shows:
 /// what this recording is, which layer, what is searched, where the review
-/// stepper is, and where the playhead is.
+/// navigator is, and where the playhead is.
 struct TranscriptHeaderBar: View {
     let title: String
     let summary: String
@@ -1237,7 +1417,7 @@ struct TranscriptHeaderBar: View {
     let focusedSegmentIndex: Int?
     let step: (Int) -> Void
     /// Stated once here rather than under every unnamed row.
-    var evidenceGap: TranscriptEvidenceGap?
+    var missingEvidence: TranscriptMissingEvidence?
     let playback: TranscriptPlaybackController
     let totalDurationS: Double
     let togglePlayback: () -> Void
@@ -1246,41 +1426,44 @@ struct TranscriptHeaderBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.medium) {
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: AppTheme.Spacing.large) {
+                HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.large) {
                     titleBlock
                     Spacer(minLength: AppTheme.Spacing.large)
                     transport
                 }
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.medium) {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.small) {
                     titleBlock
                     transport
                 }
             }
 
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: AppTheme.Spacing.medium) {
+                HStack(alignment: .center, spacing: AppTheme.Spacing.large) {
                     layerBar
-                    Spacer(minLength: AppTheme.Spacing.small)
-                    stepper
+                    searchField
+                        .frame(minWidth: 220)
+                    reviewNavigator
                 }
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.small) {
-                    layerBar
-                    stepper
+                    HStack(spacing: AppTheme.Spacing.large) {
+                        layerBar
+                        Spacer(minLength: AppTheme.Spacing.small)
+                        reviewNavigator
+                    }
+                    searchField
                 }
             }
 
-            if let evidenceGap {
+            if let missingEvidence {
                 Label {
-                    Text(verbatim: evidenceGap.sentence())
+                    Text(verbatim: missingEvidence.sentence())
                 } icon: {
                     Image(systemName: "questionmark.circle")
                 }
                 .font(AppTheme.Typography.meta)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
-
-            TranscriptSearchField(text: $searchText, matchCount: matchCount)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1292,7 +1475,7 @@ struct TranscriptHeaderBar: View {
                 .lineLimit(2)
             Text(verbatim: summary)
                 .font(AppTheme.Typography.meta)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1305,8 +1488,12 @@ struct TranscriptHeaderBar: View {
         )
     }
 
-    private var stepper: some View {
-        TranscriptReviewStepper(
+    private var searchField: some View {
+        TranscriptSearchField(text: $searchText, matchCount: matchCount)
+    }
+
+    private var reviewNavigator: some View {
+        TranscriptReviewNavigator(
             queue: reviewQueue,
             focused: focusedSegmentIndex,
             step: step
@@ -1322,6 +1509,313 @@ struct TranscriptHeaderBar: View {
         )
     }
 }
+
+/// Four text tabs, always all four. The displayed layer is semibold with an
+/// accent underline; an available one is regular; one this run cannot show is
+/// the secondary ink, disabled, and says why. No fill, no pill: the bar is
+/// where a reader learns what the product can produce, and it should read as
+/// a list of names rather than as a control that hides three of them.
+struct TranscriptLayerBar: View {
+    let options: [TranscriptLayerOption]
+    let selection: TranscriptDisplayLayer
+    let select: (TranscriptDisplayLayer) -> Void
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.large) {
+            ForEach(options) { option in
+                if option.isAvailable {
+                    Button {
+                        select(option.layer)
+                    } label: {
+                        tab(option)
+                    }
+                    .buttonStyle(.plain)
+                    .help(appString("Show this layer of the transcript."))
+                    .accessibilityLabel(Text(option.layer.title))
+                    .accessibilityAddTraits(option.layer == selection ? [.isSelected] : [])
+                } else {
+                    // Not a disabled button. `.disabled` dims the label on top
+                    // of the declared colour, which took the unavailable tabs
+                    // to 1.98:1 in light and 2.95:1 in dark on the rendered
+                    // pixels — the bar a reader learns the product's
+                    // capabilities from was the least legible thing on it.
+                    // A layer this run cannot show is a name, not a control
+                    // that refuses to work, so it is drawn as one and keeps
+                    // the secondary ink it declares.
+                    tab(option)
+                        .help(option.unavailability?.sentence() ?? "")
+                        .accessibilityElement()
+                        .accessibilityLabel(Text(option.layer.title))
+                        .accessibilityHint(Text(verbatim: option.unavailability?.sentence() ?? ""))
+                }
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func tab(_ option: TranscriptLayerOption) -> some View {
+        Text(option.layer.title)
+            .font(option.layer == selection
+                ? AppTheme.Typography.speaker
+                : Font.system(size: 13))
+            .foregroundStyle(option.isAvailable
+                ? AppTheme.Palette.ink
+                : AppTheme.Palette.inkSecondary)
+            .padding(.vertical, 5)
+            .overlay(alignment: .bottom) {
+                if option.layer == selection {
+                    Rectangle()
+                        .fill(AppTheme.Palette.accent)
+                        .frame(height: 2)
+                }
+            }
+            .contentShape(.rect)
+    }
+}
+
+struct TranscriptSearchField: View {
+    @Binding var text: String
+    let matchCount: Int?
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.small) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
+                .accessibilityHidden(true)
+            TextField(appLocalized("Search this transcript"), text: $text)
+                .textFieldStyle(.plain)
+                .font(Font.system(size: 13))
+            if let matchCount {
+                Text(appLocalized("\(matchCount) matching"))
+                    .font(AppTheme.Typography.meta)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
+                    .monospacedDigit()
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
+                .accessibilityLabel(appLocalized("Clear the search"))
+            }
+        }
+        .padding(.horizontal, AppTheme.Spacing.small)
+        .padding(.vertical, 5)
+        .overlay {
+            RoundedRectangle(cornerRadius: AppTheme.Radius.control)
+                .strokeBorder(AppTheme.Palette.controlBorder, lineWidth: 1)
+        }
+    }
+}
+
+/// The unresolved count as a control. The flag beside it is the one place on
+/// the screen where the open colour marks the reader's open work as a whole.
+struct TranscriptReviewNavigator: View {
+    let queue: [Int]
+    let focused: Int?
+    let step: (Int) -> Void
+
+    private var position: Int? {
+        guard let focused else { return nil }
+        return queue.firstIndex(of: focused).map { $0 + 1 }
+    }
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.small) {
+            Image(systemName: queue.isEmpty ? "checkmark" : "flag")
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(queue.isEmpty ? AppTheme.Palette.inkSecondary : AppTheme.Palette.open)
+                .accessibilityHidden(true)
+            Text(label)
+                .font(AppTheme.Typography.metaStrong)
+                .monospacedDigit()
+            StepButton(glyph: "chevron.up", action: { step(-1) })
+                .accessibilityLabel(appLocalized("Go to the previous segment to review"))
+            StepButton(glyph: "chevron.down", action: { step(1) })
+                .accessibilityLabel(appLocalized("Go to the next segment to review"))
+        }
+        .disabled(queue.isEmpty)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var label: LocalizedStringResource {
+        guard !queue.isEmpty else { return appLocalized("Nothing left to review") }
+        guard let position else { return appLocalized("\(queue.count) to review") }
+        return appLocalized("\(position) of \(queue.count) to review")
+    }
+}
+
+/// A square glyph button at the control radius, bordered in the control-border
+/// token: the stroke is the whole visual claim that this is operable, so it is
+/// not drawn in the decorative hairline.
+struct StepButton: View {
+    let glyph: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: glyph)
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 22, height: 22)
+                .overlay {
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.control)
+                        .strokeBorder(AppTheme.Palette.controlBorder, lineWidth: 1)
+                }
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct TranscriptTransport: View {
+    let playback: TranscriptPlaybackController
+    let totalDurationS: Double
+    let toggle: () -> Void
+    let seek: (Double) -> Void
+
+    var body: some View {
+        HStack(spacing: AppTheme.Spacing.medium) {
+            Button(action: toggle) {
+                Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 13))
+                    .frame(width: 22, height: 22)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: AppTheme.Radius.control)
+                            .strokeBorder(AppTheme.Palette.controlBorder, lineWidth: 1)
+                    }
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(playback.isPlaying
+                ? appLocalized("Pause playback")
+                : appLocalized("Play the recording"))
+
+            Text(verbatim: TranscriptPlaybackTimeline.clock(playback.positionS))
+                .font(AppTheme.Typography.metaStrong)
+                .monospacedDigit()
+
+            TranscriptPlayhead(
+                positionS: playback.positionS,
+                totalDurationS: totalDurationS,
+                seek: seek
+            )
+
+            Text(verbatim: TranscriptPlaybackTimeline.clock(totalDurationS))
+                .font(AppTheme.Typography.meta)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
+                .monospacedDigit()
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+/// Where you are in the recording, drawn from the tokens.
+///
+/// This was a system `Slider` until it was rendered for the first time. Its
+/// knob is `#FAFAFA` and takes no tint, so at the position the screen opens on
+/// it measured **1.04:1 against the page and 1.14:1 against its own track** in
+/// the light appearance: the one control that says where you are was the least
+/// visible thing in the header, and only became legible once the value moved
+/// far enough for the system's blue leading fill to appear. The knob here is
+/// the accent at 6.4:1 light and 8.0:1 dark from the first frame, with a
+/// page-coloured ring so it stays separate from its own fill.
+struct TranscriptPlayhead: View {
+    let positionS: Double
+    let totalDurationS: Double
+    let seek: (Double) -> Void
+
+    private let trackHeight: CGFloat = 4
+    private let knobDiameter: CGFloat = 12
+
+    private var total: Double { max(totalDurationS, 1) }
+
+    private var fraction: CGFloat {
+        CGFloat(min(max(positionS, 0), total) / total)
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let travel = max(0, geometry.size.width - knobDiameter)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(AppTheme.Palette.hairline)
+                    .frame(height: trackHeight)
+                Capsule()
+                    .fill(AppTheme.Palette.accent)
+                    .frame(width: knobDiameter / 2 + travel * fraction, height: trackHeight)
+                Circle()
+                    .fill(AppTheme.Palette.accent)
+                    .overlay {
+                        Circle().strokeBorder(AppTheme.Palette.ground, lineWidth: 1.5)
+                    }
+                    .frame(width: knobDiameter, height: knobDiameter)
+                    .offset(x: travel * fraction)
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(.rect)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        guard travel > 0 else { return }
+                        let x = min(max(value.location.x - knobDiameter / 2, 0), travel)
+                        seek(Double(x / travel) * total)
+                    }
+            )
+        }
+        .frame(minWidth: 120, idealWidth: 200, maxWidth: 260)
+        .frame(height: knobDiameter)
+        .accessibilityElement()
+        .accessibilityLabel(appLocalized("Playhead"))
+        .accessibilityValue(Text(verbatim: TranscriptPlaybackTimeline.clock(positionS)))
+        .accessibilityAdjustableAction { direction in
+            let step = max(total / 20, 1)
+            switch direction {
+            case .increment: seek(min(positionS + step, total))
+            case .decrement: seek(max(positionS - step, 0))
+            @unknown default: break
+            }
+        }
+    }
+}
+
+/// What the proposal layer is standing on. A proposal over a transcript with a
+/// hole in it must say so where the proposals are, not in a manifest.
+struct ProposalLayerNotice: View {
+    let layer: TranscriptProposalLayer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.tight) {
+            Label {
+                Text(appLocalized("\(layer.proposedCount) proposed, \(layer.declinedCount) declined. Not acoustic evidence, and not measured."))
+            } icon: {
+                Image(systemName: "questionmark.bubble")
+            }
+            .font(AppTheme.Typography.meta)
+            .foregroundStyle(AppTheme.Palette.inkSecondary)
+
+            if !layer.sourceCoverage.complete {
+                Label {
+                    Text(appLocalized("\(SegmentAttributionSummary.overlap(layer.sourceCoverage.missingDurationS)) of this recording produced no transcript, so these proposals cover \(TranscriptPlaybackTimeline.clock(layer.sourceCoverage.processedDurationS)) of \(TranscriptPlaybackTimeline.clock(layer.sourceCoverage.inputDurationS))."))
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(AppTheme.Typography.meta)
+                .foregroundStyle(AppTheme.Palette.open)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - The row list
+//
+// Below the rule the grammar changes. This is an editorial table: hierarchy
+// from type, spacing and hairlines; no card, no fill, no coloured strip, no
+// pill; one accent for the current thing; status colour only for a genuinely
+// open state and always beside a word. Every row is a set of fixed-width
+// gutter columns beside the text, so the eye reads down one column.
 
 /// The transcript itself, without the scroll view around it, so it can be
 /// rendered offscreen exactly as it appears on screen.
@@ -1347,37 +1841,42 @@ struct TranscriptSegmentColumn: View {
     let review: (TranscriptSegment) -> Void
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: AppTheme.Spacing.small) {
-            if segments.isEmpty {
-                Text(appLocalized("No segment matches this search."))
-                    .font(AppTheme.Typography.body)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, AppTheme.Spacing.screen)
-            }
-            ForEach(segments) { item in
-                TranscriptSegmentRow(
-                    item: item,
-                    attribution: attribution(for: item),
-                    proposal: proposalLayer?.proposal(at: item.index),
-                    displaySpeaker: displayName(item.segment.speaker),
-                    speakerName: displayName,
-                    speakerColor: { roster.color(for: $0) },
-                    text: text(item),
-                    needsReview: needsReview(item),
-                    isReviewable: isReviewable(item),
-                    isFocused: focusedSegmentIndex == item.index,
-                    isPlaying: playingSegmentIndex == item.index,
-                    isSelected: selectedSegmentIDs.contains(item.id),
-                    play: { play(item) },
-                    select: { select(item) },
-                    rename: { rename(item) },
-                    review: { review(item) }
-                )
-                .id(item.id)
+        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+            Section {
+                if segments.isEmpty {
+                    Text(appLocalized("No segment matches this search."))
+                        .font(AppTheme.Typography.body)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
+                        .padding(.vertical, AppTheme.Spacing.screen)
+                }
+                ForEach(segments) { item in
+                    TranscriptSegmentRow(
+                        item: item,
+                        attribution: attribution(for: item),
+                        proposal: proposalLayer?.proposal(at: item.index),
+                        displaySpeaker: displayName(item.segment.speaker),
+                        speakerName: displayName,
+                        speakerColor: { roster.color(for: $0) },
+                        text: text(item),
+                        reviewState: reviewState(for: item),
+                        isFocused: focusedSegmentIndex == item.index,
+                        isPlaying: playingSegmentIndex == item.index,
+                        isSelected: selectedSegmentIDs.contains(item.id),
+                        isLast: item.id == segments.last?.id,
+                        play: { play(item) },
+                        select: { select(item) },
+                        rename: { rename(item) },
+                        review: { review(item) }
+                    )
+                    .id(item.id)
+                }
+            } header: {
+                TranscriptColumnHeader()
             }
         }
-        .frame(maxWidth: 860, alignment: .leading)
-        .padding(AppTheme.Spacing.screen)
+        .frame(maxWidth: AppTheme.Layout.measure, alignment: .leading)
+        .padding(.horizontal, AppTheme.Spacing.screen)
+        .padding(.bottom, AppTheme.Spacing.screen)
         .frame(maxWidth: .infinity)
     }
 
@@ -1401,174 +1900,62 @@ struct TranscriptSegmentColumn: View {
             evidenceIsLoaded: evidenceIsLoaded
         )
     }
+
+    private func reviewState(for item: TranscriptSegment) -> TranscriptReviewChip.State? {
+        guard isReviewable(item) else { return nil }
+        return TranscriptReviewChip.State(
+            needsReview: needsReview(item),
+            hasWordingToChoose: !TranscriptReviewTarget(item: item).textAlternatives.isEmpty
+        )
+    }
 }
 
-
-struct TranscriptLayerBar: View {
-    let options: [TranscriptLayerOption]
-    let selection: TranscriptDisplayLayer
-    let select: (TranscriptDisplayLayer) -> Void
-
+/// The column names, once, pinned above the rows. This is where the share
+/// column gets its label: a `64%` under SHARE cannot be misread as a
+/// confidence, and the label is printed once rather than beside every figure.
+struct TranscriptColumnHeader: View {
     var body: some View {
-        HStack(spacing: AppTheme.Spacing.tight) {
-            ForEach(options) { option in
-                Button {
-                    select(option.layer)
-                } label: {
-                    Text(option.layer.title)
-                        .font(AppTheme.Typography.metaStrong)
-                        .padding(.horizontal, AppTheme.Spacing.medium)
-                        .padding(.vertical, 5)
-                        .background(background(for: option), in: .rect(cornerRadius: AppTheme.Radius.chip))
-                        .foregroundStyle(foreground(for: option))
-                }
-                .buttonStyle(.plain)
-                .disabled(!option.isAvailable)
-                .help(option.isAvailable
-                    ? appString("Show this layer of the transcript.")
-                    : option.unavailability?.sentence() ?? "")
-                .accessibilityLabel(Text(option.layer.title))
-                .accessibilityHint(Text(verbatim: option.unavailability?.sentence() ?? ""))
-                .accessibilityAddTraits(option.layer == selection ? [.isSelected] : [])
+        HStack(alignment: .firstTextBaseline, spacing: AppTheme.Layout.columnGap) {
+            Color.clear
+                .frame(width: AppTheme.Layout.selectColumn, height: 1)
+            columnLabel(appLocalized("Time"))
+                .frame(width: AppTheme.Layout.timeColumn, alignment: .leading)
+            HStack(alignment: .firstTextBaseline) {
+                columnLabel(appLocalized("Speaker"))
+                Spacer(minLength: AppTheme.Spacing.tight)
+                columnLabel(appLocalized("Share"))
             }
+            .frame(width: AppTheme.Layout.speakerColumn)
+            columnLabel(appLocalized("Review"))
+                .frame(width: AppTheme.Layout.reviewColumn, alignment: .leading)
+            columnLabel(appLocalized("Text"))
+                .padding(.leading, AppTheme.Layout.textGap - AppTheme.Layout.columnGap)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(3)
-        .background(.quaternary, in: .rect(cornerRadius: AppTheme.Radius.chip + 3))
-        .fixedSize(horizontal: true, vertical: false)
+        .padding(.top, AppTheme.Spacing.medium)
+        .padding(.bottom, AppTheme.Spacing.small)
+        .overlay(alignment: .bottom) { AppHairline() }
+        .background(AppTheme.Palette.ground)
+        .accessibilityHidden(true)
     }
 
-    private func background(for option: TranscriptLayerOption) -> Color {
-        guard option.isAvailable else { return .clear }
-        return option.layer == selection
-            ? Color.accentColor.opacity(0.85)
-            : .clear
-    }
-
-    private func foreground(for option: TranscriptLayerOption) -> Color {
-        // A layer this run cannot show still has to be readable: the bar is
-        // where a reader learns what the product can produce. Dimmer than this
-        // failed against the dark control ground.
-        guard option.isAvailable else { return .secondary.opacity(0.8) }
-        return option.layer == selection ? .white : .primary
-    }
-}
-
-struct TranscriptSearchField: View {
-    @Binding var text: String
-    let matchCount: Int?
-
-    var body: some View {
-        HStack(spacing: AppTheme.Spacing.small) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            TextField(appLocalized("Search this transcript"), text: $text)
-                .textFieldStyle(.plain)
-                .font(AppTheme.Typography.body)
-            if let matchCount {
-                Text(appLocalized("\(matchCount) matching"))
-                    .font(AppTheme.Typography.meta)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel(appLocalized("Clear the search"))
-            }
-        }
-        .padding(.horizontal, AppTheme.Spacing.medium)
-        .padding(.vertical, AppTheme.Spacing.small)
-        .background(.quaternary, in: .rect(cornerRadius: AppTheme.Radius.chip))
-    }
-}
-
-struct TranscriptReviewStepper: View {
-    let queue: [Int]
-    let focused: Int?
-    let step: (Int) -> Void
-
-    private var position: Int? {
-        guard let focused else { return nil }
-        return queue.firstIndex(of: focused).map { $0 + 1 }
-    }
-
-    var body: some View {
-        HStack(spacing: AppTheme.Spacing.small) {
-            Image(systemName: queue.isEmpty ? "checkmark.circle" : "flag")
-                .foregroundStyle(queue.isEmpty ? Color.secondary : AppTheme.Palette.reviewPending)
-                .accessibilityHidden(true)
-            Text(label)
-                .font(AppTheme.Typography.metaStrong)
-                .monospacedDigit()
-            Button { step(-1) } label: { Image(systemName: "chevron.up") }
-                .accessibilityLabel(appLocalized("Go to the previous segment to review"))
-            Button { step(1) } label: { Image(systemName: "chevron.down") }
-                .accessibilityLabel(appLocalized("Go to the next segment to review"))
-        }
-        .buttonStyle(.plain)
-        .disabled(queue.isEmpty)
-        .padding(.horizontal, AppTheme.Spacing.medium)
-        .padding(.vertical, 5)
-        .background(.quaternary, in: .rect(cornerRadius: AppTheme.Radius.chip))
-    }
-
-    private var label: LocalizedStringResource {
-        guard !queue.isEmpty else { return appLocalized("Nothing left to review") }
-        guard let position else { return appLocalized("\(queue.count) to review") }
-        return appLocalized("\(position) of \(queue.count) to review")
-    }
-}
-
-struct TranscriptTransport: View {
-    let playback: TranscriptPlaybackController
-    let totalDurationS: Double
-    let toggle: () -> Void
-    let seek: (Double) -> Void
-
-    var body: some View {
-        HStack(spacing: AppTheme.Spacing.medium) {
-            Button(action: toggle) {
-                Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 15))
-                    .frame(width: 26, height: 26)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(playback.isPlaying
-                ? appLocalized("Pause playback")
-                : appLocalized("Play the recording"))
-
-            Text(verbatim: TranscriptPlaybackTimeline.clock(playback.positionS))
-                .font(AppTheme.Typography.metaStrong)
-                .monospacedDigit()
-
-            Slider(
-                value: Binding(
-                    get: { min(max(playback.positionS, 0), max(totalDurationS, 1)) },
-                    set: { seek($0) }
-                ),
-                in: 0 ... max(totalDurationS, 1)
-            )
-            .frame(minWidth: 120, idealWidth: 200, maxWidth: 260)
-            .accessibilityLabel(appLocalized("Playhead"))
-
-            Text(verbatim: TranscriptPlaybackTimeline.clock(totalDurationS))
-                .font(AppTheme.Typography.meta)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
-        .padding(.horizontal, AppTheme.Spacing.medium)
-        .padding(.vertical, AppTheme.Spacing.tight)
-        .background(.quaternary, in: .rect(cornerRadius: AppTheme.Radius.chip))
-        .fixedSize(horizontal: true, vertical: false)
+    private func columnLabel(_ text: LocalizedStringResource) -> some View {
+        Text(text)
+            .font(AppTheme.Typography.label)
+            .textCase(.uppercase)
+            .foregroundStyle(AppTheme.Palette.inkSecondary)
+            .lineLimit(1)
     }
 }
 
 // MARK: - Segment row
 
+/// One row of the table: select, time, speaker and share, review, text. The
+/// gutter is fixed-width so every column aligns across rows; an unnamed
+/// segment adds a second gutter line for its evidence and, on the proposal
+/// layer, a third for the proposal. Nothing here is a box: the focused row is
+/// marked by the accent on its time, a heavier weight, and a 2-point rule
+/// where its hairline would be.
 struct TranscriptSegmentRow: View {
     let item: TranscriptSegment
     let attribution: SegmentAttributionSummary
@@ -1579,200 +1966,361 @@ struct TranscriptSegmentRow: View {
     let speakerName: (String) -> String
     let speakerColor: (String) -> Color
     let text: String
-    let needsReview: Bool
-    let isReviewable: Bool
+    /// `nil` when the segment has nothing to review.
+    let reviewState: TranscriptReviewChip.State?
     let isFocused: Bool
     let isPlaying: Bool
     let isSelected: Bool
+    var isLast: Bool = false
     let play: () -> Void
     let select: () -> Void
     let rename: () -> Void
     let review: () -> Void
 
-    var body: some View {
-        HStack(alignment: .top, spacing: AppTheme.Spacing.medium) {
-            SpeakerRule(
-                color: attribution.isAttributed
-                    ? speakerColor(item.segment.speaker)
-                    : AppTheme.Palette.unattributed,
-                isAttributed: attribution.isAttributed
-            )
+    private var showsReason: Bool {
+        SpeakerEvidenceBlock.showsReason(for: attribution, isFocused: isFocused)
+    }
 
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.small) {
-                metaRow
-                Text(text)
-                    .font(AppTheme.Typography.body)
-                    .lineSpacing(AppTheme.Typography.bodyLineSpacing)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if !attribution.isAttributed {
-                    SpeakerEvidenceBlock(
-                        attribution: attribution,
-                        speakerName: speakerName,
-                        speakerColor: speakerColor,
-                        showsReason: SpeakerEvidenceBlock.showsReason(
-                            for: attribution,
-                            isFocused: isFocused
-                        )
-                    )
-                }
-                if let proposal {
-                    SegmentProposalBlock(
-                        proposal: proposal,
-                        speakerName: speakerName,
-                        speakerColor: speakerColor
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+    /// The acoustic reason this row is already printing, if it is printing one.
+    private var acousticReason: String? {
+        guard !attribution.isAttributed, showsReason else { return nil }
+        return attribution.reason()
+    }
+
+    /// What the proposal layer adds under the text.
+    ///
+    /// A decline's cause sentence is this app's fallback for a row whose
+    /// acoustic reason is not on screen. When that reason *is* on screen it
+    /// says the same thing and says it better — it names the run's own
+    /// threshold — so the cause sentence stands down rather than printing a
+    /// near-duplicate beneath it. Nothing is lost either way: the model's own
+    /// words are the second sentence and always print.
+    private var proposalSentences: [String] {
+        guard let proposal else { return [] }
+        // A decline whose model answer only restates the cause prints the
+        // fact once: this app's sentence when the row has no acoustic reason
+        // of its own, and nothing at all when the row already prints one —
+        // which for this cause is the same sentence again.
+        if let decline = proposal.decline, decline.modelRestatesCause {
+            guard acousticReason == nil else { return [] }
+            return decline.causeSentence().map { [$0] } ?? [decline.reason]
         }
-        .padding(AppTheme.Spacing.row)
-        .background(background, in: .rect(cornerRadius: AppTheme.Radius.row))
-        .overlay {
+        return proposal.sentences(omittingCause: acousticReason != nil)
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            selectionBox
+                .frame(width: AppTheme.Layout.selectColumn, alignment: .leading)
+            Spacer().frame(width: AppTheme.Layout.columnGap)
+            timeControl
+                .frame(width: AppTheme.Layout.timeColumn, alignment: .leading)
+            Spacer().frame(width: AppTheme.Layout.columnGap)
+            gutter
+                .frame(width: AppTheme.Layout.evidenceSpan, alignment: .leading)
+            Spacer().frame(width: AppTheme.Layout.textGap)
+            textColumn
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, AppTheme.Spacing.rowVertical)
+        .overlay(alignment: .bottom) {
             if isFocused {
-                RoundedRectangle(cornerRadius: AppTheme.Radius.row)
-                    .strokeBorder(Color.accentColor, lineWidth: 2)
-            } else if isSelected {
-                RoundedRectangle(cornerRadius: AppTheme.Radius.row)
-                    .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1)
+                Rectangle()
+                    .fill(AppTheme.Palette.accent)
+                    .frame(height: 2)
+                    .accessibilityHidden(true)
+            } else if !isLast {
+                AppHairline()
             }
         }
         .accessibilityElement(children: .contain)
     }
 
-    private var metaRow: some View {
-        HStack(spacing: AppTheme.Spacing.small) {
-            if attribution.isAttributed {
+    // A checkbox, not a circle. `checkmark.circle.fill` already means "you
+    // reviewed this" elsewhere, and a checkbox is what macOS uses for "include
+    // this in a bulk action", which is what this is.
+    private var selectionBox: some View {
+        Button(action: select) {
+            Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                .font(.system(size: 12))
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? AppTheme.Palette.accent : AppTheme.Palette.inkSecondary)
+        .help(appLocalized("Select this segment for copying."))
+        .accessibilityLabel(isSelected
+            ? appLocalized("Remove this segment from the copy selection.")
+            : appLocalized("Select this segment for copying."))
+    }
+
+    /// The segment's start, and the control that plays from it. The waveform
+    /// glyph appears only while this segment is playing; 248 play triangles
+    /// down a column would say nothing, and the focused row is marked by the
+    /// accent and the weight, not by a glyph.
+    private var timeControl: some View {
+        Button(action: play) {
+            HStack(spacing: 3) {
+                if isPlaying {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                Text(verbatim: TranscriptPlaybackTimeline.clock(item.segment.startS))
+                    .font(isFocused ? AppTheme.Typography.metaStrong : AppTheme.Typography.meta)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isPlaying || isFocused ? AppTheme.Palette.accent : AppTheme.Palette.inkSecondary)
+        .help(appLocalized("Play the recording from this segment."))
+    }
+
+    private var gutter: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.tight) {
+            HStack(alignment: .firstTextBaseline, spacing: AppTheme.Layout.columnGap) {
+                speakerCell
+                    .frame(width: AppTheme.Layout.speakerColumn, alignment: .leading)
+                reviewCell
+                    .frame(width: AppTheme.Layout.reviewColumn, alignment: .leading)
+            }
+            if !attribution.isAttributed, !attribution.candidates.isEmpty {
+                SpeakerShareFigures(
+                    candidates: attribution.candidates,
+                    speakerName: speakerName,
+                    speakerColor: speakerColor
+                )
+            }
+            if let proposal {
+                SegmentProposalLine(
+                    proposal: proposal,
+                    speakerName: speakerName,
+                    speakerColor: speakerColor
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var speakerCell: some View {
+        if attribution.isAttributed {
+            HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.tight) {
                 Button(action: rename) {
                     Text(displaySpeaker)
                         .font(AppTheme.Typography.speaker)
                         .foregroundStyle(speakerColor(item.segment.speaker))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .help(appLocalized("Rename this speaker everywhere in this transcript."))
                 if let share = attribution.contestedTopShare {
-                    // Labelled, because a bare percent next to a name reads as
-                    // "64 % sure this is Jina" rather than "Jina held 64 % of
-                    // this segment's speech". The first is a confidence this
-                    // product does not compute; the second is what the merger
-                    // measured. The bare form is the narrow-width fallback
-                    // only, where the label cannot fit.
-                    ViewThatFits(in: .horizontal) {
-                        Text(appLocalized("\(SegmentAttributionSummary.percent(share)) of speech"))
-                        Text(verbatim: SegmentAttributionSummary.percent(share))
-                    }
-                    .font(AppTheme.Typography.meta)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .help(appLocalized("This speaker held this much of the segment's speech."))
-                    .accessibilityLabel(appLocalized("This speaker held this much of the segment's speech."))
+                    Spacer(minLength: 0)
+                    Text(verbatim: SegmentAttributionSummary.percent(share))
+                        .font(AppTheme.Typography.meta)
+                        .monospacedDigit()
+                        .help(appLocalized("This speaker held this much of the segment's speech."))
+                        .accessibilityLabel(appLocalized("This speaker held this much of the segment's speech."))
                 }
-            } else {
-                Label {
-                    Text(displaySpeaker)
-                        .font(AppTheme.Typography.speaker)
-                } icon: {
-                    Image(systemName: "questionmark.circle")
-                }
-                .foregroundStyle(.secondary)
             }
-
-            Button(action: play) {
-                Label {
-                    Text(verbatim: TranscriptPlaybackTimeline.clock(item.segment.startS))
-                } icon: {
-                    Image(systemName: isPlaying ? "waveform" : "play.fill")
-                }
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .font(AppTheme.Typography.meta)
-            .monospacedDigit()
-            .foregroundStyle(isPlaying ? Color.accentColor : Color.secondary)
-            .help(appLocalized("Play the recording from this segment."))
-
-            // The review marker sits with the speaker and the time rather than
-            // across the row. 192 of 248 segments carry one on the measured
-            // run, so a reader scans this column constantly, and a marker
-            // pinned to the far edge makes that scan cross the whole page.
-            if isReviewable {
-                Button(action: review) {
-                    Image(systemName: needsReview ? "flag" : "checkmark.circle.fill")
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(needsReview ? AppTheme.Palette.reviewPending : Color.secondary)
-                .help(needsReview
-                    ? appLocalized("Review what the pipeline was unsure about here.")
-                    : appLocalized("You already reviewed this segment."))
-                .accessibilityLabel(needsReview
-                    ? appLocalized("Review what the pipeline was unsure about here.")
-                    : appLocalized("You already reviewed this segment."))
-            }
-
-            // Both controls live with the speaker and the time. They do
-            // different things — the flag opens the review, the circle adds the
-            // segment to a copy selection — and pinning the second one to the
-            // right edge of an 860-point reading measure made the eye travel
-            // the width of the page to reach a secondary affordance.
-            // A checkbox, not a circle. `checkmark.circle.fill` already means
-            // "you reviewed this" on the marker eight points to the left, and
-            // "this run finished" in the library sidebar; three meanings for
-            // one glyph, two of them on the same row, is not a distinction a
-            // reader can be asked to make from colour alone. A checkbox is
-            // also what macOS uses for "include this in a bulk action", which
-            // is what this is.
-            Button(action: select) {
-                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.7))
-            .help(appLocalized("Select this segment for copying."))
-            .accessibilityLabel(isSelected
-                ? appLocalized("Remove this segment from the copy selection.")
-                : appLocalized("Select this segment for copying."))
-
-            Spacer(minLength: AppTheme.Spacing.small)
+        } else {
+            Text(displaySpeaker)
+                .font(AppTheme.Typography.speaker)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
+                .lineLimit(1)
         }
     }
 
-    /// Flagging is not a background here. On the measured run 77.4 % of
-    /// segments are flagged, so tinting them all says nothing; the page stays
-    /// calm and only the segment the reader is on is loud.
-    private var background: Color {
-        if isFocused { return Color.accentColor.opacity(0.12) }
-        if isPlaying { return Color.accentColor.opacity(0.06) }
-        if isSelected { return Color.accentColor.opacity(0.08) }
-        // Deliberately nothing. `controlBackgroundColor` resolves to the window
-        // colour in both appearances, so a per-row card was invisible anyway,
-        // and at 77.4 % flagged the page reads better as one document than as
-        // 248 boxes.
-        return .clear
+    @ViewBuilder
+    private var reviewCell: some View {
+        if let reviewState {
+            Button(action: review) {
+                TranscriptReviewChip(state: reviewState)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(reviewState.needsReview
+                ? appLocalized("Review what Maccheroni was unsure about here.")
+                : appLocalized("You already reviewed this segment."))
+            .accessibilityLabel(reviewState.needsReview
+                ? appLocalized("Review what Maccheroni was unsure about here.")
+                : appLocalized("You already reviewed this segment."))
+        } else {
+            Color.clear.frame(width: 1, height: 1)
+        }
+    }
+
+    private var textColumn: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.tight) {
+            Text(text)
+                .font(AppTheme.Typography.body)
+                .lineSpacing(AppTheme.Typography.bodyLineSpacing)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let reason = acousticReason {
+                Text(verbatim: reason)
+                    .font(AppTheme.Typography.meta)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(proposalSentences.enumerated()), id: \.offset) { _, sentence in
+                Text(verbatim: sentence)
+                    .font(AppTheme.Typography.meta)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 
-/// A speaker's colour, as a rule down the left edge of its segment. Faded when
-/// no speaker was named. Colour carries nothing here that the speaker chip's
-/// name and its glyph do not already carry, so a reader who cannot separate the
-/// colours loses nothing.
-struct SpeakerRule: View {
-    let color: Color
-    let isAttributed: Bool
+/// The review marker: an 11-point heavy label with a glyph, 2-point radius,
+/// one-point border, neutral by default. 192 of 248 rows carry one on the
+/// measured run, and a neutral chip in the secondary ink is part of the
+/// table's texture rather than a warning. Colour is kept for the one variant
+/// whose state is genuinely open — a wording the reader must choose — and
+/// review state is carried by the glyph shape and the label, never by colour.
+struct TranscriptReviewChip: View {
+    struct State: Equatable, Sendable {
+        var needsReview: Bool
+        /// The segment has alternative wordings to choose between: a text
+        /// disagreement, or a post-processing candidate merged onto it.
+        var hasWordingToChoose: Bool
+
+        var isOpen: Bool { needsReview && hasWordingToChoose }
+    }
+
+    let state: State
 
     var body: some View {
-        Capsule()
-            .fill(color.opacity(isAttributed ? 1 : 0.35))
-            .frame(width: 4)
-            .frame(maxHeight: .infinity)
-            .accessibilityHidden(true)
+        HStack(spacing: 3) {
+            Image(systemName: state.needsReview ? "flag" : "checkmark")
+                .font(.system(size: 9, weight: .heavy))
+            Text(label)
+                .font(AppTheme.Typography.label)
+                .lineLimit(1)
+        }
+        .foregroundStyle(state.isOpen ? AppTheme.Palette.open : AppTheme.Palette.inkSecondary)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .overlay {
+            RoundedRectangle(cornerRadius: AppTheme.Radius.chip)
+                .strokeBorder(
+                    state.isOpen ? AppTheme.Palette.open : AppTheme.Palette.inkSecondary,
+                    lineWidth: 1
+                )
+        }
+    }
+
+    private var label: LocalizedStringResource {
+        if !state.needsReview { return appLocalized("Reviewed") }
+        return state.hasWordingToChoose ? appLocalized("Wording") : appLocalized("Review")
     }
 }
 
-/// The acoustic evidence for a segment nobody was named for: which speakers
-/// overlapped it, for how long each, and one sentence saying why none was
-/// chosen. This is what lets a reader settle a segment without the audio.
+/// The acoustic evidence for a segment nobody was named for, as the row shows
+/// it: each candidate's name in its colour and its share, always printed, with
+/// a 3-point band split by share beneath them. The band answers "how close was
+/// it, and who led" faster than two percentages can be compared; the figures
+/// are the record and the band is the reading aid. It sits beneath the figures
+/// rather than behind them so both keep their contrast.
+struct SpeakerShareFigures: View {
+    let candidates: [SpeakerCandidate]
+    let speakerName: (String) -> String
+    let speakerColor: (String) -> Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.medium) {
+                ForEach(candidates, id: \.speaker) { candidate in
+                    HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.tight) {
+                        Text(verbatim: speakerName(candidate.speaker))
+                            .font(AppTheme.Typography.metaStrong)
+                            .foregroundStyle(speakerColor(candidate.speaker))
+                            .lineLimit(1)
+                        Text(verbatim: SegmentAttributionSummary.percent(candidate.share))
+                            .font(AppTheme.Typography.meta)
+                            .monospacedDigit()
+                    }
+                }
+            }
+            ShareBand(
+                candidates: candidates,
+                color: speakerColor,
+                height: AppTheme.Layout.bandHeight
+            )
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A proposed speaker, marked as a proposal wherever it appears: a dashed
+/// label, then the candidate treatment — a dot and a plain name — never the
+/// speaker treatment. A reader must not be able to mistake it for the
+/// segment's speaker, which is judgment rule 4 and the condition D46 allows
+/// this layer to exist under. A decline is the same dashed label with different
+/// words; the reason for either prints under the text.
+struct SegmentProposalLine: View {
+    let proposal: SegmentSpeakerProposal
+    let speakerName: (String) -> String
+    let speakerColor: (String) -> Color
+
+    var body: some View {
+        // The name goes beside the label where the span allows and under it
+        // where it does not; the label never wraps.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.small) {
+                label
+                candidate
+            }
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.tight) {
+                label
+                candidate
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var label: some View {
+        Text(proposal.proposedSpeaker == nil
+            ? appLocalized("No speaker proposed")
+            : appLocalized("Proposed, not measured"))
+            .font(AppTheme.Typography.label)
+            .foregroundStyle(AppTheme.Palette.inkSecondary)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .overlay {
+                RoundedRectangle(cornerRadius: AppTheme.Radius.chip)
+                    .strokeBorder(
+                        AppTheme.Palette.inkSecondary,
+                        style: StrokeStyle(lineWidth: 1, dash: [3, 2])
+                    )
+            }
+    }
+
+    @ViewBuilder
+    private var candidate: some View {
+        if let speaker = proposal.proposedSpeaker {
+            HStack(spacing: AppTheme.Spacing.tight) {
+                Circle()
+                    .fill(speakerColor(speaker))
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+                Text(verbatim: speakerName(speaker))
+                    .font(AppTheme.Typography.meta)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
+/// The full evidence block, used by the review sheet: the wide band, one line
+/// per candidate with name, share and overlapped seconds, and the reason. The
+/// row prints a compact form of the same numbers; this is where the seconds
+/// and the sentence always are.
 struct SpeakerEvidenceBlock: View {
     let attribution: SegmentAttributionSummary
     let speakerName: (String) -> String
@@ -1782,8 +2330,8 @@ struct SpeakerEvidenceBlock: View {
 
     /// Whether this segment's row prints its reason sentence.
     ///
-    /// On the measured run 108 of the 110 unnamed segments collapse for the
-    /// same reason, so printing that sentence under every one of them is 108
+    /// On the measured run 100 of the 110 unnamed segments collapse for the
+    /// same reason, so printing that sentence under every one of them is 100
     /// copies of one fact. The shares carry it; the sentence appears on the
     /// segment the reader is on, and always for the two rarer outcomes, which
     /// say something the shares do not.
@@ -1793,7 +2341,7 @@ struct SpeakerEvidenceBlock: View {
     /// `nil` outcome; an earlier form of this predicate compared `nil` against
     /// one outcome, which is true, and reinstated the 110-copy wall on exactly
     /// the layer that had the least to say. It is stated once in the header
-    /// instead — see `TranscriptEvidenceGap`.
+    /// instead — see `TranscriptMissingEvidence`.
     static func showsReason(
         for attribution: SegmentAttributionSummary,
         isFocused: Bool
@@ -1804,149 +2352,65 @@ struct SpeakerEvidenceBlock: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.tight) {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.small) {
             if !attribution.candidates.isEmpty {
-                ShareMeter(
+                ShareBand(
                     candidates: attribution.candidates,
-                    color: speakerColor
+                    color: speakerColor,
+                    height: AppTheme.Layout.sheetBandHeight
                 )
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: AppTheme.Spacing.large) { candidateLabels }
-                    VStack(alignment: .leading, spacing: 2) { candidateLabels }
+                .frame(maxWidth: 320)
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.tight) {
+                    ForEach(attribution.candidates, id: \.speaker) { candidate in
+                        HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.small) {
+                            Text(verbatim: speakerName(candidate.speaker))
+                                .font(AppTheme.Typography.metaStrong)
+                                .foregroundStyle(speakerColor(candidate.speaker))
+                            Text(verbatim: SegmentAttributionSummary.percent(candidate.share))
+                                .font(AppTheme.Typography.metaStrong)
+                                .monospacedDigit()
+                            Text(verbatim: SegmentAttributionSummary.overlap(candidate.overlapS))
+                                .font(AppTheme.Typography.meta)
+                                .foregroundStyle(AppTheme.Palette.inkSecondary)
+                                .monospacedDigit()
+                        }
+                    }
                 }
             }
             if showsReason, let reason = attribution.reason() {
                 Text(verbatim: reason)
                     .font(AppTheme.Typography.meta)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.top, 2)
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder
-    private var candidateLabels: some View {
-        ForEach(attribution.candidates, id: \.speaker) { candidate in
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(speakerColor(candidate.speaker))
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
-                Text(verbatim: speakerName(candidate.speaker))
-                    .font(AppTheme.Typography.meta)
-                Text(verbatim: SegmentAttributionSummary.percent(candidate.share))
-                    .font(AppTheme.Typography.metaStrong)
-                    .monospacedDigit()
-                Text(verbatim: SegmentAttributionSummary.overlap(candidate.overlapS))
-                    .font(AppTheme.Typography.meta)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-        }
-    }
-}
-
-/// A proposed speaker, marked as a proposal wherever it appears. It sits under
-/// the acoustic evidence, is labelled, is bordered rather than filled, and
-/// never borrows the speaker chip's treatment — a reader must not be able to
-/// mistake it for the segment's speaker, which is judgment rule 4 and the
-/// condition D46 allows this layer to exist under.
-struct SegmentProposalBlock: View {
-    let proposal: SegmentSpeakerProposal
-    let speakerName: (String) -> String
-    let speakerColor: (String) -> Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: AppTheme.Spacing.small) {
-                Text(proposal.proposedSpeaker == nil
-                    ? appLocalized("No speaker proposed")
-                    : appLocalized("Proposed, not measured"))
-                    .font(AppTheme.Typography.meta)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: AppTheme.Radius.chip)
-                            .strokeBorder(.secondary, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    }
-                    .foregroundStyle(.secondary)
-                if let speaker = proposal.proposedSpeaker {
-                    // The candidate treatment — a dot and a plain name — not
-                    // the speaker chip's. Rendering a proposal the way an
-                    // attributed speaker is rendered is the one mistake this
-                    // block exists to avoid.
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(speakerColor(speaker))
-                            .frame(width: 7, height: 7)
-                            .accessibilityHidden(true)
-                        Text(verbatim: speakerName(speaker))
-                            .font(AppTheme.Typography.meta)
-                    }
-                }
-            }
-            Text(verbatim: proposal.reason)
-                .font(AppTheme.Typography.meta)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.top, 2)
         .accessibilityElement(children: .combine)
     }
 }
 
-/// What the proposal layer is standing on. A proposal over a transcript with a
-/// hole in it must say so where the proposals are, not in a manifest.
-struct ProposalLayerNotice: View {
-    let layer: TranscriptProposalLayer
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.tight) {
-            Label {
-                Text(appLocalized("\(layer.proposedCount) proposed, \(layer.declinedCount) declined. Not acoustic evidence, and not measured."))
-            } icon: {
-                Image(systemName: "questionmark.bubble")
-            }
-            .font(AppTheme.Typography.meta)
-            .foregroundStyle(.secondary)
-
-            if !layer.sourceCoverage.complete {
-                Label {
-                    Text(appLocalized("\(SegmentAttributionSummary.overlap(layer.sourceCoverage.missingDurationS)) of this recording produced no transcript, so these proposals cover \(TranscriptPlaybackTimeline.clock(layer.sourceCoverage.processedDurationS)) of \(TranscriptPlaybackTimeline.clock(layer.sourceCoverage.inputDurationS))."))
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                }
-                .font(AppTheme.Typography.meta)
-                .foregroundStyle(AppTheme.Palette.reviewPending)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(AppTheme.Spacing.small)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary, in: .rect(cornerRadius: AppTheme.Radius.chip))
-    }
-}
-
-struct ShareMeter: View {
+/// A filled band split by share, one rectangle per candidate in that
+/// candidate's colour, with a 2-point gap of page ground between them so each
+/// rectangle's neighbour is the ground it was measured against. Square.
+struct ShareBand: View {
     let candidates: [SpeakerCandidate]
     let color: (String) -> Color
+    var height: CGFloat = AppTheme.Layout.bandHeight
+
+    private let gap: CGFloat = 2
 
     var body: some View {
         GeometryReader { geometry in
-            HStack(spacing: 0) {
+            let usable = max(0, geometry.size.width - gap * CGFloat(max(0, candidates.count - 1)))
+            HStack(spacing: gap) {
                 ForEach(candidates, id: \.speaker) { candidate in
                     Rectangle()
-                        .fill(color(candidate.speaker).opacity(0.75))
-                        .frame(width: max(2, geometry.size.width * candidate.share))
+                        .fill(color(candidate.speaker))
+                        .frame(width: max(2, usable * candidate.share))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: 320)
-        .frame(height: 5)
-        .clipShape(Capsule())
+        .frame(height: height)
         .accessibilityHidden(true)
     }
 }
@@ -1966,7 +2430,7 @@ struct SpeakerRenamePopover: View {
                 .font(AppTheme.Typography.sectionTitle)
             Text(appLocalized("This name applies to every \(originalSpeaker) segment in exports."))
                 .font(AppTheme.Typography.meta)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
             TextField(appLocalized("Speaker name"), text: $name)
                 .focused($focused)
                 .onSubmit(save)
@@ -2044,7 +2508,7 @@ struct SegmentReviewSheet: View {
                 ? appLocalized("Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.")
                 : appLocalized("Your selection is stored as a correction beside the immutable raw transcript."))
                 .font(AppTheme.Typography.meta)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
         }
         .padding(AppTheme.Spacing.screen)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2056,7 +2520,7 @@ struct SegmentReviewSheet: View {
                 .font(AppTheme.Typography.screenTitle)
             Text(verbatim: TranscriptPlaybackTimeline.clock(item.segment.startS))
                 .font(AppTheme.Typography.meta)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
                 .monospacedDigit()
             Text(verbatim: displayedText)
                 .font(AppTheme.Typography.body)
@@ -2083,11 +2547,11 @@ struct SegmentReviewSheet: View {
                 // here made three grey sentences that say two things.
                 Text(appLocalized("Timeline coverage \(SegmentAttributionSummary.percent(evidence.timelineCoverage))."))
                     .font(AppTheme.Typography.meta)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
             }
             Text(appLocalized("Maccheroni will not assign a speaker without acoustic evidence, so this stays as it is."))
                 .font(AppTheme.Typography.meta)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
         }
     }
 
@@ -2128,24 +2592,24 @@ struct SegmentReviewSheet: View {
             || untranslatedReason != nil
         {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.tight) {
-                Text(appLocalized("What The Pipeline Recorded"))
+                Text(appLocalized("What Maccheroni Recorded"))
                     .font(AppTheme.Typography.sectionTitle)
                 if let reason = untranslatedReason {
                     Text(verbatim: reason)
                         .font(AppTheme.Typography.meta)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
                 }
                 if target.hasBackendSpeakerEvidence {
                     Text(appLocalized("The speech model also reported a speaker for this segment. It is kept as evidence and never becomes the speaker."))
                         .font(AppTheme.Typography.meta)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
                 }
                 if !target.otherMarkers.isEmpty {
                     Text(appLocalized("Other markers"))
                         .font(AppTheme.Typography.meta)
                     Text(verbatim: target.otherMarkers.joined(separator: ", "))
                         .font(AppTheme.Typography.meta.monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
                         .textSelection(.enabled)
                 }
             }
@@ -2165,25 +2629,25 @@ struct CandidateButton: View {
         } label: {
             HStack(alignment: .top, spacing: AppTheme.Spacing.medium) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .foregroundStyle(isSelected ? AppTheme.Palette.accent : AppTheme.Palette.inkSecondary)
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.tight) {
                     Text(source)
                         .font(AppTheme.Typography.meta)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
                     Text(text)
                         .font(AppTheme.Typography.body)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(AppTheme.Palette.ink)
                         .multilineTextAlignment(.leading)
                 }
                 Spacer()
             }
             .padding(AppTheme.Spacing.medium)
-            .background(.quaternary, in: .rect(cornerRadius: AppTheme.Radius.chip))
             .overlay {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: AppTheme.Radius.chip)
-                        .strokeBorder(Color.accentColor, lineWidth: 2)
-                }
+                RoundedRectangle(cornerRadius: AppTheme.Radius.control)
+                    .strokeBorder(
+                        isSelected ? AppTheme.Palette.accent : AppTheme.Palette.controlBorder,
+                        lineWidth: isSelected ? 2 : 1
+                    )
             }
         }
         .buttonStyle(.plain)

@@ -129,7 +129,7 @@ public struct PostprocessRequest: Sendable {
     }
 }
 
-public enum PostprocessDisposition: String, Codable, Equatable, Sendable {
+public enum PostprocessOutcome: String, Codable, Equatable, Sendable {
     case apply
     case review
 }
@@ -137,10 +137,10 @@ public enum PostprocessDisposition: String, Codable, Equatable, Sendable {
 public struct PostprocessProposal: Codable, Equatable, Sendable {
     public var segmentIndex: Int
     public var replacementText: String
-    public var disposition: PostprocessDisposition
+    public var disposition: PostprocessOutcome
     public var reason: String
 
-    public init(segmentIndex: Int, replacementText: String, disposition: PostprocessDisposition, reason: String) {
+    public init(segmentIndex: Int, replacementText: String, disposition: PostprocessOutcome, reason: String) {
         self.segmentIndex = segmentIndex
         self.replacementText = replacementText
         self.disposition = disposition
@@ -304,7 +304,7 @@ public struct TranslationResult: Equatable, Sendable {
 
 // MARK: - Marked non-acoustic speaker proposal
 
-public enum SpeakerProposalDisposition: String, Codable, Equatable, Sendable {
+public enum SpeakerProposalOutcome: String, Codable, Equatable, Sendable {
     case propose
     case decline
 }
@@ -314,13 +314,13 @@ public struct SpeakerProposalDecision: Codable, Equatable, Sendable {
     public var segmentIndex: Int
     /// Empty when `disposition` is `.decline`.
     public var proposedSpeaker: String
-    public var disposition: SpeakerProposalDisposition
+    public var disposition: SpeakerProposalOutcome
     public var reason: String
 
     public init(
         segmentIndex: Int,
         proposedSpeaker: String,
-        disposition: SpeakerProposalDisposition,
+        disposition: SpeakerProposalOutcome,
         reason: String
     ) {
         self.segmentIndex = segmentIndex
@@ -396,45 +396,119 @@ public struct SpeakerProposal: Codable, Equatable, Sendable {
     }
 }
 
+/// The rule the first speaker-proposal iteration runs under (PROJECT.md D50).
+///
+/// A proposal may confirm the top-ranked candidate — the candidate holding the
+/// largest overlap share, below the bar that would have assigned it — or the
+/// segment is declined. It may never name another speaker. Confirming a
+/// sub-threshold top-ranked candidate completes acoustic evidence; overturning it
+/// contradicts acoustic evidence, and nothing yet measures whether such an
+/// overturn is right more often than wrong. The document names the constraint
+/// so a reader knows overturns were disallowed rather than absent, and every
+/// decline the constraint forced keeps the model's answer as evidence for the
+/// measurement that could one day permit them.
+public enum SpeakerProposalConstraint: String, Codable, Equatable, Sendable {
+    case confirmOrDecline = "confirm-or-decline"
+
+    /// Two candidates whose overlaps differ by no more than this tie, and a
+    /// tie has no top-ranked candidate. This mirrors the merger's `overlapEpsilonS` margin
+    /// rule, so the proposer never names a top-ranked candidate the merger itself refuses
+    /// to distinguish at any threshold.
+    public static let topRankedMarginS: Double = 1e-9
+
+    /// The top-ranked candidate among `candidates`, or nil when there is none:
+    /// no candidate overlapped the segment at all, or the top candidates tie.
+    /// Share and overlap rank candidates identically within one segment, so
+    /// the comparison is made on the raw seconds the merger measured.
+    public static func topRankedCandidate(
+        among candidates: [SpeakerCandidateEvidence]
+    ) -> String? {
+        guard let top = candidates.map(\.overlapS).max() else { return nil }
+        let topRanked = candidates.filter { top - $0.overlapS <= topRankedMarginS }
+        guard topRanked.count == 1 else { return nil }
+        return topRanked[0].speaker
+    }
+}
+
+/// Why a declined segment was declined. The first three are the constraint
+/// acting on the model's answer; the last two are the model's own decline or
+/// the absence of any answer.
+public enum SpeakerProposalDeclineCause: String, Codable, Equatable, Sendable {
+    /// The model named a speaker other than the top-ranked candidate. Under
+    /// confirm-or-decline that is recorded, not applied: `modelAnswer` keeps
+    /// what the language evidence said and `topRankedCandidate` what the
+    /// acoustics said, so the disagreement survives as evidence.
+    case modelDisagreedWithTopRankedCandidate = "model_disagreed_with_top_ranked_candidate"
+    /// No diarization turn overlapped the segment, so there is no top-ranked candidate to
+    /// confirm. Declined whatever the model answered.
+    case noAcousticCandidates = "no_acoustic_candidates"
+    /// The top candidates hold equal overlap, so there is no top-ranked candidate to
+    /// confirm. Declined whatever the model answered.
+    case noTopRankedCandidate = "no_top_ranked_candidate"
+    /// The model declined; `reason` is its own.
+    case modelDeclined = "model_declined"
+    /// The backend returned no decision for the segment.
+    case noDecision = "no_decision"
+}
+
 /// An unattributed segment this layer looked at and did not propose a speaker
 /// for, with why. Declining is a result, not a gap, so it is recorded with the
 /// same evidence a proposal carries.
-public struct SpeakerProposalDeclination: Codable, Equatable, Sendable {
+public struct SpeakerProposalDecline: Codable, Equatable, Sendable {
     public var segmentIndex: Int
     public var reason: String
     public var acousticOutcome: String
     public var acousticTimelineCoverage: Double
     public var acousticCandidates: [SpeakerCandidateEvidence]
+    /// Why the segment was declined. Absent on artifacts written before the
+    /// confirm-or-decline constraint of 2026-09-02.
+    public var cause: SpeakerProposalDeclineCause?
+    /// The top-ranked candidate the model was asked to confirm, when one existed.
+    public var topRankedCandidate: String?
+    /// The model's own decision whenever the constraint, not the model,
+    /// decided the outcome: the speaker it named and its reason, or its own
+    /// decline on a segment that had no top-ranked candidate anyway.
+    public var modelAnswer: SpeakerProposalDecision?
 
     public init(
         segmentIndex: Int,
         reason: String,
         acousticOutcome: String,
         acousticTimelineCoverage: Double,
-        acousticCandidates: [SpeakerCandidateEvidence]
+        acousticCandidates: [SpeakerCandidateEvidence],
+        cause: SpeakerProposalDeclineCause? = nil,
+        topRankedCandidate: String? = nil,
+        modelAnswer: SpeakerProposalDecision? = nil
     ) {
         self.segmentIndex = segmentIndex
         self.reason = reason
         self.acousticOutcome = acousticOutcome
         self.acousticTimelineCoverage = acousticTimelineCoverage
         self.acousticCandidates = acousticCandidates
+        self.cause = cause
+        self.topRankedCandidate = topRankedCandidate
+        self.modelAnswer = modelAnswer
     }
 
     enum CodingKeys: String, CodingKey {
-        case reason
+        case reason, cause
         case segmentIndex = "segment_index"
         case acousticOutcome = "acoustic_outcome"
         case acousticTimelineCoverage = "acoustic_timeline_coverage"
         case acousticCandidates = "acoustic_candidates"
+        case topRankedCandidate = "top_ranked_candidate"
+        case modelAnswer = "model_answer"
     }
 }
 
 /// The derived run's speaker-proposal artifact.
 ///
 /// Every segment the source run left unattributed appears exactly once, in
-/// `proposals` or in `declined`. That is what makes a run that proposed almost
-/// nothing honest rather than empty: the file still says which segments were
-/// examined and why each was left alone.
+/// `proposals` or in `declined`. That is what separates a run that proposed
+/// almost nothing from an empty one: the file still says which segments were
+/// examined and why each was left alone. `constraint` names the rule the
+/// proposals were held to, so a reader knows an overturn of the top-ranked
+/// candidate is absent because it was disallowed, not because none was offered.
 public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
     public static let layer = "speaker-proposal"
 
@@ -448,10 +522,14 @@ public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
     /// must not have to open another file to learn that 30.56 s of the meeting
     /// has no transcript at all.
     public var sourceCoverage: DerivedSourceCoverage
+    /// The rule every proposal in this document was held to. Absent on
+    /// artifacts written before 2026-09-02, when overturns were still
+    /// permitted.
+    public var constraint: SpeakerProposalConstraint?
     /// The speaker labels the source run uses for an unattributed segment.
     public var unattributedSpeakers: [String]
     public var proposals: [SpeakerProposal]
-    public var declined: [SpeakerProposalDeclination]
+    public var declined: [SpeakerProposalDecline]
     public var batches: [TranslationBatchRecord]
 
     public init(
@@ -459,15 +537,17 @@ public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
         layer: String = SpeakerProposalDocument.layer,
         sourceSegmentsSHA256: String,
         sourceCoverage: DerivedSourceCoverage,
+        constraint: SpeakerProposalConstraint? = nil,
         unattributedSpeakers: [String] = UnattributedSpeaker.labels,
         proposals: [SpeakerProposal],
-        declined: [SpeakerProposalDeclination],
+        declined: [SpeakerProposalDecline],
         batches: [TranslationBatchRecord]
     ) {
         self.schemaVersion = schemaVersion
         self.layer = layer
         self.sourceSegmentsSHA256 = sourceSegmentsSHA256
         self.sourceCoverage = sourceCoverage
+        self.constraint = constraint
         self.unattributedSpeakers = unattributedSpeakers
         self.proposals = proposals
         self.declined = declined
@@ -475,7 +555,7 @@ public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case layer, proposals, declined, batches
+        case layer, constraint, proposals, declined, batches
         case schemaVersion = "schema_version"
         case sourceSegmentsSHA256 = "source_segments_sha256"
         case sourceCoverage = "source_coverage"
@@ -1067,32 +1147,19 @@ public struct SpeakerProposer: Sendable {
         }
 
         var proposals: [SpeakerProposal] = []
-        var declined: [SpeakerProposalDeclination] = []
+        var declined: [SpeakerProposalDecline] = []
         for index in unattributed {
             // Force-unwrapping is safe: every unattributed index was checked
             // against `evidenceByIndex` above.
             let evidence = evidenceByIndex[index]!
-            guard let decision = decisions[index],
-                  decision.disposition == .propose
-            else {
-                declined.append(SpeakerProposalDeclination(
-                    segmentIndex: index,
-                    reason: decisions[index]?.reason
-                        ?? "the proposer returned no decision for this segment",
-                    acousticOutcome: evidence.outcome,
-                    acousticTimelineCoverage: evidence.timelineCoverage,
-                    acousticCandidates: evidence.candidates
-                ))
-                continue
-            }
-            proposals.append(SpeakerProposal(
+            switch resolveUnderConstraint(
+                decisions[index],
                 segmentIndex: index,
-                proposedSpeaker: decision.proposedSpeaker,
-                reason: decision.reason,
-                acousticOutcome: evidence.outcome,
-                acousticTimelineCoverage: evidence.timelineCoverage,
-                acousticCandidates: evidence.candidates
-            ))
+                evidence: evidence
+            ) {
+            case let .proposal(proposal): proposals.append(proposal)
+            case let .decline(decline): declined.append(decline)
+            }
         }
 
         var provenance = backend.manifestPostprocess
@@ -1119,12 +1186,126 @@ public struct SpeakerProposer: Sendable {
             document: SpeakerProposalDocument(
                 sourceSegmentsSHA256: request.sourceSegmentsSHA256,
                 sourceCoverage: request.sourceCoverage,
+                constraint: .confirmOrDecline,
                 proposals: proposals,
                 declined: declined,
                 batches: records
             ),
             manifestPostprocess: provenance
         )
+    }
+
+    private enum ConstrainedOutcome {
+        case proposal(SpeakerProposal)
+        case decline(SpeakerProposalDecline)
+    }
+
+    /// The confirm-or-decline rule applied to one segment, after the decision
+    /// passed `validate`. A proposal survives only when it names the top-ranked
+    /// candidate. Everything else becomes a decline that says why, and whenever
+    /// the constraint rather than the model decided, the model's own answer is
+    /// kept beside it: the 21 overturns and 23 tie-picks of the first real run
+    /// are the evidence a later measurement needs, and dropping them would
+    /// make the constraint indistinguishable from a model that never disagreed.
+    private func resolveUnderConstraint(
+        _ decision: SpeakerProposalDecision?,
+        segmentIndex: Int,
+        evidence: SegmentSpeakerEvidence
+    ) -> ConstrainedOutcome {
+        let topRanked = SpeakerProposalConstraint.topRankedCandidate(
+            among: evidence.candidates
+        )
+        func decline(
+            _ cause: SpeakerProposalDeclineCause,
+            reason: String,
+            modelAnswer: SpeakerProposalDecision? = nil
+        ) -> ConstrainedOutcome {
+            .decline(SpeakerProposalDecline(
+                segmentIndex: segmentIndex,
+                reason: reason,
+                acousticOutcome: evidence.outcome,
+                acousticTimelineCoverage: evidence.timelineCoverage,
+                acousticCandidates: evidence.candidates,
+                cause: cause,
+                topRankedCandidate: topRanked,
+                modelAnswer: modelAnswer
+            ))
+        }
+        guard let decision else {
+            return decline(
+                .noDecision,
+                reason: "the proposer returned no decision for this segment"
+            )
+        }
+        guard let topRanked else {
+            // Nothing to confirm, so the constraint decides before the model's
+            // answer is even read; the answer is still kept.
+            if evidence.candidates.isEmpty {
+                return decline(
+                    .noAcousticCandidates,
+                    reason: "Declined under confirm-or-decline: no diarization turn overlapped this segment, so there is no top-ranked candidate to confirm. "
+                        + Self.modelAnswerClause(decision),
+                    modelAnswer: decision
+                )
+            }
+            return decline(
+                .noTopRankedCandidate,
+                reason: "Declined under confirm-or-decline: the acoustic candidates \(Self.tiedSpeakers(in: evidence.candidates)) hold equal overlap, so there is no top-ranked candidate to confirm. "
+                    + Self.modelAnswerClause(decision),
+                modelAnswer: decision
+            )
+        }
+        switch decision.disposition {
+        case .decline:
+            return decline(.modelDeclined, reason: decision.reason)
+        case .propose where decision.proposedSpeaker == topRanked:
+            return .proposal(SpeakerProposal(
+                segmentIndex: segmentIndex,
+                proposedSpeaker: decision.proposedSpeaker,
+                reason: decision.reason,
+                acousticOutcome: evidence.outcome,
+                acousticTimelineCoverage: evidence.timelineCoverage,
+                acousticCandidates: evidence.candidates
+            ))
+        case .propose:
+            let share = evidence.candidates
+                .first { $0.speaker == topRanked }
+                .map { Self.percent($0.share) } ?? "an unknown share"
+            return decline(
+                .modelDisagreedWithTopRankedCandidate,
+                reason: "Declined under confirm-or-decline: the language evidence pointed to speaker \(decision.proposedSpeaker), but the top-ranked candidate is speaker \(topRanked) at \(share) of the overlapped speech, and a proposal may only confirm that candidate. The model's reason: \(decision.reason)",
+                modelAnswer: decision
+            )
+        }
+    }
+
+    private static func modelAnswerClause(
+        _ decision: SpeakerProposalDecision
+    ) -> String {
+        switch decision.disposition {
+        case .propose:
+            "The model proposed speaker \(decision.proposedSpeaker): \(decision.reason)"
+        case .decline:
+            "The model also declined: \(decision.reason)"
+        }
+    }
+
+    /// The speakers sharing the top overlap, named in the order the merger
+    /// ranked them.
+    private static func tiedSpeakers(
+        in candidates: [SpeakerCandidateEvidence]
+    ) -> String {
+        let top = candidates.map(\.overlapS).max() ?? 0
+        let names = candidates
+            .filter { top - $0.overlapS <= SpeakerProposalConstraint.topRankedMarginS }
+            .map(\.speaker)
+        guard names.count > 1 else { return names.joined() }
+        return names.dropLast().joined(separator: ", ") + " and " + names.last!
+    }
+
+    private static func percent(_ share: Double) -> String {
+        guard share.isFinite else { return "an unknown share" }
+        return "\(Int((share * 100).rounded()))%"
     }
 
     private func validate(
@@ -1149,7 +1330,10 @@ public struct SpeakerProposer: Sendable {
             // A proposal may only name a speaker the acoustics already put in
             // play for this segment. Where the acoustics named nobody at all,
             // it may name any speaker the run itself resolved, and no other:
-            // this layer proposes who spoke, it never invents a speaker.
+            // this layer proposes who spoke, it never invents a speaker. The
+            // confirm-or-decline rule is applied afterwards, in
+            // `resolveUnderConstraint`, so that an answer this check accepts
+            // is kept as evidence even when the constraint declines it.
             let allowed = evidence.map { record in
                 record.candidates.isEmpty
                     ? Set(knownSpeakers)
@@ -1434,12 +1618,18 @@ public enum SpeakerProposalPrompt {
             var speaker: String?
             var acousticOutcome: String?
             var acousticCandidates: [CandidateInput]?
+            /// Written for every target, as `null` when no candidate leads.
+            /// The model cannot derive this from the rounded shares — 0.5004
+            /// against 0.4996 prints as 0.5 and 0.5 — and the rule it is asked
+            /// to follow turns on exactly that distinction.
+            var topRankedCandidate: String?
 
             enum CodingKeys: String, CodingKey {
                 case target, text, speaker
                 case segmentIndex = "segment_index"
                 case acousticOutcome = "acoustic_outcome"
                 case acousticCandidates = "acoustic_candidates"
+                case topRankedCandidate = "top_ranked_candidate"
             }
 
             func encode(to encoder: Encoder) throws {
@@ -1456,6 +1646,9 @@ public enum SpeakerProposalPrompt {
                     acousticCandidates,
                     forKey: .acousticCandidates
                 )
+                if target {
+                    try container.encode(topRankedCandidate, forKey: .topRankedCandidate)
+                }
             }
         }
 
@@ -1502,16 +1695,21 @@ public enum SpeakerProposalPrompt {
                             overlapS: rounded($0.overlapS),
                             share: rounded($0.share)
                         )
+                    },
+                    topRankedCandidate: record.flatMap {
+                        SpeakerProposalConstraint.topRankedCandidate(
+                            among: $0.candidates
+                        )
                     }
                 )
             }
         )
         let instruction = [
-            "Propose which speaker spoke each target segment of this meeting transcript. This is a proposal for human review. The acoustic speaker assignment is authoritative and your answer never changes it.",
+            "Confirm or decline a speaker for each target segment of this meeting transcript. This is a proposal for human review. The acoustic speaker assignment is authoritative and your answer never changes it.",
             "Only segments with target true are open. Segments with target false already have an acoustic speaker; they are context and you must not answer for them.",
-            "acoustic_candidates lists the speakers whose diarization turns overlapped a target segment, how many seconds each held, and each one's share of the segment's attributed time. A share near 0.5 means the acoustics could not choose between them. What you add is the conversation: who was answering whom, who was mid-sentence, who the surrounding turns belong to.",
-            "When a target segment has a nonempty acoustic_candidates list, proposed_speaker must be one of those candidate speakers. When it is empty, proposed_speaker must be one of known_speakers. Never name a speaker outside those sets and never invent one.",
-            "Use decline whenever the surrounding text gives no real reason to prefer one candidate over another. A decline is a correct answer; a guess dressed as a proposal is not.",
+            "acoustic_candidates lists the speakers whose diarization turns overlapped a target segment, how many seconds each held, and each one's share of the segment's attributed time. top_ranked_candidate names the candidate with the largest share, or is null when no candidate leads: none overlapped the segment, or the top candidates tie. What you add is the conversation: who was answering whom, who was mid-sentence, who the surrounding turns belong to.",
+            "Propose only to confirm top_ranked_candidate: when the conversation supports that speaker, set proposed_speaker to top_ranked_candidate. Never propose any other speaker, even when the conversation points to one, and never invent a speaker.",
+            "Decline when top_ranked_candidate is null, when the conversation gives no real reason to confirm that candidate, or when the conversation points to a different speaker; in that last case, name in the reason the speaker the conversation pointed to. A decline is a correct answer; a guess dressed as a proposal is not.",
             "Return exactly one JSON object with this shape and no commentary:",
             #"{"speaker_proposals":[{"segment_index":0,"proposed_speaker":"0","disposition":"propose","reason":"brief reason"}]}"#,
             #"The only root key is speaker_proposals. Every entry has exactly segment_index, proposed_speaker, disposition, and reason. disposition is propose or decline. When disposition is decline, proposed_speaker must be the empty string. Answer exactly once for every segment whose target is true, and for no other segment."#,

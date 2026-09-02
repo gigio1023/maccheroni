@@ -490,9 +490,9 @@ class BackendEvidenceTests(unittest.TestCase):
             "ok " * 40: 40,
             "네, " * 75: 75,
             # A long passage that reuses one common word without ever repeating
-            # a block adjacently is not degeneration.
+            # a block adjacently is not looping.
             " ".join("the item%d" % index for index in range(20)): 1,
-            # A multi-unit phrase cycled adjacently is degeneration, and is the
+            # A multi-unit phrase cycled adjacently is looping, and is the
             # shape a four-unit window missed on a measured run.
             " ".join(["the customer count rose sharply"] * 30): 30,
         }
@@ -511,16 +511,16 @@ class BackendEvidenceTests(unittest.TestCase):
         cycle = "the customer count rose sharply "
         self.assertEqual(runner.VIBEVOICE_REPETITION_PHRASE_UNITS, 8)
         self.assertEqual(runner.repetition_run_length(cycle * 333), 333)
-        self.assertTrue(runner.is_repetition_degenerate(cycle * 333))
+        self.assertTrue(runner.is_repetition_looping(cycle * 333))
         # The same text scored with the old window is why the miss happened.
         self.assertLess(runner.repetition_run_length(cycle * 333, phrase_units=4), 12)
 
     def test_repetition_threshold_boundary_is_below_at_and_above(self) -> None:
-        self.assertFalse(runner.is_repetition_degenerate("ok " * (runner.VIBEVOICE_REPETITION_RUN_THRESHOLD - 1)))
-        self.assertTrue(runner.is_repetition_degenerate("ok " * runner.VIBEVOICE_REPETITION_RUN_THRESHOLD))
-        self.assertTrue(runner.is_repetition_degenerate("ok " * (runner.VIBEVOICE_REPETITION_RUN_THRESHOLD + 1)))
+        self.assertFalse(runner.is_repetition_looping("ok " * (runner.VIBEVOICE_REPETITION_RUN_THRESHOLD - 1)))
+        self.assertTrue(runner.is_repetition_looping("ok " * runner.VIBEVOICE_REPETITION_RUN_THRESHOLD))
+        self.assertTrue(runner.is_repetition_looping("ok " * (runner.VIBEVOICE_REPETITION_RUN_THRESHOLD + 1)))
 
-    def test_a_sub_critical_stutter_that_escapes_is_not_degeneration(self) -> None:
+    def test_a_sub_critical_stutter_that_escapes_is_not_looping(self) -> None:
         """The strongest negative case: an accepted transcript contains the
         same failure mode below the threshold.
 
@@ -531,11 +531,11 @@ class BackendEvidenceTests(unittest.TestCase):
         """
         escaped = "and then " + "again " * 6 + "the meeting moved on to the next item"
         self.assertEqual(runner.repetition_run_length(escaped), 6)
-        self.assertFalse(runner.is_repetition_degenerate(escaped))
+        self.assertFalse(runner.is_repetition_looping(escaped))
 
         # The same word repeated in the audio itself, transcribed correctly.
         backchannel = "yes, yes, yes. the address is over there"
-        self.assertFalse(runner.is_repetition_degenerate(backchannel))
+        self.assertFalse(runner.is_repetition_looping(backchannel))
 
         prefix = runner.recover_vibevoice_prefix(
             "[" + ",".join([
@@ -627,7 +627,7 @@ class BackendEvidenceTests(unittest.TestCase):
         )
 
         self.assertEqual(result["outcome"], "limit")
-        self.assertEqual(result["stop_reason"], "repetitionDegeneration")
+        self.assertEqual(result["stop_reason"], "repetitionLooping")
         self.assertEqual(result["raw_text"], "")
         self.assertEqual(result["segments"], [])
         prefix = result["partial_prefix"]
@@ -669,7 +669,7 @@ class BackendEvidenceTests(unittest.TestCase):
         result, _ = self.run_vibevoice_stub(generated_tokens=4, max_tokens=5, raw_json=raw_json)
 
         self.assertEqual(result["outcome"], "limit")
-        self.assertEqual(result["stop_reason"], "repetitionDegeneration")
+        self.assertEqual(result["stop_reason"], "repetitionLooping")
         self.assertEqual(result["segments"], [])
         self.assertEqual(result["partial_prefix"]["promoted_object_count"], 1)
         self.assertAlmostEqual(result["partial_prefix"]["coverage_s"], 0.6)

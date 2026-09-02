@@ -984,6 +984,77 @@ final class MaccheroniAppModel {
         self.selection = selection
     }
 
+    /// Renames a recording in the library.
+    ///
+    /// Only `displayName` in the library index changes. The source audio, the
+    /// run directory and every artifact keep the names they were written with,
+    /// so a rename cannot reach anything a run's manifest refers to. The index
+    /// is written before the change is adopted: a failed write leaves the
+    /// library exactly as it was rather than showing a name nobody saved.
+    func rename(_ record: LibraryRecord, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = records.firstIndex(where: { $0.id == record.id }),
+              records[index].displayName != trimmed
+        else { return }
+        var updated = records
+        updated[index].displayName = trimmed
+        do {
+            try recordSaver(updated)
+            records = updated
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// What a move to the Trash would take, for the confirmation to name.
+    func trashPlan(for record: LibraryRecord) -> LibraryTrashPlan {
+        repository.trashPlan(for: record)
+    }
+
+    /// Whether this recording's files may be moved right now. A run still
+    /// writing into the run directory has to finish first: moving that
+    /// directory out from under the CLI would turn a live run into a failure
+    /// with no cause a reader could name.
+    func canMoveToTrash(_ record: LibraryRecord) -> Bool {
+        record.id != activeRecordID
+            && record.id != activeExistingRunPostprocess?.recordID
+            && record.state != .transcribing
+    }
+
+    /// The second of the two steps. The first is the confirmation the sidebar
+    /// opens; nothing moves until this runs.
+    ///
+    /// The files go to the Trash first and the index follows. Writing the
+    /// index first would risk losing the library entry while the files stayed
+    /// where they were, which is the worse of the two failures: a recording
+    /// whose files are in the Trash is one Put Back away from whole, and an
+    /// entry deleted from the index is not recoverable from the app at all.
+    /// A failure at any point leaves the entry in place.
+    func moveToTrash(_ plan: LibraryTrashPlan) async {
+        guard let record = records.first(where: { $0.id == plan.recordID }) else { return }
+        guard canMoveToTrash(record) else {
+            errorMessage = appString(
+                "Wait for this recording's transcription to finish before moving it to the Trash."
+            )
+            return
+        }
+        do {
+            try await repository.moveToTrash(plan)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        if selection == .record(plan.recordID) {
+            stopPlayback()
+            selection = .capture
+        }
+        records.removeAll { $0.id == plan.recordID }
+        runFailures.removeValue(forKey: plan.recordID)
+        existingRunPostprocessFailures.removeValue(forKey: plan.recordID)
+        saveRecordsReportingErrors()
+    }
+
     func renameSpeaker(_ speaker: String, to name: String) {
         guard case let .record(id) = selection,
               let index = records.firstIndex(where: { $0.id == id })
@@ -1328,6 +1399,11 @@ final class MaccheroniAppModel {
                 selectedRunIssue = .missingArtifact(error.localizedDescription)
             case .originalUnavailable:
                 selectedRunIssue = .missing
+            case .trashTargetVanished, .trashRefused, .trashFailed:
+                // Unreachable here: only `moveToTrash` raises these, and it
+                // reports through `errorMessage`. Kept explicit so a new
+                // repository error has to be classified rather than absorbed.
+                selectedRunIssue = .decoding(error.localizedDescription)
             }
         } catch let error as RunIntegrityError {
             selectedRunIssue = .integrity(error.localizedDescription)

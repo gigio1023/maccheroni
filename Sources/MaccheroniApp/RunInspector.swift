@@ -39,29 +39,36 @@ struct RunInspectorSections: View {
             {
                 LabeledContent(appLocalized("Outcome")) {
                     Text(RunInspectorWording.status(run.manifest.status))
+                        .inspectorValue()
                 }
                 LabeledContent(appLocalized("Transcribed")) {
                     Text(verbatim: RunInspectorWording.coverage(run.manifest.coverage))
+                        .inspectorValue()
                 }
                 LabeledContent(appLocalized("Speakers")) {
                     Text(run.transcript.numSpeakers.formatted())
                         .monospacedDigit()
+                        .inspectorValue()
                 }
                 LabeledContent(appLocalized("Segments")) {
                     Text(verbatim: RunInspectorWording.segments(run.transcript.segments))
                         .monospacedDigit()
+                        .inspectorValue()
                 }
-                LabeledContent(appLocalized("Took")) {
+                LabeledContent(appLocalized("Duration")) {
                     Text(Duration.seconds(run.manifest.timing.wallTimeS), format: .time(pattern: .hourMinuteSecond))
                         .monospacedDigit()
+                        .inspectorValue()
                 }
                 LabeledContent(appLocalized("Profile")) {
                     Text(record.profileID.title)
+                        .inspectorValue()
                 }
                 LabeledContent(appLocalized("Recording")) {
                     Text(verbatim: run.manifest.input.fileName)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .inspectorValue()
                 }
             }
 
@@ -69,22 +76,28 @@ struct RunInspectorSections: View {
                 Section(appLocalized("Current Derived Result")) {
                     LabeledContent(appLocalized("Operation")) {
                         Text(PostprocessOperationChoice(operation.mode).title)
+                            .inspectorValue()
                     }
                     if let target = operation.targetLanguage {
                         LabeledContent(appLocalized("Target Language")) {
-                            if let language = AppLanguage(rawValue: target) {
-                                Text(language.title)
-                            } else {
-                                Text(verbatim: target)
+                            Group {
+                                if let language = AppLanguage(rawValue: target) {
+                                    Text(language.title)
+                                } else {
+                                    Text(verbatim: target)
+                                }
                             }
+                            .inspectorValue()
                         }
                     }
                     LabeledContent(appLocalized("Glossary Used")) {
                         Text(RunInspectorWording.glossarySemantics(operation.glossarySemantics))
+                            .inspectorValue()
                     }
                     LabeledContent(appLocalized("Glossary Terms")) {
                         Text(operation.glossaryItemCount.formatted())
                             .monospacedDigit()
+                            .inspectorValue()
                     }
                 }
             }
@@ -96,26 +109,34 @@ struct RunInspectorSections: View {
                 {
                     LabeledContent(appLocalized("Operation")) {
                         Text(PostprocessOperationChoice(postprocess.mode).title)
+                            .inspectorValue()
                     }
                     if let target = postprocess.targetLanguage {
                         LabeledContent(appLocalized("Target Language")) {
-                            if let language = AppLanguage(rawValue: target) {
-                                Text(language.title)
-                            } else {
-                                Text(verbatim: target)
+                            Group {
+                                if let language = AppLanguage(rawValue: target) {
+                                    Text(language.title)
+                                } else {
+                                    Text(verbatim: target)
+                                }
                             }
+                            .inspectorValue()
                         }
                     }
                     LabeledContent(appLocalized("Model")) {
                         Text(verbatim: postprocess.modelID)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            .inspectorValue()
                     }
-                    LabeledContent(appLocalized("Sent To The Model")) {
-                        switch postprocess.inputMode {
-                        case .textOnly:
-                            Text(appLocalized("Transcript text only. Audio stayed on this Mac."))
+                    LabeledContent(appLocalized("Sent to the Model")) {
+                        Group {
+                            switch postprocess.inputMode {
+                            case .textOnly:
+                                Text(appLocalized("Transcript text only. Audio stayed on this Mac."))
+                            }
                         }
+                        .inspectorValue()
                     }
                 }
             }
@@ -123,14 +144,48 @@ struct RunInspectorSections: View {
             if !run.derivedResults.isEmpty {
                 Section(appLocalized("Derived Results")) {
                     ForEach(run.derivedResults) { result in
-                        LabeledContent {
-                            Text(result.createdAt, format: .dateTime.year().month().day().hour().minute())
-                                .foregroundStyle(.secondary)
-                        } label: {
-                            Label {
-                                Text(PostprocessOperationChoice(result.operation).title)
-                            } icon: {
-                                Image(systemName: result.isCurrent ? "checkmark.circle.fill" : "circle")
+                        VStack(
+                            alignment: .leading,
+                            spacing: AppTheme.Spacing.tight
+                        ) {
+                            LabeledContent {
+                                // Two speaker-proposal sets carry the same
+                                // name, so when each was made is what a reader
+                                // chooses on and it has to be readable side by
+                                // side. The year is dropped: it never tells two
+                                // derived sets of one run apart, and at the
+                                // inspector's 300-point minimum it pushed the
+                                // value onto a second line, where the two rows
+                                // stopped being comparable by eye.
+                                Text(result.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                                    .monospacedDigit()
+                                    .foregroundStyle(AppTheme.Palette.inkSecondary)
+                            } label: {
+                                Label {
+                                    Text(RunInspectorWording.derivedSet(result))
+                                } icon: {
+                                    // The accent is what marks the current
+                                    // thing everywhere else on this surface.
+                                    Image(systemName: result.isCurrent ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(result.isCurrent
+                                            ? AppTheme.Palette.accent
+                                            : AppTheme.Palette.inkSecondary)
+                                }
+                            }
+                            // Two proposal sets made minutes apart are told
+                            // apart by a timestamp only if the reader already
+                            // knows which one they wanted. What each set did is
+                            // the answer, so it is printed here — the same
+                            // sentence the transcript surface prints over the
+                            // proposed layer, for the same two numbers, rather
+                            // than a second wording for one fact.
+                            if let counts = result.speakerProposalCounts {
+                                Text(appLocalized("\(counts.proposed) proposed, \(counts.declined) declined. Not acoustic evidence, and not measured."))
+                                    .font(AppTheme.Typography.meta)
+                                    .foregroundStyle(AppTheme.Palette.inkSecondary)
+                                    .monospacedDigit()
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }
@@ -145,7 +200,7 @@ struct RunInspectorSections: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(RunInspectorWording.role(model.role))
                             .font(AppTheme.Typography.meta)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.Palette.inkSecondary)
                         Text(verbatim: model.hfModelID)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
@@ -162,14 +217,17 @@ struct RunInspectorSections: View {
                 LabeledContent(appLocalized("Terms")) {
                     Text(run.manifest.glossary.itemCount.formatted())
                         .monospacedDigit()
+                        .inspectorValue()
                 }
-                LabeledContent(appLocalized("Reached The Model")) {
+                LabeledContent(appLocalized("Reached the Model")) {
                     Text(run.manifest.glossary.applied
                         ? appLocalized("Yes")
                         : appLocalized("No"))
+                        .inspectorValue()
                 }
                 LabeledContent(appLocalized("How")) {
                     Text(RunInspectorWording.injection(run.manifest.glossary.injectionMode))
+                        .inspectorValue()
                 }
             }
 
@@ -177,27 +235,36 @@ struct RunInspectorSections: View {
                 LabeledContent(appLocalized("Sample Rate")) {
                     Text(verbatim: "\(run.manifest.preprocessing.sampleRateHz.formatted()) Hz")
                         .monospacedDigit()
+                        .inspectorValue()
                 }
                 LabeledContent(appLocalized("Channels")) {
                     Text(run.manifest.preprocessing.channels.formatted())
                         .monospacedDigit()
+                        .inspectorValue()
                 }
                 LabeledContent(appLocalized("Peak Normalization")) {
                     Text(run.manifest.preprocessing.peakNormalization ? appLocalized("On") : appLocalized("Off"))
+                        .inspectorValue()
                 }
                 LabeledContent(appLocalized("Voice Activity Detection")) {
-                    if let backend = run.manifest.preprocessing.vad.backend {
-                        Text(verbatim: backend)
-                    } else {
-                        Text(appLocalized("Off"))
+                    Group {
+                        if let backend = run.manifest.preprocessing.vad.backend {
+                            Text(verbatim: backend)
+                        } else {
+                            Text(appLocalized("Off"))
+                        }
                     }
+                    .inspectorValue()
                 }
                 LabeledContent(appLocalized("Enhancement")) {
-                    if let backend = run.manifest.preprocessing.enhancement.backend {
-                        Text(verbatim: backend)
-                    } else {
-                        Text(appLocalized("Off"))
+                    Group {
+                        if let backend = run.manifest.preprocessing.enhancement.backend {
+                            Text(verbatim: backend)
+                        } else {
+                            Text(appLocalized("Off"))
+                        }
                     }
+                    .inspectorValue()
                 }
             }
 
@@ -210,7 +277,7 @@ struct RunInspectorSections: View {
             } footer: {
                 Text(appLocalized("Run and result identifiers, file fingerprints, model revisions, and the batching numbers behind post-processing."))
                     .font(AppTheme.Typography.meta)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
             }
         }
     }
@@ -254,6 +321,26 @@ enum RunInspectorWording {
         case .freeTextContext: appLocalized("In the model's context prompt", locale: locale)
         case .hotwordInstruction: appLocalized("As a hotword instruction", locale: locale)
         case .ctcVocabulary: appLocalized("As a decoder vocabulary", locale: locale)
+        }
+    }
+
+    /// What family a derived set belongs to, read from `kind` and never from
+    /// `mode`. A speaker-proposal manifest keeps `mode == .correction` for a
+    /// structural reason in the derived contract and corrected no text, so
+    /// naming it from `mode` labels it "Correct" in the one panel a reader
+    /// consults to find out what a set actually is.
+    static func derivedSet(
+        _ result: DerivedResultSummary,
+        locale: Locale? = nil
+    ) -> LocalizedStringResource {
+        switch result.kind {
+        case .speakerProposal:
+            appLocalized("Speaker Proposal", locale: locale)
+        case .textPostprocess:
+            switch result.operation {
+            case .correction: appLocalized("Correct", locale: locale)
+            case .translation: appLocalized("Translate", locale: locale)
+            }
         }
     }
 
@@ -346,7 +433,7 @@ private struct RunFingerprints: View {
                 )
             }
             FingerprintRow(
-                label: appLocalized("Pipeline"),
+                label: appLocalized("Transcription Backend"),
                 value: "\(run.manifest.backend.name) \(run.manifest.backend.version)"
             )
             if let postprocess = run.effectivePostprocess {
@@ -366,7 +453,7 @@ private struct RunFingerprints: View {
             }
             ForEach(run.derivedResults) { result in
                 FingerprintRow(
-                    label: PostprocessOperationChoice(result.operation).title,
+                    label: RunInspectorWording.derivedSet(result),
                     value: result.id
                 )
             }
@@ -434,6 +521,22 @@ private struct BatchingFingerprints: View {
     }
 }
 
+private extension View {
+    /// The inspector's values, in the ink token.
+    ///
+    /// `LabeledContent` styles its trailing content with the system secondary
+    /// label by default. Rendered, that measured **2.67–3.03:1** against the
+    /// grouped form's `#F9F9F9` card in the light appearance — every value on
+    /// the panel, below the 4.5:1 floor, and exactly the colour
+    /// `docs/ui-design.md` names as the cause of most of the light-appearance
+    /// failures the first rework shipped with. An explicit foreground style on
+    /// the content wins over the style's default, so the ban is enforced here
+    /// rather than trusting twenty call sites to remember it.
+    func inspectorValue() -> some View {
+        foregroundStyle(AppTheme.Palette.ink)
+    }
+}
+
 private struct FingerprintRow: View {
     let label: LocalizedStringResource
     let value: String
@@ -442,7 +545,7 @@ private struct FingerprintRow: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
                 .font(AppTheme.Typography.meta)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
             Text(verbatim: value)
                 .font(AppTheme.Typography.meta.monospaced())
                 .textSelection(.enabled)

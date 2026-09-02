@@ -4,6 +4,16 @@
 <dict>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
+	<key>%@ The system reported: %@</key>
+	<string>%@ Система сообщила: %@</string>
+	<key>%@ could not be moved because its folder is not writable. Nothing was moved.</key>
+	<string>Не удалось переместить %@: его папка недоступна для записи. Ничего не перемещено.</string>
+	<key>%@ could not be moved to the Trash, and part of it is in the Trash now. Put it back in the Finder. The recording is still in your library.</key>
+	<string>Не удалось переместить %@ в корзину, часть файлов уже там. Верните их через Finder. Запись по-прежнему в библиотеке.</string>
+	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
+	<string>Не удалось переместить %@ в корзину. Файлы остались на месте, а запись по-прежнему в библиотеке.</string>
+	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
+	<string>%@ больше не находится там, где ожидает библиотека, поэтому ничего не перемещено.</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%1$@ из %2$@ (%3$@)</string>
 	<key>%@ of speech</key>
@@ -234,6 +244,8 @@
 	<string>Загрузить закрепленную модель…</string>
 	<key>Drop an audio file here</key>
 	<string>Скиньте сюда аудиофайл</string>
+	<key>Duration</key>
+	<string>Длительность</string>
 	<key>Edit Glossary</key>
 	<string>Редактировать глоссарий</string>
 	<key>Elapsed</key>
@@ -366,8 +378,8 @@
 	<string>Maccheroni не удалось прочитать отчёт о готовности от механизма командной строки.</string>
 	<key>Maccheroni is processing the full recording locally.</key>
 	<string>Maccheroni обрабатывает всю запись локально.</string>
-	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Model removal uses the macOS Trash.</key>
-	<string>Maccheroni никогда не удаляет и не перезаписывает записи, необработанные расшифровки или артефакты завершенного запуска. Для удаления модели используется корзина macOS.</string>
+	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Removing a model or a recording uses the macOS Trash.</key>
+	<string>Maccheroni никогда не удаляет и не перезаписывает записи, необработанные расшифровки или артефакты завершенного запуска. Для удаления модели или записи используется корзина macOS.</string>
 	<key>Maccheroni stopped this run and its record does not name a more specific cause.</key>
 	<string>Maccheroni остановил этот запуск, и в записи нет более конкретной причины.</string>
 	<key>Maccheroni will not assign a speaker without acoustic evidence, so this stays as it is.</key>
@@ -392,6 +404,12 @@
 	<string>Модели</string>
 	<key>Move Model to Trash</key>
 	<string>Переместить модель в корзину</string>
+	<key>Move to Trash</key>
+	<string>Переместить в корзину</string>
+	<key>Move to Trash…</key>
+	<string>Переместить в корзину…</string>
+	<key>Move “%@” to the Trash?</key>
+	<string>Переместить «%@» в корзину?</string>
 	<key>New Recording</key>
 	<string>Новая запись</string>
 	<key>No</key>
@@ -458,8 +476,6 @@
 	<string>Пиковая нормализация</string>
 	<key>People</key>
 	<string>Люди</string>
-	<key>Pipeline</key>
-	<string>Конвейер обработки</string>
 	<key>Places</key>
 	<string>Места</string>
 	<key>Planned Model</key>
@@ -504,7 +520,7 @@
 	<string>Предоставил</string>
 	<key>Quantization</key>
 	<string>Квантование</string>
-	<key>Reached The Model</key>
+	<key>Reached the Model</key>
 	<string>Дошло до модели</string>
 	<key>Ready to Transcribe</key>
 	<string>Готов к расшифровке</string>
@@ -516,6 +532,8 @@
 	<string>Запись</string>
 	<key>Recording %@</key>
 	<string>Запись %@</string>
+	<key>Recording Name</key>
+	<string>Название записи</string>
 	<key>Recording Not Found</key>
 	<string>Запись не найдена</string>
 	<key>Recording SHA-256</key>
@@ -532,14 +550,22 @@
 	<string>Удалять</string>
 	<key>Remove %@</key>
 	<string>Удалять %@</string>
+	<key>Remove from Library</key>
+	<string>Удалить из библиотеки</string>
 	<key>Remove this segment from the copy selection.</key>
 	<string>Удалить этот сегмент из выбранного для копирования.</string>
+	<key>Remove “%@” from the library?</key>
+	<string>Удалить «%@» из библиотеки?</string>
 	<key>Rename Speaker</key>
 	<string>Переименовать спикера</string>
 	<key>Rename this speaker everywhere in the corrected transcript.</key>
 	<string>Переименуйте этого докладчика везде в исправленной стенограмме.</string>
 	<key>Rename this speaker everywhere in this transcript.</key>
 	<string>Переименовать этого говорящего во всей этой расшифровке.</string>
+	<key>Renames this recording in the library only. The audio file and the run folder keep their names.</key>
+	<string>Переименовывает эту запись только в библиотеке. Имена аудиофайла и папки запуска не меняются.</string>
+	<key>Rename…</key>
+	<string>Переименовать…</string>
 	<key>Request Logs</key>
 	<string>Журналы запросов</string>
 	<key>Resolved</key>
@@ -554,14 +580,18 @@
 	<string>Показать запуск в Finder</string>
 	<key>Reveal in Finder</key>
 	<string>Показать в Finder</string>
+	<key>Review</key>
+	<string>Проверить</string>
 	<key>Review Profiles</key>
 	<string>Просмотреть профили</string>
 	<key>Review This Segment</key>
 	<string>Проверить этот сегмент</string>
 	<key>Review Uncertain Transcript</key>
 	<string>Просмотрите неопределенную стенограмму</string>
-	<key>Review what the pipeline was unsure about here.</key>
-	<string>Проверьте то, в чём обработка здесь не была уверена.</string>
+	<key>Review what Maccheroni was unsure about here.</key>
+	<string>Проверьте то, в чём Maccheroni здесь не был уверен.</string>
+	<key>Reviewed</key>
+	<string>Проверено</string>
 	<key>Revision</key>
 	<string>Редакция</string>
 	<key>Run</key>
@@ -602,12 +632,14 @@
 	<string>Сегментов в пакете</string>
 	<key>Select this segment for copying.</key>
 	<string>Выбрать этот сегмент для копирования.</string>
-	<key>Sent To The Model</key>
+	<key>Sent to the Model</key>
 	<string>Отправлено модели</string>
 	<key>Service-managed (limit unavailable)</key>
 	<string>Управляется сервисом (лимит недоступен)</string>
 	<key>Settings Could Not Be Loaded</key>
 	<string>Не удалось загрузить настройки</string>
+	<key>Share</key>
+	<string>Доля</string>
 	<key>Show or hide exact run and model details.</key>
 	<string>Показать или скрыть точные сведения о запуске и модели.</string>
 	<key>Show or hide how this run was produced.</key>
@@ -626,10 +658,14 @@
 	<string>SHA-256 исходных сегментов</string>
 	<key>Spanish</key>
 	<string>испанский</string>
+	<key>Speaker</key>
+	<string>Говорящий</string>
 	<key>Speaker %@</key>
 	<string>Говорящий %@</string>
 	<key>Speaker Diarization</key>
 	<string>Диаризация говорящих</string>
+	<key>Speaker Proposal</key>
+	<string>Предложение говорящего</string>
 	<key>Speaker Separation</key>
 	<string>Разделение говорящих</string>
 	<key>Speaker name</key>
@@ -690,6 +726,8 @@
 	<string>Полнота распознавания терминов</string>
 	<key>Terms</key>
 	<string>Термины</string>
+	<key>Text</key>
+	<string>Текст</string>
 	<key>Text only</key>
 	<string>Только текст</string>
 	<key>The Hugging Face %@ command failed (exit %lld): %@</key>
@@ -712,6 +750,8 @@
 	<string>Экспортированное имя говорящего для сегмента %lld пусто.</string>
 	<key>The exported text is empty for segment %lld.</key>
 	<string>Экспортированный текст для сегмента %lld пуст.</string>
+	<key>The files this recording named are no longer on disk, so this removes its library entry and nothing else.</key>
+	<string>Файлов этой записи больше нет на диске, поэтому удаляется только её запись в библиотеке.</string>
 	<key>The folder Maccheroni saves recordings and runs in cannot be reached.</key>
 	<string>Нет доступа к папке, в которой Maccheroni сохраняет записи и результаты запусков.</string>
 	<key>The glossary for this profile could not be used for this run.</key>
@@ -766,6 +806,8 @@
 	<string>Ответившая речевая модель не совпадает с моделью, закреплённой в этом профиле, поэтому её вывод отклонён.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>Модель распознавания речи, необходимая этому профилю, не установлена на этом Mac.</string>
+	<key>The top speakers held exactly equal time in this segment.</key>
+	<string>В этом сегменте ведущие говорящие занимали ровно одинаковое время.</string>
 	<key>The transcript could not be copied.</key>
 	<string>Не удалось скопировать расшифровку.</string>
 	<key>The transcription engine could not start: %@</key>
@@ -780,6 +822,12 @@
 	<string>Активной записи нет.</string>
 	<key>This Run</key>
 	<string>Этот запуск</string>
+	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>Результат запуска будет перемещён в корзину. Ничего не удаляется, и команда «Положить обратно» в Finder его восстановит.</string>
+	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>
+	<string>Исходная запись и результат запуска будут перемещены в корзину вместе. Ничего не удаляется, и команда «Положить обратно» в Finder их восстановит.</string>
+	<key>This moves the source audio to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>Исходная запись будет перемещена в корзину. Ничего не удаляется, и команда «Положить обратно» в Finder её восстановит.</string>
 	<key>This name applies to every %@ segment in corrected exports.</key>
 	<string>Это имя применяется к каждому сегменту %@ в исправленном экспорте.</string>
 	<key>This name applies to every %@ segment in exports.</key>
@@ -794,20 +842,18 @@
 	<string>Этот запуск достиг лимита вывода MOSS даже после ограниченного разделения. Перед повторной попыткой выберите другой профиль или используйте более короткую копию.</string>
 	<key>This segment carries no recorded speaker evidence.</key>
 	<string>Для этого сегмента не записаны данные о говорящем.</string>
-	<key>This segment was marked uncertain by the pipeline.</key>
-	<string>Этот сегмент был отмечен как неопределённый конвейером обработки.</string>
 	<key>This speaker held this much of the segment's speech.</key>
 	<string>Доля речи сегмента, приходящаяся на этого говорящего.</string>
 	<key>This stage covered only part of the recording.</key>
 	<string>Этот этап охватил только часть записи.</string>
 	<key>This stage stopped the run.</key>
 	<string>На этом этапе запуск остановился.</string>
+	<key>Time</key>
+	<string>Время</string>
 	<key>Timeline coverage %@, and this run named a speaker only above %@.</key>
 	<string>Покрытие шкалы %@; этот запуск называл говорящего только выше %@.</string>
 	<key>Timeline coverage %@.</key>
 	<string>Покрытие шкалы %@.</string>
-	<key>Took</key>
-	<string>Заняло</string>
 	<key>Transcribed</key>
 	<string>Расшифровано</string>
 	<key>Transcribing</key>
@@ -830,6 +876,8 @@
 	<string>Только текст расшифровки. Аудио осталось на этом Mac.</string>
 	<key>Transcription</key>
 	<string>Транскрипция</string>
+	<key>Transcription Backend</key>
+	<string>Бэкенд транскрипции</string>
 	<key>Transcription Cancelled</key>
 	<string>Транскрипция отменена</string>
 	<key>Transcription Failed</key>
@@ -872,10 +920,12 @@
 	<string>Состояние томов</string>
 	<key>Wait for the active transcription to finish.</key>
 	<string>Подождите, пока активная транскрипция завершится.</string>
+	<key>Wait for this recording's transcription to finish before moving it to the Trash.</key>
+	<string>Дождитесь завершения расшифровки этой записи, прежде чем перемещать её в корзину.</string>
 	<key>Wall Time</key>
 	<string>Фактическое время</string>
-	<key>What The Pipeline Recorded</key>
-	<string>Что записала обработка</string>
+	<key>What Maccheroni Recorded</key>
+	<string>Что записал Maccheroni</string>
 	<key>Who Was Speaking</key>
 	<string>Кто говорил</string>
 	<key>Wording</key>

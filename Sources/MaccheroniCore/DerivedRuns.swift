@@ -34,8 +34,8 @@ public struct DerivedSourceLineage: Codable, Equatable, Sendable {
 
 /// How much of the source run's input its transcript actually covers.
 ///
-/// A derived run over a transcript with a hole in it is honest only if it says
-/// where the hole is. A bare "incomplete" flag is not enough for that: a reader
+/// A derived run over an incomplete transcript must record which range is
+/// missing. A bare "incomplete" flag is not enough for that: a reader
 /// deciding whether to trust a speaker proposal needs to know it was made over
 /// 1212.52 s of 1243.08 s with 30.56 s missing, and which range went missing.
 /// So the durations and the source run's own coverage message travel with the
