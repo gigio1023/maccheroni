@@ -59,6 +59,62 @@ struct RunnerCaptureRecoveryTests {
     }
 
     @Test @MainActor
+    func succeededRunLeavesNoRequestDirectoryBehind() async throws {
+        let fixture = try RunnerRecoveryFixture()
+        defer { fixture.remove() }
+        let runID = "sealed-and-tidy"
+        let script = try fixture.script(
+            creating: [(runID, try fixture.manifestPayload(runID: runID))],
+            printing: fixture.outputRoot.appendingPathComponent(runID).path
+        )
+        let runner = try fixture.runner(executableURL: script)
+
+        _ = try await runner.run(fixture.request) { _ in }
+
+        let leftovers = try FileManager.default.contentsOfDirectory(
+            at: fixture.requestsRoot,
+            includingPropertiesForKeys: nil
+        )
+        #expect(leftovers.isEmpty, "a sealed run must not leave its request scratch behind")
+    }
+
+    @Test @MainActor
+    func failedRunKeepsItsRequestDirectoryWithTheEngineStderr() async throws {
+        let fixture = try RunnerRecoveryFixture()
+        defer { fixture.remove() }
+        let script = fixture.root.appendingPathComponent("engine-refuses.sh")
+        try Data("""
+        #!/bin/sh
+        printf 'engine refused the request\n' >&2
+        exit 3
+
+        """.utf8).write(to: script)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: script.path
+        )
+        let runner = try fixture.runner(executableURL: script)
+
+        let error = await #expect(throws: TranscriptionRunnerError.self) {
+            _ = try await runner.run(fixture.request) { _ in }
+        }
+
+        guard case let .pipelineFailed(message) = error else {
+            Issue.record("Expected the engine's stderr to surface as pipelineFailed")
+            return
+        }
+        #expect(message == "engine refused the request")
+        let kept = try FileManager.default.contentsOfDirectory(
+            at: fixture.requestsRoot,
+            includingPropertiesForKeys: nil
+        )
+        #expect(kept.count == 1, "a failed run keeps its request scratch for diagnosis")
+        let stderrLog = try #require(kept.first).appendingPathComponent("stderr.log")
+        #expect(try String(contentsOf: stderrLog, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "engine refused the request")
+    }
+
+    @Test @MainActor
     func authoritativeRunOutsideRequestedOutputRootIsRejected() async throws {
         let fixture = try RunnerRecoveryFixture()
         defer { fixture.remove() }

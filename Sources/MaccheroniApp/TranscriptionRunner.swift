@@ -79,10 +79,12 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
         try Data().write(to: stderrURL, options: .withoutOverwriting)
         let stdout = try FileHandle(forWritingTo: stdoutURL)
         let stderr = try FileHandle(forWritingTo: stderrURL)
+        var requestSucceeded = false
         defer {
             try? stdout.close()
             try? stderr.close()
             process = nil
+            if requestSucceeded { discardRequestDirectory(requestDirectory) }
         }
 
         try FileManager.default.createDirectory(
@@ -206,6 +208,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
                 manifest.failure?.message ?? appString("The run did not succeed.")
             )
         }
+        requestSucceeded = true
         return runURL
     }
 
@@ -227,10 +230,12 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
         try Data().write(to: stderrURL, options: .withoutOverwriting)
         let stdout = try FileHandle(forWritingTo: stdoutURL)
         let stderr = try FileHandle(forWritingTo: stderrURL)
+        var requestSucceeded = false
         defer {
             try? stdout.close()
             try? stderr.close()
             process = nil
+            if requestSucceeded { discardRequestDirectory(requestDirectory) }
         }
 
         let launchedAt = Date()
@@ -342,6 +347,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
             modelID: manifest.postprocess?.modelID,
             message: nil
         ))
+        requestSucceeded = true
         return derivedURL
     }
 
@@ -389,6 +395,17 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
             values += ["--glossary", glossaryURL.path]
         }
         return values
+    }
+
+    /// A request directory holds the profile handed to the engine and the
+    /// engine's stdout and stderr. Once the run or derived set is sealed and
+    /// verified nothing reads them again, so a succeeded request leaves
+    /// nothing behind. A failed or cancelled request keeps its directory:
+    /// `stderr.log` is the only complete record of what the engine said, and
+    /// the failure message shown in the app is cut from it.
+    private func discardRequestDirectory(_ directory: URL) {
+        guard directory.path.hasPrefix(requestsRoot.path + "/") else { return }
+        try? FileManager.default.removeItem(at: directory)
     }
 
     private func createRequestDirectory() throws -> URL {
