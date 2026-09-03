@@ -12,6 +12,8 @@
 	<string>%@을(를) 휴지통으로 옮기지 못했고 일부만 휴지통에 있습니다. Finder에서 되돌려놓으세요. 녹음은 라이브러리에 남아 있습니다.</string>
 	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
 	<string>%@을(를) 휴지통으로 옮기지 못했습니다. 파일은 원래 자리에 그대로 있고 녹음도 라이브러리에 남아 있습니다.</string>
+	<key>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</key>
+	<string>%@ 항목이 휴지통에 있지만 라이브러리를 저장하지 못해 녹음이 목록에 남아 있습니다. Finder에서 되돌려 놓으세요.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@이(가) 라이브러리가 기대한 위치에 없어 아무것도 옮기지 않았습니다.</string>
 	<key>%@ of %@ (%@)</key>
@@ -72,6 +74,8 @@
 	<string>실행 아티팩트가 누락되었습니다: %@</string>
 	<key>ASR Model Cache</key>
 	<string>ASR 모델 캐시</string>
+	<key>Acoustic candidates: %@</key>
+	<string>음향 후보: %@</string>
 	<key>Add</key>
 	<string>추가</string>
 	<key>Add a name, term, or place</key>
@@ -806,8 +810,8 @@
 	<string>응답한 음성 모델이 이 프로필이 고정한 모델과 정확히 일치하지 않아 그 출력을 받아들이지 않았습니다.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>이 프로필에 필요한 음성 인식 모델이 이 Mac에 설치되어 있지 않습니다.</string>
-	<key>The top speakers held exactly equal time in this segment.</key>
-	<string>이 구간에서 상위 화자들이 정확히 같은 시간을 차지했습니다.</string>
+	<key>The top speakers held the same time in this segment, to within a nanosecond.</key>
+	<string>이 구간에서 상위 화자들이 1나노초 차이 이내로 같은 시간을 차지했습니다.</string>
 	<key>The transcript could not be copied.</key>
 	<string>전사문을 복사할 수 없습니다.</string>
 	<key>The transcription engine could not start: %@</key>

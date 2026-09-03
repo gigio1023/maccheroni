@@ -12,6 +12,8 @@
 	<string>Impossibile spostare %@ nel cestino e una parte si trova ora lì. Rimettila a posto nel Finder. La registrazione è ancora nell'archivio.</string>
 	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
 	<string>Impossibile spostare %@ nel cestino. I suoi file sono rimasti dov'erano e la registrazione è ancora nell'archivio.</string>
+	<key>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</key>
+	<string>%@ è nel Cestino, ma non è stato possibile salvare la libreria, quindi la registrazione resta in elenco. Rimettila a posto nel Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ non si trova più dove l'archivio se lo aspetta, quindi non è stato spostato nulla.</string>
 	<key>%@ of %@ (%@)</key>
@@ -72,6 +74,8 @@
 	<string>Manca un artefatto di esecuzione: %@</string>
 	<key>ASR Model Cache</key>
 	<string>Cache del modello ASR</string>
+	<key>Acoustic candidates: %@</key>
+	<string>Candidati acustici: %@</string>
 	<key>Add</key>
 	<string>Aggiungi</string>
 	<key>Add a name, term, or place</key>
@@ -806,8 +810,8 @@
 	<string>Il modello vocale che ha risposto non è esattamente quello fissato da questo profilo, quindi il suo output è stato rifiutato.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>Il modello di riconoscimento vocale richiesto da questo profilo non è installato su questo Mac.</string>
-	<key>The top speakers held exactly equal time in this segment.</key>
-	<string>In questo segmento i parlanti in testa hanno occupato esattamente lo stesso tempo.</string>
+	<key>The top speakers held the same time in this segment, to within a nanosecond.</key>
+	<string>In questo segmento i parlanti in testa hanno occupato lo stesso tempo, a meno di un nanosecondo.</string>
 	<key>The transcript could not be copied.</key>
 	<string>Impossibile copiare la trascrizione.</string>
 	<key>The transcription engine could not start: %@</key>

@@ -499,11 +499,10 @@ verified_complete =
   and validated_segment_count > 0
 ```
 
-Both statements are superseded by the 2026-09-01 VibeVoice repetition
-degeneration section below. The 1,200-second leaf maximum was derived from
-duration alone, with no measured leaf at that duration, and `verified_complete`
-carried no repetition term. The historical values stay here so the change is
-legible.
+Both statements are superseded by the 2026-09-01 VibeVoice repetition looping
+section below. The 1,200-second leaf maximum was derived from duration alone,
+with no measured leaf at that duration, and `verified_complete` carried no
+repetition term. The historical values stay here so the change is legible.
 
 Equality with the effective output cap is a limit outcome. The 2026-09-01
 section replaces its zero-promotable-coverage clause: a limit outcome still
@@ -746,9 +745,19 @@ failure.code = ASR_REPETITION_LOOPING or ASR_LIMIT_EXHAUSTED
 ```
 
 Every unpromoted range is named in `primary/partial-coverage.json` with its
-attempt ID and stop reason, and the manifest failure message repeats them.
-Judgment rule 2 holds: nothing is silently truncated, and the covered duration
-is stated rather than inferred.
+attempt ID, stop reason, and typed failure code, and the manifest failure
+message repeats them. A range lost to something that never reached a terminal
+decoder state records `stop_reason: unavailable`; the field stays present and
+stays a string, and `failure_code` names the cause in every case. Judgment rule
+2 holds: nothing is silently truncated, and the covered duration is stated
+rather than inferred.
+
+A promoted prefix is listed in `partial_prefix_attempt_ids` whenever its
+attempt stopped on a limit outcome, including when the prefix happens to reach
+the leaf boundary. Coverage and terminal state are separate claims: a leaf that
+stopped on the token budget or a collapse did not reach end of sequence, so it
+is never counted in `eos_leaf_attempt_ids`, and a run whose coverage is
+complete can still disclose that it promoted a prefix.
 
 **No minimum promotable share, and no claim that a promoted prefix is clean.**
 The 240-second class-A leaf that started at 45 s recovers exactly one object,
@@ -793,6 +802,17 @@ did complete. The run fails outright only when nothing anywhere was promotable,
 in which case it carries the typed cause of its first missing range. This applies
 to every backend, MOSS included.
 
+It also applies to every leaf failure, not only to a spent limit. A leaf that
+fails outside the limit taxonomy — a malformed payload, a timeout, a rejected
+adapter document, an attempt that never returned an outcome — loses its own
+range and nothing else, at any depth and at the root. A recovery child that
+fails this way no longer takes its successful sibling with it, and a later root
+chunk that fails this way no longer discards the chunks already promoted before
+it. Such a range carries `stop_reason: unavailable` and the typed failure code
+of the error that produced it. Cancellation is the one exception: it is the
+operator ending the whole run rather than one leaf losing its range, so it
+still stops the run and marks the unstarted attempts canceled.
+
 That is a change to MOSS's behaviour and it is recorded here. A
 MOSS run that exhausted its recovery depth previously aborted before merge and
 discarded every completed leaf, keeping their `result.json` files on disk with
@@ -831,9 +851,15 @@ what the run directory actually records:
 |---|---|---|
 | `outcome.json` `status` | `eos_complete` | `partial_prefix_promoted` |
 | `outcome.json` `stop_reason` | `endOfSequence` | a typed limit reason |
-| covers its planned range | yes | no, coverage is short |
+| covers its planned range | yes | usually not, and sometimes yes |
 | `promotion.json` | `eos_leaf_attempt_ids` | `partial_prefix_attempt_ids` |
 | `chunks/<i>/backend.raw` | `eos_leaf_attempt_ids` | `partial_prefix_attempt_ids` |
+
+The list an attempt lands in is decided by its stop reason, not by how much it
+covered. A recovered prefix whose last accepted segment happens to reach the
+leaf boundary still stopped on a limit, so it is a prefix; classifying it by
+covered end alone filed it as an end-of-sequence leaf and let a run claim it was
+fully EOS when it was not.
 
 An attempt appears in exactly one of those two lists, never both. A reader
 holding only the run directory can therefore answer "did every promoted leaf
@@ -850,7 +876,7 @@ would be a claim about an event that has not happened yet, and the layout
 permits no second write to a closed attempt.
 
 The record written at promotion is the authority: `primary/promotion.json`
-lists `eos_leaf_attempt_ids` for attempts that covered their range and
+lists `eos_leaf_attempt_ids` for attempts that reached end of sequence and
 `partial_prefix_attempt_ids` for attempts whose prefix was promoted, and an
 attempt appears in exactly one of them. `primary/chunks/<index>/backend.raw`
 carries the same split per root chunk. A reader asking whether one attempt

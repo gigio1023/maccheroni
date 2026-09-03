@@ -281,6 +281,17 @@ struct UnreadableDerivedSet: Equatable, Identifiable, Sendable {
         /// The manifest names a derived family this build does not know. The
         /// associated value is the raw `operation.kind` string as written.
         case unrecognisedKind(String)
+        /// A speaker-proposal set whose artifact contradicts the source run it
+        /// names: a decline cause the acoustic record does not support, a
+        /// top-ranked candidate the candidates do not rank first, a model
+        /// answer attached to another segment, evidence the run never
+        /// measured, or coverage the run does not have.
+        ///
+        /// The bytes are the ones the manifest hashed, so this is the artifact
+        /// being false rather than damaged, and it is recorded rather than
+        /// thrown: the source run is immutable and readable whatever a derived
+        /// set beside it claims.
+        case speakerProposalContradictsSourceRun
     }
 
     /// The derived directory name, which is also the derived ID it claims.

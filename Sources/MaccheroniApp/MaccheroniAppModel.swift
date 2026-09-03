@@ -279,10 +279,9 @@ final class MaccheroniAppModel {
         didSet {
             defaults.set(selectedProfileID.rawValue, forKey: "selectedProfile")
             guard selectedProfileID != oldValue else { return }
-            profileReadiness = ProfileReadiness(
-                profileID: selectedProfileID,
-                asrBackend: selectedProfile.asrBackend
-            )
+            // The reset the profile change needs is the one every evaluation
+            // now does; a second writer here would be the same value written
+            // twice and a place for the two to drift apart.
             evaluateProfileReadiness()
         }
     }
@@ -522,11 +521,23 @@ final class MaccheroniAppModel {
     /// Re-asks `doctor` and the capture permissions whether the selected profile can run.
     /// The capture screen calls this when it appears and when the user asks again; the
     /// profile picker calls it through `selectedProfileID`.
+    /// A new evaluation has no answer yet, so it starts from no answer.
+    ///
+    /// Keeping the previous result while the next one is being fetched left a
+    /// window where `hasResult` was true and the blockers were the old ones:
+    /// probe, remove a dependency, ask again, and a run started inside that
+    /// window read the stale success and proceeded. `awaitPendingProfileReadiness`
+    /// waits precisely on `hasResult`, so clearing it is what makes the caller
+    /// wait for the answer it is about to race.
     func evaluateProfileReadiness() {
         let profile = selectedProfile
         readinessTask?.cancel()
-        profileReadiness.profileID = profile.id
-        profileReadiness.isEvaluating = true
+        profileReadiness = ProfileReadiness(
+            profileID: profile.id,
+            asrBackend: profile.asrBackend,
+            hasResult: false,
+            isEvaluating: true
+        )
         let probe = readinessProbe
         let permissions = capturePermissions
         readinessTask = Task { [weak self] in
@@ -1031,6 +1042,15 @@ final class MaccheroniAppModel {
     /// whose files are in the Trash is one Put Back away from whole, and an
     /// entry deleted from the index is not recoverable from the app at all.
     /// A failure at any point leaves the entry in place.
+    ///
+    /// That order makes the index save the step that can leave the two apart,
+    /// so it is undone rather than reported and left: a failed save puts the
+    /// record, its run failure and its post-processing failure back exactly as
+    /// they were, and the message says where the files went. What the library
+    /// shows and what it saved then agree, and one Put Back in the Finder makes
+    /// the entry whole. The alternative — save first, recycle second — was
+    /// rejected because its failure deletes the entry while the files stay
+    /// put, and no path in the app brings that entry back.
     func moveToTrash(_ plan: LibraryTrashPlan) async {
         guard let record = records.first(where: { $0.id == plan.recordID }) else { return }
         guard canMoveToTrash(record) else {
@@ -1049,10 +1069,26 @@ final class MaccheroniAppModel {
             stopPlayback()
             selection = .capture
         }
+        let previousRecords = records
+        let previousRunFailure = runFailures[plan.recordID]
+        let previousPostprocessFailure = existingRunPostprocessFailures[plan.recordID]
         records.removeAll { $0.id == plan.recordID }
         runFailures.removeValue(forKey: plan.recordID)
         existingRunPostprocessFailures.removeValue(forKey: plan.recordID)
-        saveRecordsReportingErrors()
+        do {
+            try recordSaver(records)
+        } catch {
+            records = previousRecords
+            runFailures[plan.recordID] = previousRunFailure
+            existingRunPostprocessFailures[plan.recordID] = previousPostprocessFailure
+            let head = appString(
+                "\(plan.displayName) is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder."
+            )
+            let detail = error.localizedDescription
+            errorMessage = detail.isEmpty
+                ? head
+                : appString("\(head) The system reported: \(detail)")
+        }
     }
 
     func renameSpeaker(_ speaker: String, to name: String) {

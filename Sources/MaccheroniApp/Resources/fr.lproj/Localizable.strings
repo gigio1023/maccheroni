@@ -12,6 +12,8 @@
 	<string>%@ n’a pas pu être déplacé vers la corbeille et une partie s’y trouve à présent. Remettez-la en place dans le Finder. L’enregistrement reste dans la bibliothèque.</string>
 	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
 	<string>%@ n’a pas pu être déplacé vers la corbeille. Ses fichiers sont restés en place et l’enregistrement reste dans la bibliothèque.</string>
+	<key>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</key>
+	<string>%@ est dans la corbeille, mais la bibliothèque n'a pas pu être enregistrée, donc l'enregistrement reste dans la liste. Remettez-le en place dans le Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ ne se trouve plus là où la bibliothèque l’attend ; rien n’a été déplacé.</string>
 	<key>%@ of %@ (%@)</key>
@@ -72,6 +74,8 @@
 	<string>Un artefact d'exécution est manquant : %@</string>
 	<key>ASR Model Cache</key>
 	<string>Cache du modèle ASR</string>
+	<key>Acoustic candidates: %@</key>
+	<string>Candidats acoustiques : %@</string>
 	<key>Add</key>
 	<string>Ajouter</string>
 	<key>Add a name, term, or place</key>
@@ -806,8 +810,8 @@
 	<string>Le modèle vocal qui a répondu n’est pas exactement celui épinglé par ce profil ; sa sortie a été refusée.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>Le modèle de reconnaissance vocale requis par ce profil n'est pas installé sur ce Mac.</string>
-	<key>The top speakers held exactly equal time in this segment.</key>
-	<string>Dans ce segment, les principaux locuteurs ont occupé exactement le même temps.</string>
+	<key>The top speakers held the same time in this segment, to within a nanosecond.</key>
+	<string>Dans ce segment, les principaux locuteurs ont occupé le même temps, à une nanoseconde près.</string>
 	<key>The transcript could not be copied.</key>
 	<string>Impossible de copier la transcription.</string>
 	<key>The transcription engine could not start: %@</key>

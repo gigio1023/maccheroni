@@ -384,7 +384,7 @@ private struct ASRAttemptRequestRecord: Codable, Sendable {
 /// Attempt statuses double as the persisted failure identifier: an attempt
 /// status and the manifest `failure.code` for the same error must be the same
 /// string so evidence can be bucketed from either record alone.
-private enum ASRAttemptStatus: String, Codable, Sendable {
+enum ASRAttemptStatus: String, Codable, Sendable {
     case eosComplete = "eos_complete"
     case limitIsolated = "limit_isolated"
     case limitExhausted = "limit_exhausted"
@@ -398,6 +398,31 @@ private enum ASRAttemptStatus: String, Codable, Sendable {
     case asrModelIdentityMismatch = "asr_model_identity_mismatch"
     case backendFailed = "backend_failed"
     case canceled = "CANCELED"
+
+    /// The value `repetitionLooping` carried before the 2026-09-02
+    /// terminology audit renamed repetition degeneration to repetition
+    /// looping.  Attempt outcomes sealed before that rename still hold it.
+    static let legacyRepetitionLoopingRawValue = "repetition_degeneration"
+
+    /// D52: a renamed wire value keeps its legacy value accepted on read, and
+    /// judgment rule 3 keeps the sealed bytes as they are.  Encoding still
+    /// goes through the raw value, so the legacy string is never written.
+    init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if let value = ASRAttemptStatus(rawValue: raw) {
+            self = value
+        } else if raw == ASRAttemptStatus.legacyRepetitionLoopingRawValue {
+            self = .repetitionLooping
+        } else {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription:
+                        "unknown ASR attempt status \"\(raw)\""
+                )
+            )
+        }
+    }
 }
 
 private struct ASRAttemptOutcomeRecord: Codable, Sendable {
@@ -461,7 +486,18 @@ private struct CompletedASRLeaf: Sendable {
     var coveredEndSample: Int64
     var stopReason: ASRAttemptStopReason
 
-    var isPartial: Bool { coveredEndSample < leaf.endSample }
+    /// Whether this leaf was promoted as a prefix rather than as a complete
+    /// end-of-sequence transcript.
+    ///
+    /// A limit outcome is a prefix even when its last accepted segment lands
+    /// on the leaf boundary: the decoder stopped on the token budget or a
+    /// collapse, not because it finished, so nothing says the range was fully
+    /// transcribed.  Deciding this from covered end alone filed such a leaf in
+    /// `eos_leaf_attempt_ids`, which is the done criterion's own definition of
+    /// a fully-EOS run and would have claimed one falsely.
+    var isPartial: Bool {
+        stopReason.isLimitOutcome || coveredEndSample < leaf.endSample
+    }
 }
 
 /// One leaf whose range no attempt could transcribe, after recovery was spent.
@@ -470,8 +506,32 @@ private struct CompletedASRLeaf: Sendable {
 private struct UnrecoveredASRLeaf: Sendable {
     var attemptID: String
     var leaf: InferenceLeaf
-    var stopReason: ASRAttemptStopReason
-    var failure: CLIError
+    /// The decoder's terminal reason when the attempt reported one.  A leaf
+    /// lost to something outside the limit taxonomy — a malformed payload, a
+    /// timeout, a rejected adapter document — never reached a terminal
+    /// decoder state and so has none.
+    var stopReason: ASRAttemptStopReason?
+    var failure: UnrecoveredLeafFailure
+}
+
+/// The typed cause of one lost leaf, in a form the run can both record in a
+/// missing range and throw when nothing anywhere was promotable.  It keeps the
+/// code the original error would have produced, so a run that loses every leaf
+/// still fails with that cause instead of a generic run error.
+private struct UnrecoveredLeafFailure: Error, LocalizedError, Sendable {
+    var code: String
+    var message: String
+
+    var errorDescription: String? { message }
+
+    init(code: String, message: String) {
+        self.code = code
+        self.message = message
+    }
+
+    init(_ error: some Error) {
+        self.init(code: failureCode(for: error), message: failureMessage(for: error))
+    }
 }
 
 /// What one leaf and its recovery subtree produced.
@@ -490,11 +550,18 @@ private struct SourceMissingRange: Codable, Sendable, Equatable {
     var startS: Double
     var endS: Double
     var attemptID: String
-    var stopReason: ASRAttemptStopReason
+    /// The decoder's terminal reason, or nil when the attempt failed before
+    /// reaching one.  `failureCode` names the cause in either case.
+    var stopReason: ASRAttemptStopReason?
     /// The typed failure this range would have produced had it ended the run.
     /// Carried so the manifest reports the real cause per backend instead of
     /// inferring one.
     var failureCode: String
+
+    /// What `stop_reason` reads when there was no terminal decoder state to
+    /// report.  The field stays present and stays a string: every reader of
+    /// this record, the app's failure screen included, decodes it as one.
+    static let unavailableStopReason = "unavailable"
 
     enum CodingKeys: String, CodingKey {
         case attemptID = "attempt_id"
@@ -502,6 +569,44 @@ private struct SourceMissingRange: Codable, Sendable, Equatable {
         case endS = "end_s"
         case stopReason = "stop_reason"
         case failureCode = "failure_code"
+    }
+
+    init(
+        startS: Double,
+        endS: Double,
+        attemptID: String,
+        stopReason: ASRAttemptStopReason?,
+        failureCode: String
+    ) {
+        self.startS = startS
+        self.endS = endS
+        self.attemptID = attemptID
+        self.stopReason = stopReason
+        self.failureCode = failureCode
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startS = try container.decode(Double.self, forKey: .startS)
+        endS = try container.decode(Double.self, forKey: .endS)
+        attemptID = try container.decode(String.self, forKey: .attemptID)
+        failureCode = try container.decode(String.self, forKey: .failureCode)
+        let raw = try container.decode(String.self, forKey: .stopReason)
+        stopReason = raw == Self.unavailableStopReason
+            ? nil
+            : try container.decode(ASRAttemptStopReason.self, forKey: .stopReason)
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(startS, forKey: .startS)
+        try container.encode(endS, forKey: .endS)
+        try container.encode(attemptID, forKey: .attemptID)
+        try container.encode(
+            stopReason?.rawValue ?? Self.unavailableStopReason,
+            forKey: .stopReason
+        )
+        try container.encode(failureCode, forKey: .failureCode)
     }
 }
 
@@ -1447,6 +1552,16 @@ public struct CLIApplication: Sendable {
                 "speaker proposal artifact does not match its canonical source"
             )
         }
+        // D50, enforced here and not only in the proposer.  The proposer is an
+        // injected dependency, so a set that omitted the constraint or named a
+        // lower-ranked candidate would otherwise seal successfully.  The
+        // boundary re-derives the top-ranked candidate from the acoustic
+        // evidence in the artifact itself.
+        guard document.constraint == .confirmOrDecline else {
+            throw CLIError.postprocess(
+                "speaker proposal artifact does not declare the confirm-or-decline constraint"
+            )
+        }
 
         let evidenceByIndex = Dictionary(
             uniqueKeysWithValues: evidence.map { ($0.segmentIndex, $0) }
@@ -1502,6 +1617,23 @@ public struct CLIApplication: Sendable {
             guard allowed.contains(proposal.proposedSpeaker) else {
                 throw CLIError.postprocess(
                     "speaker proposal for segment \(proposal.segmentIndex) names a speaker the acoustics did not offer"
+                )
+            }
+            // Confirm-or-decline: the only proposal the first iteration may
+            // seal is the unique top-ranked candidate.  A tie has no
+            // top-ranked candidate, so a proposal on a tied segment is a
+            // tie-break resting on no acoustic evidence, which is exactly what
+            // judgment rule 4 was written against.
+            guard let topRanked = SpeakerProposalConstraint.topRankedCandidate(
+                among: proposal.acousticCandidates
+            ) else {
+                throw CLIError.postprocess(
+                    "speaker proposal for segment \(proposal.segmentIndex) has no top-ranked candidate to confirm"
+                )
+            }
+            guard proposal.proposedSpeaker == topRanked else {
+                throw CLIError.postprocess(
+                    "speaker proposal for segment \(proposal.segmentIndex) does not confirm the top-ranked candidate"
                 )
             }
         }
@@ -1886,7 +2018,9 @@ public struct CLIApplication: Sendable {
                     format: "chunk-%04d-root",
                     rootIndex
                 )
-                let leafResult = try await processASRLeaf(
+                let leafResult: ASRLeafResult
+                do {
+                    leafResult = try await processASRLeaf(
                     rootLeaf,
                     attemptID: rootAttemptID,
                     parentID: nil,
@@ -1900,7 +2034,21 @@ public struct CLIApplication: Sendable {
                     expectedHelperFingerprint: expectedHelperFingerprint,
                     mossContextPlan: mossContextPlan,
                     writer: writer
-                )
+                    )
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    // D51 again, at the root: this chunk's whole range is lost
+                    // and every earlier chunk keeps its transcript.  Before
+                    // this, a direct error from a later root leaf left the
+                    // loop and discarded everything already promoted.
+                    leafResult = ASRLeafResult(unrecovered: [UnrecoveredASRLeaf(
+                        attemptID: rootAttemptID,
+                        leaf: rootLeaf,
+                        stopReason: nil,
+                        failure: UnrecoveredLeafFailure(error)
+                    )])
+                }
                 try writer.addArtifactsRecursively(
                     &artifacts,
                     under: "primary/attempts",
@@ -2679,7 +2827,7 @@ public struct CLIApplication: Sendable {
                     attemptID: attemptID,
                     leaf: leaf,
                     stopReason: limit.stopReason,
-                    failure: exhausted
+                    failure: UnrecoveredLeafFailure(exhausted)
                 )])
             }
             let childIDs = ["\(attemptID)-l", "\(attemptID)-r"]
@@ -2699,7 +2847,6 @@ public struct CLIApplication: Sendable {
                 at: "\(base)/outcome.json"
             )
             var childResults = ASRLeafResult()
-            var firstChildError: Error?
             for index in children.indices {
                 do {
                     childResults += try await processASRLeaf(
@@ -2717,26 +2864,37 @@ public struct CLIApplication: Sendable {
                         mossContextPlan: mossContextPlan,
                         writer: writer
                     )
-                } catch {
-                    if firstChildError == nil { firstChildError = error }
-                    if error is CancellationError {
-                        for remainingIndex in children.indices
-                            where remainingIndex > index
-                        {
-                            try writeUnstartedCanceledAttempt(
-                                attemptID: childIDs[remainingIndex],
-                                selected: selected,
-                                glossary: glossary,
-                                expectedHelperFingerprint:
-                                    expectedHelperFingerprint,
-                                writer: writer
-                            )
-                        }
-                        break
+                } catch let cancellation as CancellationError {
+                    for remainingIndex in children.indices
+                        where remainingIndex > index
+                    {
+                        try writeUnstartedCanceledAttempt(
+                            attemptID: childIDs[remainingIndex],
+                            selected: selected,
+                            glossary: glossary,
+                            expectedHelperFingerprint:
+                                expectedHelperFingerprint,
+                            writer: writer
+                        )
                     }
+                    // A cancel is the operator ending the whole run, not this
+                    // child losing its range, so it still propagates.
+                    throw cancellation
+                } catch {
+                    // D51 applies to every leaf failure, not only to spent
+                    // limits: this child loses its own range and nothing else.
+                    // Rethrowing here discarded the sibling that had already
+                    // succeeded, and with it every chunk before this one.  The
+                    // child's own `outcome.json` already records the typed
+                    // cause; the range now travels with it.
+                    childResults.unrecovered.append(UnrecoveredASRLeaf(
+                        attemptID: childIDs[index],
+                        leaf: children[index],
+                        stopReason: nil,
+                        failure: UnrecoveredLeafFailure(error)
+                    ))
                 }
             }
-            if let firstChildError { throw firstChildError }
             return childResults
             }
         } catch {
@@ -2800,11 +2958,20 @@ public struct CLIApplication: Sendable {
         let ranges = missing
             .map { "[\(format(seconds: $0.startS)), \(format(seconds: $0.endS))) s" }
             .joined(separator: ", ")
+        // Not every lost range is a spent limit any more: a leaf can also fail
+        // outright, and saying it exhausted recovery would misdescribe what
+        // the run observed.
+        let cause = if looping {
+            " after repetition looping exhausted recovery"
+        } else if missing.contains(where: { $0.stopReason != nil }) {
+            " after a limit outcome exhausted recovery"
+        } else {
+            " after the leaf failed"
+        }
         let message = """
         promoted \(format(seconds: promotedDurationS)) s of \
         \(format(seconds: inputDurationS)) s; \(missing.count) range(s) produced no \
-        transcript after \(looping ? "repetition looping" : "a limit outcome") \
-        exhausted recovery: \(ranges)
+        transcript\(cause): \(ranges)
         """
         return Failure(code: code, message: message)
     }
@@ -4057,20 +4224,20 @@ private let rejectedDiarizationArtifactKind =
 /// the cluster label — so the run may keep it, though nothing here may be
 /// committed.
 ///
-/// Anything that is not a rejection, and any rejection whose bytes are already
-/// gone or cannot be written, passes through unchanged: a diagnosis must not be
-/// replaced by a filesystem complaint.
+/// Anything that is not a rejection passes through unchanged, and a rejection
+/// whose bytes are already gone or cannot be written keeps its diagnosis: a
+/// diagnosis must not be replaced by a filesystem complaint.
 private func preservedRejectedTimeline(
     _ error: Error,
     writer: RunWriter,
     artifacts: inout [Artifact]
 ) -> Error {
     guard let rejection = error as? DiarizationError,
-          case let .rejectedOutput(reason, rawOutputPath) = rejection,
-          let rawJSON = try? Data(
-              contentsOf: URL(fileURLWithPath: rawOutputPath)
-          )
+          case let .rejectedOutput(reason, rawOutputPath) = rejection
     else { return error }
+    guard let rawJSON = try? Data(
+        contentsOf: URL(fileURLWithPath: rawOutputPath)
+    ) else { return UnpreservedRejectedTimeline(reason: reason) }
     do {
         try writer.write(rawJSON, at: rejectedDiarizationArtifactPath)
         try writer.addArtifact(
@@ -4079,12 +4246,33 @@ private func preservedRejectedTimeline(
             relative: rejectedDiarizationArtifactPath
         )
     } catch {
-        return rejection
+        return UnpreservedRejectedTimeline(reason: reason)
     }
     return DiarizationError.rejectedOutput(
         reason: reason,
         rawOutputPath: rejectedDiarizationArtifactPath
     )
+}
+
+/// A rejected diarization timeline whose bytes could not be kept inside the
+/// run, either because the sweep had already taken them or because the
+/// run-local copy failed.
+///
+/// `DiarizationError.rejectedOutput` describes itself as kept at its
+/// `rawOutputPath`, which in this state is an absolute path outside the run
+/// that no longer holds the payload.  Sealing that sentence made the run claim
+/// evidence it does not have and wrote a machine-local path into a manifest
+/// that is read elsewhere.  This keeps the diagnosis, says the payload was not
+/// preserved, and names no path at all.
+private struct UnpreservedRejectedTimeline: Error, LocalizedError {
+    var reason: DiarizationError
+
+    var errorDescription: String? {
+        let diagnosis = reason.errorDescription
+            ?? "diarization output was rejected"
+        return "\(diagnosis); the rejected backend timeline could not be "
+            + "preserved in the run and is no longer available"
+    }
 }
 
 private enum CLICommand {
@@ -4513,6 +4701,9 @@ private func typedASRAttemptStatus(
 
 private func failureCode(for error: Error) -> String {
     if let error = error as? CLIError { return error.code }
+    // A lost leaf already resolved its cause; rethrowing it must not flatten
+    // that back into a generic run error.
+    if let error = error as? UnrecoveredLeafFailure { return error.code }
     if error is CancellationError { return "CANCELED" }
     if let error = error as? ASRAdapterError,
        let status = typedASRAttemptStatus(for: error)
@@ -4524,7 +4715,10 @@ private func failureCode(for error: Error) -> String {
     case is VoiceActivityError: "VAD_ERROR"
     case is ChunkPlanningError, is InferenceLeafPlanningError:
         "CHUNK_PLAN_ERROR"
-    case is DiarizationError: "DIARIZATION_ERROR"
+    // A rejection whose bytes could not be preserved is still a diarization
+    // rejection, and keeps that code.
+    case is DiarizationError, is UnpreservedRejectedTimeline:
+        "DIARIZATION_ERROR"
     case is ASRAdapterError: "ASR_ERROR"
     case is TimelineMergeError: "MERGE_ERROR"
     case is GlossaryError: "GLOSSARY_ERROR"

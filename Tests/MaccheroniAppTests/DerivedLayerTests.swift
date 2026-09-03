@@ -378,9 +378,7 @@ struct DerivedLayerTests {
             proposedSpeakerForSegmentOne: "SPEAKER_01"
         )
 
-        #expect(throws: LibraryRepositoryError.self) {
-            try LibraryRepository(root: root).loadRun(at: fixture.runURL)
-        }
+        try expectRejectedProposal(root: root, runURL: fixture.runURL, id: "overturn")
     }
 
     /// Judgment rule 4 as amended by D46: a proposal completes acoustic
@@ -397,9 +395,7 @@ struct DerivedLayerTests {
             extraProposalOnAttributedSegment: true
         )
 
-        #expect(throws: LibraryRepositoryError.self) {
-            try LibraryRepository(root: root).loadRun(at: fixture.runURL)
-        }
+        try expectRejectedProposal(root: root, runURL: fixture.runURL, id: "overrides")
     }
 
     /// Exactly once over proposals plus declined, across every unattributed
@@ -417,9 +413,7 @@ struct DerivedLayerTests {
             omitDeclines: true
         )
 
-        #expect(throws: LibraryRepositoryError.self) {
-            try LibraryRepository(root: root).loadRun(at: fixture.runURL)
-        }
+        try expectRejectedProposal(root: root, runURL: fixture.runURL, id: "incomplete")
     }
 
     /// The acoustic evidence in the artifact is checked against the run's own
@@ -436,9 +430,156 @@ struct DerivedLayerTests {
             inflateFirstCandidateShare: true
         )
 
-        #expect(throws: LibraryRepositoryError.self) {
-            try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+        try expectRejectedProposal(root: root, runURL: fixture.runURL, id: "fabricated-evidence")
+    }
+
+    /// A decline's explanation is checked against the acoustic record, not
+    /// taken on trust from the artifact.
+    ///
+    /// `cause`, `top_ranked_candidate` and the nested `model_answer` are the
+    /// three fields D50's constraint writes so a later measurement can tell
+    /// what the constraint did from what the model did, and they were read
+    /// straight onto the screen. Each case below keeps the artifact hash
+    /// consistent and the acoustic evidence exactly as the run measured it,
+    /// and lies only in the explanation — which is the part a reader reads.
+    @Test
+    func aDeclineWhoseExplanationContradictsTheAcousticRecordIsRejected() throws {
+        // Segment 2 is the exact tie; segment 1 has a clear sub-threshold
+        // leader in SPEAKER_00. Both shapes are needed: a cause is false only
+        // against the candidates it sits beside.
+        let lies: [(String, ([SpeakerProposalDecline]) -> [SpeakerProposalDecline])] = [
+            ("no-acoustic-candidates-with-candidates", { declines in
+                declines.map {
+                    var decline = $0
+                    decline.cause = .noAcousticCandidates
+                    return decline
+                }
+            }),
+            ("no-top-ranked-candidate-on-a-clear-leader", { declines in
+                declines.map { decline in
+                    guard decline.segmentIndex == 1 else { return decline }
+                    var edited = decline
+                    edited.cause = .noTopRankedCandidate
+                    edited.topRankedCandidate = nil
+                    return edited
+                }
+            }),
+            ("top-ranked-candidate-names-the-other-speaker", { declines in
+                declines.map { decline in
+                    guard decline.segmentIndex == 1 else { return decline }
+                    var edited = decline
+                    edited.topRankedCandidate = "SPEAKER_01"
+                    return edited
+                }
+            }),
+            ("model-answer-from-another-segment", { declines in
+                declines.map { decline in
+                    guard var answer = decline.modelAnswer else { return decline }
+                    var edited = decline
+                    answer.segmentIndex = 0
+                    edited.modelAnswer = answer
+                    return edited
+                }
+            }),
+            ("model-declined-carrying-a-proposal", { declines in
+                declines.map { decline in
+                    guard decline.cause == .modelDeclined else { return decline }
+                    var edited = decline
+                    edited.modelAnswer = SpeakerProposalDecision(
+                        segmentIndex: decline.segmentIndex,
+                        proposedSpeaker: "SPEAKER_00",
+                        disposition: .propose,
+                        reason: "An answer this cause says was never given."
+                    )
+                    return edited
+                }
+            }),
+        ]
+
+        for (id, rewrite) in lies {
+            let root = try derivedLayerTemporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let fixture = try derivedLayerRunFixture(in: root)
+            try derivedLayerWriteSpeakerProposal(
+                fixture: fixture,
+                id: id,
+                finishedAt: "2026-09-01T23:13:07Z",
+                declineSegmentOne: true,
+                rewritingDeclines: rewrite
+            )
+
+            let loaded = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+
+            #expect(
+                loaded.unreadableDerivedSets == [
+                    UnreadableDerivedSet(
+                        id: id,
+                        reason: .speakerProposalContradictsSourceRun
+                    ),
+                ],
+                "\(id)"
+            )
+            #expect(loaded.speakerProposal == nil, "\(id)")
+            #expect(loaded.transcript == fixture.transcript, "\(id)")
         }
+    }
+
+    /// The same set with its explanations intact loads, so the checks above
+    /// reject the lie rather than the shape it is written in.
+    @Test
+    func everyDeclineCauseTheConstraintWritesIsAccepted() throws {
+        let root = try derivedLayerTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try derivedLayerRunFixture(in: root)
+        try derivedLayerWriteSpeakerProposal(
+            fixture: fixture,
+            id: "honest-declines",
+            finishedAt: "2026-09-01T23:13:07Z",
+            declineSegmentOne: true
+        )
+
+        let loaded = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+
+        let proposal = try #require(loaded.speakerProposal)
+        #expect(loaded.unreadableDerivedSets.isEmpty)
+        #expect(proposal.proposals.isEmpty)
+        #expect(proposal.declined.map(\.cause) == [.modelDeclined, .noTopRankedCandidate])
+        #expect(proposal.declined.map(\.topRankedCandidate) == ["SPEAKER_00", nil])
+        #expect(proposal.declined[0].modelAnswer?.disposition == .decline)
+        #expect(proposal.declined[1].modelAnswer?.segmentIndex == 2)
+    }
+
+    /// An artifact written before the confirm-or-decline constraint carries
+    /// none of the three fields, and is judged by none of these checks.
+    @Test
+    func aDeclineWrittenBeforeTheConstraintIsNotJudgedByIt() throws {
+        let root = try derivedLayerTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try derivedLayerRunFixture(in: root)
+        try derivedLayerWriteSpeakerProposal(
+            fixture: fixture,
+            id: "pre-constraint",
+            finishedAt: "2026-09-01T23:13:07Z",
+            rewritingDeclines: { declines in
+                declines.map {
+                    SpeakerProposalDecline(
+                        segmentIndex: $0.segmentIndex,
+                        reason: $0.reason,
+                        acousticOutcome: $0.acousticOutcome,
+                        acousticTimelineCoverage: $0.acousticTimelineCoverage,
+                        acousticCandidates: $0.acousticCandidates
+                    )
+                }
+            }
+        )
+
+        let loaded = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+
+        let proposal = try #require(loaded.speakerProposal)
+        #expect(loaded.unreadableDerivedSets.isEmpty)
+        #expect(proposal.declined.map(\.cause) == [nil])
+        #expect(proposal.declined[0].topRankedCandidate == nil)
+        #expect(proposal.declined[0].modelAnswer == nil)
     }
 
     /// D49's condition. The manifest must record the coverage the proposal was
@@ -455,9 +596,7 @@ struct DerivedLayerTests {
             claimCompleteCoverage: true
         )
 
-        #expect(throws: LibraryRepositoryError.self) {
-            try LibraryRepository(root: root).loadRun(at: fixture.runURL)
-        }
+        try expectRejectedProposal(root: root, runURL: fixture.runURL, id: "coverage-lie")
     }
 
     /// The repository hands the view the whole proposal document, not a
@@ -586,6 +725,37 @@ struct DerivedLayerTests {
             try LibraryRepository(root: root).loadRun(at: fixture.runURL)
         }
     }
+}
+
+/// A speaker-proposal set the loader refuses, and the source run that opens
+/// anyway.
+///
+/// The bytes are the ones the manifest hashed in every case here, so what is
+/// wrong is what the artifact claims rather than whether it is intact. That is
+/// recorded against the set and the run is read: a derived layer beside a run
+/// must not decide whether the run itself can be opened, which is the defect
+/// the unrecognised-kind path was repaired for and which every one of these
+/// checks used to reproduce.
+private func expectRejectedProposal(
+    root: URL,
+    runURL: URL,
+    id: String,
+    sourceFileID: String = #fileID,
+    sourceLine: Int = #line
+) throws {
+    let loaded = try LibraryRepository(root: root).loadRun(at: runURL)
+    let location = SourceLocation(fileID: sourceFileID, filePath: #filePath, line: sourceLine, column: 1)
+    #expect(
+        loaded.unreadableDerivedSets == [
+            UnreadableDerivedSet(id: id, reason: .speakerProposalContradictsSourceRun),
+        ],
+        sourceLocation: location
+    )
+    #expect(loaded.speakerProposal == nil, sourceLocation: location)
+    #expect(loaded.derivedResults.isEmpty, sourceLocation: location)
+    // The immutable record is what the reader still gets.
+    #expect(loaded.segments.count == 4, sourceLocation: location)
+    #expect(loaded.resultID == nil, sourceLocation: location)
 }
 
 // MARK: - Fixtures
@@ -723,6 +893,31 @@ private func derivedLayerRunFixture(
     ]).write(to: timelineURL)
     try JSONEncoder().encode(conflicts).write(to: conflictsURL)
 
+    // A `partial` run has to say what it lost and why: the manifest carries the
+    // failure and, when its coverage is short, `primary/partial-coverage.json`
+    // states the missing range. A partial fixture without those is not a run
+    // this product would write, and the derivable-source gate refuses it —
+    // correctly, because a proposal over a transcript with an unnamed hole in
+    // it is the false claim D49's conditions exist to prevent.
+    //
+    // The field names and wire values are the ones `PartialCoverageRecord` and
+    // `SourceMissingRange` actually write, `stop_reason` included: a fixture
+    // that spelled them its own way would pass this suite while standing in
+    // for a file no run produces.
+    let partialCoverageURL = primaryURL.appendingPathComponent("partial-coverage.json")
+    if !complete {
+        try Data(#"""
+        {"schema_version":"1.0.0","input_duration_s":8.0,"promoted_duration_s":6.0,"missing_duration_s":2.0,"missing":[{"attempt_id":"fixture-leaf-1","start_s":6.0,"end_s":8.0,"stop_reason":"repetitionLooping","failure_code":"ASR_REPETITION_LOOPING"}],"partial_attempt_ids":[]}
+        """#.utf8).write(to: partialCoverageURL)
+    }
+    let partialArtifacts = complete ? [] : [
+        Artifact(
+            kind: "partial_coverage",
+            path: "primary/partial-coverage.json",
+            sha256: try derivedLayerSHA256(of: partialCoverageURL)
+        ),
+    ]
+
     let manifest = Manifest(
         runID: runID,
         status: complete ? .succeeded : .partial,
@@ -798,8 +993,15 @@ private func derivedLayerRunFixture(
                 path: "diarization/timeline.json",
                 sha256: try derivedLayerSHA256(of: timelineURL)
             ),
-        ],
-        failure: nil
+        ] + partialArtifacts,
+        // The sentence shape the CLI seals on a partial run, in this fixture's
+        // numbers: what was promoted, out of what, and which range was lost.
+        failure: complete
+            ? nil
+            : Failure(
+                code: "ASR_REPETITION_LOOPING",
+                message: "promoted 6.000 s of 8.000 s; 1 range(s) produced no transcript after repetition looping exhausted recovery: [6.000, 8.000) s"
+            )
     )
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
@@ -897,7 +1099,11 @@ private func derivedLayerWriteSpeakerProposal(
     declineSegmentOne: Bool = false,
     extraProposalOnAttributedSegment: Bool = false,
     inflateFirstCandidateShare: Bool = false,
-    claimCompleteCoverage: Bool = false
+    claimCompleteCoverage: Bool = false,
+    /// The last hook: rewrite the sealed declines. A decline explains why no
+    /// speaker was proposed, and every way of lying about that lies in a field
+    /// the hash still covers.
+    rewritingDeclines: ([SpeakerProposalDecline]) -> [SpeakerProposalDecline] = { $0 }
 ) throws {
     let source = try RunIntegrityVerifier.verifyMergedRun(at: fixture.runURL)
     let directory = fixture.runURL.appendingPathComponent(
@@ -1000,7 +1206,7 @@ private func derivedLayerWriteSpeakerProposal(
         sourceCoverage: coverage,
         constraint: .confirmOrDecline,
         proposals: proposals,
-        declined: declined,
+        declined: rewritingDeclines(declined),
         batches: [derivedLayerBatch(segmentIndices: [1, 2])]
     )
     let artifactURL = speakerDirectory.appendingPathComponent("proposals.json")

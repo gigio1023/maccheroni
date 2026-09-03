@@ -38,6 +38,15 @@ def _write_executable(path: Path, source: str) -> None:
     path.chmod(0o755)
 
 
+def _remedy_lines(stderr: str) -> list[str]:
+    """The two pasteable lines of a stale-environment remedy: move aside, rerun."""
+    lines = [line.strip() for line in stderr.splitlines()]
+    for index, line in enumerate(lines):
+        if line.startswith("mv "):
+            return lines[index : index + 2]
+    raise AssertionError(f"no move-aside remedy was printed:\n{stderr}")
+
+
 class FakeRuntime:
     """Isolated fake Hub, harness build, and product-doctor boundary."""
 
@@ -600,14 +609,20 @@ class SetupTranscriptionRuntimeTests(unittest.TestCase):
             self.assertIn("its interpreter link bin/python", result.stderr)
             self.assertIn(str(target), result.stderr)
             self.assertIn(
-                f'mv "{venv}" "{venv}.stale-{today}"',
+                f"mv '{venv}' '{venv}.stale-{today}'",
                 result.stderr,
             )
             self.assertIn(
-                f'MACCHERONI_BENCHMARK_CACHE="{fake.cache}"',
+                f"MACCHERONI_BENCHMARK_CACHE='{fake.cache}'",
                 result.stderr,
             )
-            self.assertIn("--profile ko-meeting", result.stderr)
+            self.assertIn("--profile 'ko-meeting'", result.stderr)
+            rerun = _remedy_lines(result.stderr)[1]
+            self.assertEqual(
+                rerun,
+                f"MACCHERONI_BENCHMARK_CACHE='{fake.cache}' zsh '{fake.script}'"
+                " --profile 'ko-meeting'",
+            )
 
             self.assertNotIn("rm ", result.stderr)
             self.assertTrue((binary / "python").is_symlink())
@@ -694,6 +709,81 @@ class SetupTranscriptionRuntimeTests(unittest.TestCase):
         finally:
             fake.close()
 
+    def test_printed_remedy_survives_a_shell_paste_and_keeps_the_output_mode(
+        self,
+    ) -> None:
+        """The remedy is pasted into zsh from a cache path full of shell syntax."""
+        fake = FakeRuntime()
+        try:
+            hostile = fake.cache.parent / "ca$he d'ir `tick` \"dq\""
+            hostile.mkdir()
+            outside = fake.cache.parent / "earlier-run interpreter"
+            outside.mkdir()
+            target = outside / "python3"
+            shutil.copy2(fake.tool_source / "python", target)
+            target.chmod(0o755)
+            venv = hostile / "venvs/mlx-audio"
+            (venv / "bin").mkdir(parents=True)
+            (venv / "bin/python").symlink_to(target)
+            (venv / "pyvenv.cfg").write_text("home = elsewhere\n", encoding="utf-8")
+
+            refused = fake.run(
+                "--profile",
+                "ko-meeting",
+                "--json",
+                MACCHERONI_BENCHMARK_CACHE=str(hostile),
+            )
+            self.assertEqual(refused.returncode, 65, refused.stderr)
+            self.assertIn("stale provisioning environment", refused.stderr)
+
+            move_aside, rerun = _remedy_lines(refused.stderr)
+            today = datetime.date.today().strftime("%Y%m%d")
+            aside = venv.with_name(f"mlx-audio.stale-{today}")
+            self.assertEqual(
+                shlex.split(move_aside), ["mv", str(venv), str(aside)]
+            )
+            self.assertEqual(
+                shlex.split(rerun),
+                [
+                    f"MACCHERONI_BENCHMARK_CACHE={hostile}",
+                    "zsh",
+                    str(fake.script),
+                    "--profile",
+                    "ko-meeting",
+                    "--json",
+                ],
+            )
+
+            # Paste both lines into a shell whose own cache selection differs, so
+            # only the remedy's own assignment can steer the rerun.
+            pasted = Path(fake.temporary.name) / "pasted-remedy.zsh"
+            pasted.write_text(
+                "\n".join(["set -euo pipefail", move_aside, rerun, ""]),
+                encoding="utf-8",
+            )
+            replayed = subprocess.run(
+                ["zsh", str(pasted)],
+                cwd=fake.root,
+                env=fake.environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(replayed.returncode, 0, replayed.stderr)
+            self.assertEqual(
+                (aside / "pyvenv.cfg").read_text(encoding="utf-8"),
+                "home = elsewhere\n",
+            )
+            self.assertFalse((venv / "bin/python").is_symlink())
+            payload = json.loads(replayed.stdout)
+            self.assertEqual(payload["profile"], "ko-meeting")
+            self.assertIs(payload["ready"], True)
+            self.assertTrue((hostile / "venvs/mlx-audio/bin/hf").is_file())
+            self.assertFalse((fake.cache / "venvs").exists())
+        finally:
+            fake.close()
+
     def test_stale_remedy_never_targets_an_occupied_move_aside_path(self) -> None:
         fake = FakeRuntime()
         try:
@@ -714,7 +804,7 @@ class SetupTranscriptionRuntimeTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 65, result.stderr)
             self.assertIn(
-                f'mv "{venv}" "{venv}.stale-{today}-2"',
+                f"mv '{venv}' '{venv}.stale-{today}-2'",
                 result.stderr,
             )
             self.assertEqual(

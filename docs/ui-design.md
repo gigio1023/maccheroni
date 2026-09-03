@@ -306,9 +306,11 @@ unattributed gains a third gutter line and, under its text, a sentence:
   the cause in the reader's own language
   wherever the constraint, rather than the model, decided; where the model
   decided, its own words stand and the app adds nothing.
-- A segment declined because **the top candidates hold exactly equal overlap**
-  says so in its own sentence: *The top speakers held exactly equal time in this
-  segment.* Nothing else on the row can say it. The shares are printed rounded to
+- A segment declined because **the top candidates hold the same overlap to within
+  the proposer's tolerance** says so in its own sentence: *The top speakers held
+  the same time in this segment, to within a nanosecond.* The sentence states the
+  comparison the artifact's `cause` actually made, so the row and the artifact
+  cannot disagree. Nothing else on the row can say it. The shares are printed rounded to
   whole percentages, and on the measured run a model decline at 0.5015 / 0.4985
   and a true tie at 0.5000 / 0.5000 both print 50 % / 50 %; the band splits the
   same way for both. The tie is read off the overlapped seconds by the proposer's
@@ -371,6 +373,20 @@ unattributed count, profile, models by role and model ID, glossary — and no ru
 ID, no SHA-256, and no format strings. Fingerprints sit behind one disclosure
 labelled for what they are, and are selectable when opened.
 
+**Derived sets** are listed under their own heading, one row each, and a row is
+two lines when it has a second thing to say. The first line names the family —
+*Speaker Proposal*, *Correct*, *Translate*, read from the operation's kind and
+never from its mode — beside the month, day and time that set was made, and
+marks the current set of its family with an accent check. The year is dropped:
+it never tells two derived sets of one run apart, and at the inspector's
+300-point minimum it pushed the time onto a second line, where two rows stopped
+being comparable by eye. A speaker-proposal set carries a second line in the
+secondary ink: how many segments it proposed a speaker for, how many it
+declined, and the same *not acoustic evidence, and not measured* disclosure the
+transcript surface prints over the proposed layer. Two proposal sets made
+minutes apart carry distinct times, but what each one did is what a reader
+chooses on.
+
 #### Tokens
 
 One token set, defined once in `AppTheme` and used by every view in this
@@ -426,18 +442,34 @@ resolved, a checkbox is inclusion in a copy selection, a waveform is playing.
 
 D48 governs: this surface is judged by rendering it offscreen from the real
 248-segment run at 820 and 1400 points in both appearances and reading the
-images back, not by the maintainer. Two limits of that method decide what an
-image can be trusted to show and are recorded here:
+images back, not by the maintainer. The render path is an `NSHostingView` laid
+out offscreen and drawn with `cacheDisplay(in:to:)`, which needs no window
+server and no Screen Recording permission. What that path draws, and what it
+cannot, decides what an image is trusted to show:
 
-- **Nothing inside a scrolling container renders.** `ScrollView`, `List` and
-  `Form(.grouped)` all come back empty. The transcript header, the segment
-  column, the inspector's sections and the review sheet's body are therefore
-  separate views that a harness renders on their own.
-- **AppKit-backed controls render as a placeholder glyph.** The search field's
-  text field and the transport's slider appear as yellow blocks in every
-  rendered image; their appearance, and any hover-revealed affordance such as
-  the tab tooltips, is what offscreen rendering cannot judge. This surface uses
-  `.plain` button styles throughout for that reason.
+- **Scroll views, grouped forms and typed-in controls draw.** `ScrollView`
+  content, `Form(.grouped)`, `TextField`, `Slider` and a spinner all render, so
+  the inspector is read as the grouped form the app builds, at 300 and 450
+  points, and the search field and the transport slider are judged from pixels
+  like everything else on this surface.
+- **`List`, menus, sheets and hover are what an image cannot judge.** `List` is
+  `NSTableView`-backed and comes back blank without a real window, so the
+  library sidebar and the glossary list are rendered a row at a time; a context
+  menu, a sheet and a confirmation dialog are presented by AppKit and never
+  enter a render, so what they say is rendered as a plain view instead; and a
+  hover-revealed affordance such as a tab or chip tooltip has no hover to
+  reveal it. Those wait for the running app.
+
+The shipped `TranscriptView` renders as itself, but its own `ScrollView`
+settles at a non-zero offset offscreen and its `.navigationTitle` wrapper lays
+the screen out taller than the frame, so that image starts part-way down the
+list and carries no header. The images this section measures are composed from
+the same shipped header and segment-column views the screen builds. SwiftUI's
+own `ImageRenderer`, the path D48 first recorded, returns nothing at all for a
+scroll container, a `List` or a grouped form and draws `TextField`, `Slider`
+and AppKit-backed button styles as placeholder blocks; this surface's `.plain`
+button styles were chosen under it, and one probe render of the same sample
+down both paths is kept so the difference stays legible.
 
 Measured on the real 248-segment run by rendering every row at the measure and
 reading the heights back, header included, in a window 1000 points tall
@@ -481,9 +513,9 @@ The same measurement on the first rework's renders: light teal name and band
 1.9:1, purple name 3.0:1, secondary text 4.0:1, review flag 2.3:1, white on
 the layer pill 3.5:1; dark purple name 3.1:1 and white on the pill 3.2:1.
 
-What the renders could not show: the search field's text field and the
-transport's slider (placeholders), the tab and chip tooltips, and the pinned
-column header while scrolling. Those wait for the running app.
+What the renders could not show: the tab and chip tooltips, which need a
+hover, and the pinned column header while scrolling, which the harness puts
+back to the top before it draws. Those wait for the running app.
 
 #### Decisions the renders forced
 

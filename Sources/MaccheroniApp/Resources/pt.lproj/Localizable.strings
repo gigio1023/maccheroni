@@ -12,6 +12,8 @@
 	<string>Não foi possível mover %@ para a lixeira e parte dela está agora lá. Reponha-a no Finder. A gravação permanece na biblioteca.</string>
 	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
 	<string>Não foi possível mover %@ para a lixeira. Os ficheiros continuam onde estavam e a gravação permanece na biblioteca.</string>
+	<key>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</key>
+	<string>%@ está no Lixo, mas não foi possível salvar a biblioteca, então a gravação continua listada. Coloque-o de volta no Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ já não está onde a biblioteca espera, por isso nada foi movido.</string>
 	<key>%@ of %@ (%@)</key>
@@ -72,6 +74,8 @@
 	<string>Falta um artefato de execução: %@</string>
 	<key>ASR Model Cache</key>
 	<string>Cache do modelo ASR</string>
+	<key>Acoustic candidates: %@</key>
+	<string>Candidatos acústicos: %@</string>
 	<key>Add</key>
 	<string>Adicionar</string>
 	<key>Add a name, term, or place</key>
@@ -806,8 +810,8 @@
 	<string>O modelo de fala que respondeu não é exatamente o modelo fixado por este perfil, por isso a saída foi recusada.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>O modelo de reconhecimento de fala exigido por este perfil não está instalado neste Mac.</string>
-	<key>The top speakers held exactly equal time in this segment.</key>
-	<string>Neste segmento, os falantes principais ocuparam exatamente o mesmo tempo.</string>
+	<key>The top speakers held the same time in this segment, to within a nanosecond.</key>
+	<string>Neste segmento, os falantes principais ocuparam o mesmo tempo, com uma margem de um nanossegundo.</string>
 	<key>The transcript could not be copied.</key>
 	<string>Não foi possível copiar a transcrição.</string>
 	<key>The transcription engine could not start: %@</key>

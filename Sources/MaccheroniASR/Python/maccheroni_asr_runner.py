@@ -777,8 +777,18 @@ def recover_vibevoice_prefix(raw_text: Any, duration: float) -> dict[str, Any]:
     promoted = len(segments)
     while promoted > 0 and segments[promoted - 1]["degenerate"]:
         promoted -= 1
-    tail_run = repetition_run_length(tail)
-    if repetition_units(tail):
+    # A closed array leaves only its terminator behind, and ``]`` is not
+    # repeated content.  Scoring it as a repeatable unit sent an
+    # end-of-sequence collapse down the nonempty-tail branch, where a run of 1
+    # reported ``terminal_collapse = false`` while the caller emitted
+    # ``repetitionLooping``; the Swift adapter rejects that pair as
+    # inconsistent evidence.  The decision reads the model's own undecodable
+    # text, so the terminator and the whitespace around it are removed first.
+    residual_tail = tail.strip()
+    if residual_tail.startswith("]"):
+        residual_tail = residual_tail[1:].strip()
+    tail_run = repetition_run_length(residual_tail)
+    if repetition_units(residual_tail):
         terminal_collapse = tail_run >= VIBEVOICE_REPETITION_RUN_THRESHOLD
     else:
         terminal_collapse = bool(segments) and segments[-1]["degenerate"]
@@ -789,14 +799,22 @@ def recover_vibevoice_prefix(raw_text: Any, duration: float) -> dict[str, Any]:
         "complete_object_count": len(decoded),
         "validated_object_count": len(segments),
         "promoted_object_count": promoted,
-        "degenerate_object_count": sum(1 for item in segments if item["degenerate"]),
+        # Both counts describe the promoted prefix, which is the only thing
+        # the run promotes and the only thing the CLI disclosure claims they
+        # describe.  Objects sliced off the tail are already excluded from
+        # ``promoted_object_count`` and ``segments``; counting them here made
+        # the prefix look more degraded than the transcript it actually kept.
+        "degenerate_object_count": sum(
+            1 for item in segments[:promoted] if item["degenerate"]
+        ),
         "coverage_s": segments[promoted - 1]["end_s"] if promoted else 0.0,
         "repetition_run_threshold": VIBEVOICE_REPETITION_RUN_THRESHOLD,
         "repetition_run_maximum": max(
-            (repetition_run_length(item["text"]) for item in segments), default=0
+            (repetition_run_length(item["text"]) for item in segments[:promoted]),
+            default=0,
         ),
         "tail_repetition_run": tail_run,
-        "tail_characters": len(tail),
+        "tail_characters": len(residual_tail),
         "terminal_collapse": terminal_collapse,
         "raw_text": prefix_text,
         "segments": segments[:promoted],

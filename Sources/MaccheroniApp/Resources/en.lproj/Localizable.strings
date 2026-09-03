@@ -12,6 +12,8 @@
 	<string>%@ could not be moved to the Trash, and part of it is in the Trash now. Put it back in the Finder. The recording is still in your library.</string>
 	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
 	<string>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</string>
+	<key>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</key>
+	<string>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ is no longer where the library expects it, so nothing was moved.</string>
 	<key>%@ of %@ (%@)</key>
@@ -72,6 +74,8 @@
 	<string>A run artifact is missing: %@</string>
 	<key>ASR Model Cache</key>
 	<string>ASR Model Cache</string>
+	<key>Acoustic candidates: %@</key>
+	<string>Acoustic candidates: %@</string>
 	<key>Add</key>
 	<string>Add</string>
 	<key>Add a name, term, or place</key>
@@ -806,8 +810,8 @@
 	<string>The speech model that answered is not the exact model this profile pins, so its output was refused.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>The speech recognition model this profile needs is not installed on this Mac.</string>
-	<key>The top speakers held exactly equal time in this segment.</key>
-	<string>The top speakers held exactly equal time in this segment.</string>
+	<key>The top speakers held the same time in this segment, to within a nanosecond.</key>
+	<string>The top speakers held the same time in this segment, to within a nanosecond.</string>
 	<key>The transcript could not be copied.</key>
 	<string>The transcript could not be copied.</string>
 	<key>The transcription engine could not start: %@</key>

@@ -12,6 +12,8 @@
 	<string>No se pudo mover %@ a la papelera y una parte está ahora allí. Devuélvela desde el Finder. La grabación sigue en la biblioteca.</string>
 	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
 	<string>No se pudo mover %@ a la papelera. Sus archivos siguen donde estaban y la grabación sigue en la biblioteca.</string>
+	<key>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</key>
+	<string>%@ está en la Papelera, pero no se pudo guardar la biblioteca, así que la grabación sigue en la lista. Devuélvela desde el Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ ya no está donde la biblioteca lo espera, así que no se movió nada.</string>
 	<key>%@ of %@ (%@)</key>
@@ -72,6 +74,8 @@
 	<string>Falta un artefacto de ejecución: %@</string>
 	<key>ASR Model Cache</key>
 	<string>Caché del modelo ASR</string>
+	<key>Acoustic candidates: %@</key>
+	<string>Candidatos acústicos: %@</string>
 	<key>Add</key>
 	<string>Agregar</string>
 	<key>Add a name, term, or place</key>
@@ -806,8 +810,8 @@
 	<string>El modelo de voz que respondió no es exactamente el que fija este perfil, así que se rechazó su salida.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>El modelo de reconocimiento de voz que necesita este perfil no está instalado en esta Mac.</string>
-	<key>The top speakers held exactly equal time in this segment.</key>
-	<string>En este segmento, los hablantes principales ocuparon exactamente el mismo tiempo.</string>
+	<key>The top speakers held the same time in this segment, to within a nanosecond.</key>
+	<string>En este segmento, los hablantes principales ocuparon el mismo tiempo, con un margen de un nanosegundo.</string>
 	<key>The transcript could not be copied.</key>
 	<string>No se pudo copiar la transcripción.</string>
 	<key>The transcription engine could not start: %@</key>

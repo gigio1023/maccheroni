@@ -111,7 +111,8 @@ struct TranscriptView: View {
                     run: run,
                     record: record,
                     selectedSegmentIDs: selectedSegmentIDs,
-                    layer: displayLayer
+                    layer: displayLayer,
+                    proposal: proposal
                 )
                 showCopyFeedback(
                     TranscriptCopyFeedback(
@@ -249,6 +250,11 @@ struct TranscriptView: View {
             copyFeedback = nil
             selectedLayer = nil
             focusedSegmentIndex = nil
+            // The result under the view changed, so what is playing is no
+            // longer what is displayed. `preparePlayer` also refuses another
+            // record's player; this ends the sound as well, rather than
+            // leaving it running until the next control is touched.
+            playback.stop()
         }
         .onDisappear { playback.stop() }
     }
@@ -464,7 +470,8 @@ struct TranscriptView: View {
                 run: run,
                 record: record,
                 selectedSegmentIDs: selectedSegmentIDs,
-                layer: displayLayer
+                layer: displayLayer,
+                proposal: proposal
             )
             showCopyFeedback(
                 TranscriptCopyFeedback(
@@ -839,8 +846,17 @@ enum SegmentSpeakerProposal: Equatable, Sendable {
                 // The tie said as a tie. Nothing else on the row says it: the
                 // shares round to 50 % / 50 % and the threshold sentence
                 // below is true of every unattributed segment.
+                //
+                // "To within a nanosecond" rather than "exactly equal",
+                // because the artifact's own `cause` is decided by
+                // `topRankedCandidate(among:)`, which admits a tie inside
+                // `topRankedMarginS` — a nanosecond of overlap. Saying exact
+                // would let this row make a claim the artifact does not, and
+                // making the comparison exact instead would let the row deny a
+                // tie the artifact recorded. `theTieSentenceNamesTheMargin`
+                // pins the sentence to the constant.
                 appString(
-                    "The top speakers held exactly equal time in this segment.",
+                    "The top speakers held the same time in this segment, to within a nanosecond.",
                     locale: locale
                 )
             case .noTopRankedCandidate:
@@ -917,6 +933,22 @@ enum SegmentSpeakerProposal: Equatable, Sendable {
         case let .declined(decline):
             decline.sentences(locale: locale, omittingCause: omittingCause)
         }
+    }
+
+    /// The same sentences for a surface that prints no acoustic reason of its
+    /// own — the clipboard, and a row that is not showing one. Nothing stands
+    /// down here, because there is nothing beside it saying the same thing;
+    /// the one fact still said once is the model decline that only restates
+    /// this app's cause sentence.
+    ///
+    /// Shared with `TranscriptSegmentRow.proposalSentences` rather than
+    /// restated there: two copies of this rule would let the clipboard and the
+    /// screen disagree about what a decline said.
+    func sentencesWithoutAcousticReason(locale: Locale? = nil) -> [String] {
+        if let decline, decline.modelRestatesCause {
+            return decline.causeSentence(locale: locale).map { [$0] } ?? [decline.reason]
+        }
+        return sentences(locale: locale, omittingCause: false)
     }
 }
 
@@ -1134,6 +1166,24 @@ final class TranscriptPlaybackController {
     @ObservationIgnored private var player: AVPlayer?
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var accessedURL: URL?
+    /// Which record the live player was built for. A controller outlives a
+    /// selection change whenever SwiftUI keeps the transcript view's identity,
+    /// so "a player exists" is not "the right player exists".
+    @ObservationIgnored private(set) var preparedRecordID: UUID?
+    /// The source the live player was built from, as the record declared it.
+    /// Compared rather than re-resolved: `seek` runs on every frame of a
+    /// scrubber drag, and resolving a security-scoped bookmark there would put
+    /// file-system work in the drag loop. A record whose file moves keeps its
+    /// declared URL only while the library index is unchanged, and the index
+    /// changing is what replaces the record here.
+    @ObservationIgnored private(set) var preparedSourceURL: URL?
+    /// How the player is built. Injected so a test can watch this lifecycle
+    /// without audio, a window server, or a decodable file.
+    @ObservationIgnored private let makePlayer: (URL) -> AVPlayer
+
+    init(makePlayer: @escaping (URL) -> AVPlayer = { AVPlayer(url: $0) }) {
+        self.makePlayer = makePlayer
+    }
 
     // No `deinit` teardown: it would have to reach main-actor state from a
     // nonisolated context. The view calls `stop()` in `onDisappear`, which is
@@ -1147,7 +1197,10 @@ final class TranscriptPlaybackController {
     }
 
     func togglePlayPause(record: LibraryRecord) {
-        if isPlaying {
+        // Pausing is about the audio that is playing, so it applies only when
+        // the audio that is playing is this record's. Otherwise this is the
+        // first press on a newly selected record and has to build its player.
+        if isPlaying, isPrepared(for: record) {
             player?.pause()
             isPlaying = false
             return
@@ -1175,6 +1228,8 @@ final class TranscriptPlaybackController {
         }
         timeObserver = nil
         player = nil
+        preparedRecordID = nil
+        preparedSourceURL = nil
         isPlaying = false
         positionS = 0
         accessedURL?.stopAccessingSecurityScopedResource()
@@ -1188,8 +1243,19 @@ final class TranscriptPlaybackController {
         return TranscriptPlaybackTimeline.segmentIndex(at: positionS, in: segments)
     }
 
+    /// Whether the live player is this record's.
+    func isPrepared(for record: LibraryRecord) -> Bool {
+        player != nil
+            && preparedRecordID == record.id
+            && preparedSourceURL == record.sourceURL
+    }
+
     private func preparePlayer(for record: LibraryRecord) -> Bool {
-        if player != nil { return true }
+        if isPrepared(for: record) { return true }
+        // A player built for another record is torn down rather than reused.
+        // Reusing it played run A's audio under run B's transcript, with run
+        // B's playhead and run B's segment highlight following it.
+        if player != nil { stop() }
         guard let url = Self.sourceURL(for: record) else {
             errorMessage = appString("The original recording could not be found.")
             return false
@@ -1197,8 +1263,10 @@ final class TranscriptPlaybackController {
         if url.startAccessingSecurityScopedResource() {
             accessedURL = url
         }
-        let player = AVPlayer(url: url)
+        let player = makePlayer(url)
         self.player = player
+        preparedRecordID = record.id
+        preparedSourceURL = record.sourceURL
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.2, preferredTimescale: 600),
             queue: .main
@@ -1325,7 +1393,8 @@ struct TranscriptCopyCommand {
         run: LoadedRun,
         record: LibraryRecord,
         selectedSegmentIDs: Set<TranscriptSegmentID>,
-        layer: TranscriptDisplayLayer? = nil
+        layer: TranscriptDisplayLayer? = nil,
+        proposal: SpeakerProposalDocument? = nil
     ) throws -> TranscriptCopyPayload {
         let selectedSegments = run.segments.filter { selectedSegmentIDs.contains($0.id) }
         guard selectedSegmentIDs.isEmpty || selectedSegments.count == selectedSegmentIDs.count else {
@@ -1336,7 +1405,8 @@ struct TranscriptCopyCommand {
             run: run,
             record: record,
             selectedSegmentIndices: selectedIndices,
-            layer: layer
+            layer: layer,
+            proposal: proposal
         )
         return TranscriptCopyPayload(
             text: text,
@@ -1353,13 +1423,15 @@ struct TranscriptCopyCommand {
         run: LoadedRun,
         record: LibraryRecord,
         selectedSegmentIDs: Set<TranscriptSegmentID>,
-        layer: TranscriptDisplayLayer? = nil
+        layer: TranscriptDisplayLayer? = nil,
+        proposal: SpeakerProposalDocument? = nil
     ) throws -> TranscriptCopyConfirmation {
         let payload = try payload(
             run: run,
             record: record,
             selectedSegmentIDs: selectedSegmentIDs,
-            layer: layer
+            layer: layer,
+            proposal: proposal
         )
         guard clipboard.write(payload.text) else {
             throw TranscriptCopyError.clipboardWriteFailed
@@ -2001,11 +2073,11 @@ struct TranscriptSegmentRow: View {
         // fact once: this app's sentence when the row has no acoustic reason
         // of its own, and nothing at all when the row already prints one —
         // which for this cause is the same sentence again.
-        if let decline = proposal.decline, decline.modelRestatesCause {
-            guard acousticReason == nil else { return [] }
-            return decline.causeSentence().map { [$0] } ?? [decline.reason]
+        guard acousticReason != nil else {
+            return proposal.sentencesWithoutAcousticReason()
         }
-        return proposal.sentences(omittingCause: acousticReason != nil)
+        if proposal.decline?.modelRestatesCause == true { return [] }
+        return proposal.sentences(omittingCause: true)
     }
 
     var body: some View {

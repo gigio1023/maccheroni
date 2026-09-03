@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Foundation
 import MaccheroniCore
 import MaccheroniMerge
@@ -121,6 +122,111 @@ struct TranscriptReadingTests {
         #expect(correctedPayload.text.contains("Accepted wording"))
         #expect(rawPayload.confirmation.layer == .speakerLabelled)
         #expect(correctedPayload.confirmation.layer == .corrected)
+    }
+
+    /// The clipboard's header names a layer, and the rows under it have to be
+    /// that layer's. Beside a translation the speaker-labelled layer is the
+    /// source-language transcript the loaded run kept; the copy path used to
+    /// enumerate `run.transcript`, so it said "Speaker-labelled" over
+    /// translated rows.
+    @Test @MainActor
+    func speakerLabelledCopyBesideATranslationExportsTheSourceLanguageRows() throws {
+        var fixture = TranscriptFixtures.translationShaped()
+        let source = TranscriptFixtures.meetingShaped().run.transcript
+        fixture.run.sourceTranscript = source
+        let command = TranscriptCopyCommand(clipboard: RecordingClipboard())
+
+        let raw = try command.payload(
+            run: fixture.run,
+            record: fixture.record,
+            selectedSegmentIDs: [],
+            layer: .speakerLabelled
+        )
+        let translated = try command.payload(
+            run: fixture.run,
+            record: fixture.record,
+            selectedSegmentIDs: [],
+            layer: .translated
+        )
+
+        #expect(raw.text.hasPrefix("Transcript layer: Speaker-labelled\n\n"))
+        #expect(raw.text.contains(source.segments[0].text))
+        #expect(!raw.text.contains("Translated line "))
+        #expect(translated.text.hasPrefix("Transcript layer: Translated\n\n"))
+        #expect(translated.text.contains("Translated line "))
+        #expect(!translated.text.contains(source.segments[0].text))
+        // The layer is a reading of what is loaded; copying it writes nothing.
+        #expect(fixture.run.transcript == TranscriptFixtures.translationShaped().run.transcript)
+    }
+
+    /// D46 lets a non-acoustic proposal exist only because the acoustic
+    /// candidates and their shares stay beside it and it is marked as a
+    /// proposal. Text pasted into another document is where that condition
+    /// would be dropped without anyone seeing it, so the clipboard carries the
+    /// same evidence the screen does: the proposed speaker under the same
+    /// label, or the decline and its reason, the candidates with their shares,
+    /// and the disclosure that none of it was measured.
+    @Test @MainActor
+    func proposedLayerCopyCarriesTheProposalsDeclinesAndAcousticEvidence() throws {
+        let english = Locale(identifier: "en")
+        let fixture = TranscriptFixtures.meetingShaped()
+        let document = TranscriptFixtures.proposalDocument(for: fixture.run)
+        let proposed = try #require(document.proposals.first)
+        let declined = try #require(
+            document.declined.first { $0.cause == .noTopRankedCandidate }
+        )
+
+        let text = try TranscriptExporter.copyText(
+            run: fixture.run,
+            record: fixture.record,
+            selectedSegmentIndices: [],
+            locale: english,
+            layer: .proposed,
+            proposal: document
+        )
+
+        // The disclosure, once, above the rows, with D49's coverage hole.
+        #expect(text.hasPrefix("Transcript layer: Proposed\n"))
+        #expect(text.contains(
+            "\(document.proposals.count) proposed, \(document.declined.count) declined. Not acoustic evidence, and not measured."
+        ))
+        #expect(text.contains("of this recording produced no transcript"))
+
+        // A proposal: the dashed label the row uses, then the speaker, under
+        // the name this library gives that speaker rather than its raw ID.
+        func name(_ speaker: String) -> String {
+            fixture.record.speakerNames[speaker] ?? speaker
+        }
+        #expect(name(proposed.proposedSpeaker) == "Jina")
+        #expect(text.contains("Proposed, not measured: \(name(proposed.proposedSpeaker))"))
+        #expect(text.contains(proposed.reason))
+        for candidate in proposed.acousticCandidates {
+            #expect(text.contains(
+                "\(name(candidate.speaker)) \(SegmentAttributionSummary.percent(candidate.share, locale: english))"
+            ))
+        }
+
+        // A decline: what was not proposed, why, and the tie sentence, which
+        // is the one the row prints only because the shares round to equal.
+        #expect(text.contains("No speaker proposed"))
+        #expect(text.contains(
+            "The top speakers held the same time in this segment, to within a nanosecond."
+        ))
+        let modelAnswer = try #require(declined.modelAnswer)
+        #expect(text.contains(modelAnswer.reason))
+
+        // Nothing of the layer leaks into a layer the reader did not ask for.
+        let raw = try TranscriptExporter.copyText(
+            run: fixture.run,
+            record: fixture.record,
+            selectedSegmentIndices: [],
+            locale: english,
+            layer: .speakerLabelled,
+            proposal: document
+        )
+        #expect(!raw.contains("Proposed, not measured"))
+        #expect(!raw.contains("Acoustic candidates"))
+        #expect(!raw.contains("Not acoustic evidence, and not measured."))
     }
 
     // MARK: Speakers
@@ -564,6 +670,76 @@ struct TranscriptReadingTests {
         #expect(controller.playingSegmentIndex(in: fixture.run.segments) == nil)
     }
 
+    /// The controller outlives a selection change whenever SwiftUI keeps the
+    /// transcript view's identity, and it used to return the player it already
+    /// had for whatever record was asked about. Run A's audio then played,
+    /// seeked and resumed under run B's transcript.
+    ///
+    /// The player is injected so this is settled without audio, a window
+    /// server, or a decodable file: what is asserted is which URL each player
+    /// was built from and when the old one was let go.
+    @Test @MainActor
+    func selectingAnotherRecordBuildsThatRecordsPlayerInsteadOfReusingTheOldOne() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "MaccheroniPlaybackTests-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func recording(_ name: String) throws -> URL {
+            let url = root.appendingPathComponent("\(name).wav")
+            try Data("not audio, and never decoded".utf8).write(to: url)
+            return url
+        }
+
+        var first = TranscriptFixtures.meetingShaped()
+        first.record.sourceURL = try recording("a")
+        var second = TranscriptFixtures.meetingShaped()
+        second.record.id = UUID()
+        second.record.sourceURL = try recording("b")
+
+        var built: [URL] = []
+        let controller = TranscriptPlaybackController { url in
+            built.append(url)
+            return AVPlayer()
+        }
+
+        controller.play(from: 12, record: first.record)
+        #expect(built == [first.record.sourceURL])
+        #expect(controller.isPlaying)
+        #expect(controller.preparedRecordID == first.record.id)
+        #expect(controller.isPrepared(for: first.record))
+        #expect(!controller.isPrepared(for: second.record))
+
+        // Seeking while the other record is selected must not drive the first
+        // record's player.
+        controller.seek(to: 30, record: second.record)
+        #expect(built == [first.record.sourceURL, second.record.sourceURL])
+        #expect(controller.preparedRecordID == second.record.id)
+        #expect(controller.positionS == 30)
+
+        // Resuming is the same question, and a pause press while another
+        // record's audio is playing builds this record's player rather than
+        // pausing the other one.
+        controller.togglePlayPause(record: second.record)
+        #expect(controller.isPlaying)
+        #expect(built.count == 2)
+        controller.togglePlayPause(record: second.record)
+        #expect(!controller.isPlaying)
+
+        // A record whose file moved is not the record the player was built
+        // for, even under the same identity.
+        var moved = second
+        moved.record.sourceURL = try recording("c")
+        controller.play(from: 1, record: moved.record)
+        #expect(built.count == 3)
+        #expect(controller.preparedRecordID == moved.record.id)
+
+        controller.stop()
+        #expect(controller.preparedRecordID == nil)
+        #expect(!controller.isPrepared(for: moved.record))
+    }
+
     // MARK: Inspector
 
     @Test
@@ -928,7 +1104,7 @@ struct TranscriptReadingTests {
     func anExactTieSaysSoWhereANearTieDoesNot() {
         let english = Locale(identifier: "en")
         let korean = Locale(identifier: "ko")
-        let tieSentence = "The top speakers held exactly equal time in this segment."
+        let tieSentence = "The top speakers held the same time in this segment, to within a nanosecond."
         let tie = SegmentSpeakerProposal.Decline(
             reason: "Declined under confirm-or-decline: the acoustic candidates 0 and 1 hold equal overlap, so there is no top-ranked candidate to confirm. The model also declined: 공동 발화가 동률이라 선두 화자가 없습니다.",
             cause: .noTopRankedCandidate,
@@ -984,7 +1160,7 @@ struct TranscriptReadingTests {
         #expect(!nearTie.sentences(locale: english).contains(tieSentence))
         #expect(
             tie.sentences(locale: korean).first
-                == "이 구간에서 상위 화자들이 정확히 같은 시간을 차지했습니다."
+                == "이 구간에서 상위 화자들이 1나노초 차이 이내로 같은 시간을 차지했습니다."
         )
 
         // The tie sentence never stands down for the acoustic reason. That
@@ -1005,6 +1181,54 @@ struct TranscriptReadingTests {
                     minimumTimelineCoverage: 0.50
                 )
             ).reason(locale: english)
+        )
+    }
+
+    /// The row said "exactly equal" while the comparison behind it admits a
+    /// tie inside `topRankedMarginS`. The sentence is the half that moved:
+    /// making the comparison exact instead would have let a row deny a tie the
+    /// artifact recorded, because the artifact's own `cause` is decided by
+    /// `topRankedCandidate(among:)` and by nothing else.
+    ///
+    /// The margin is a nanosecond and the sentence says so, so this pins the
+    /// two together: a change to the constant fails here rather than leaving a
+    /// sentence that quietly overstates what was measured.
+    @Test
+    func theTieSentenceNamesTheMargin() {
+        let english = Locale(identifier: "en")
+        #expect(SpeakerProposalConstraint.topRankedMarginS == 1e-9)
+
+        // Not exactly equal, and inside the margin: the artifact records no
+        // top-ranked candidate here, so the row has to agree with it.
+        let insideTheMargin = SegmentSpeakerProposal.Decline(
+            reason: "Declined under confirm-or-decline: the acoustic candidates 0 and 1 hold equal overlap, so there is no top-ranked candidate to confirm.",
+            cause: .noTopRankedCandidate,
+            candidates: [
+                SpeakerCandidateEvidence(speaker: "0", overlapS: 3.8, share: 0.5),
+                SpeakerCandidateEvidence(speaker: "1", overlapS: 3.8 - 5e-10, share: 0.5),
+            ]
+        )
+        // Outside it by a hundredth of a second: a top-ranked candidate
+        // exists, and this sentence must not appear.
+        let outsideTheMargin = SegmentSpeakerProposal.Decline(
+            reason: "Declined under confirm-or-decline.",
+            cause: .noTopRankedCandidate,
+            candidates: [
+                SpeakerCandidateEvidence(speaker: "0", overlapS: 3.8, share: 0.5),
+                SpeakerCandidateEvidence(speaker: "1", overlapS: 3.79, share: 0.5),
+            ]
+        )
+
+        #expect(insideTheMargin.candidates[0].overlapS != insideTheMargin.candidates[1].overlapS)
+        #expect(insideTheMargin.holdsEqualOverlap)
+        #expect(!outsideTheMargin.holdsEqualOverlap)
+        #expect(
+            insideTheMargin.causeSentence(locale: english)
+                == "The top speakers held the same time in this segment, to within a nanosecond."
+        )
+        #expect(
+            outsideTheMargin.causeSentence(locale: english)
+                == "No speaker held enough of this segment's speech, so none was named."
         )
     }
 
@@ -1035,7 +1259,7 @@ struct TranscriptReadingTests {
             #expect(decline.holdsEqualOverlap, "segment \(record.segmentIndex)")
             #expect(
                 decline.sentences(locale: english).first
-                    == "The top speakers held exactly equal time in this segment."
+                    == "The top speakers held the same time in this segment, to within a nanosecond."
             )
         }
     }

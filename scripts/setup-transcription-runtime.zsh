@@ -90,10 +90,17 @@ done
 [[ $profile == ko-meeting ]] || usage
 
 # The remedy printed by a stale-environment refusal has to reproduce this
-# invocation, including the cache root the caller selected.
-provision_command="zsh \"$script_path\" --profile $profile"
+# invocation: the cache root the caller selected and every flag it was given.
+# The remedy is meant to be pasted into a shell, so every interpolated value is
+# single-quoted with ${(qq)}. A valid path holding a space, a dollar sign, a
+# quote, a backtick, or a newline then reaches the rerun unchanged instead of
+# being reinterpreted.
+provision_command="zsh ${(qq)script_path} --profile ${(qq)profile}"
+if [[ $json == true ]]; then
+    provision_command+=' --json'
+fi
 if [[ -n ${MACCHERONI_BENCHMARK_CACHE:-} ]]; then
-    provision_command="MACCHERONI_BENCHMARK_CACHE=\"$cache_root\" $provision_command"
+    provision_command="MACCHERONI_BENCHMARK_CACHE=${(qq)cache_root} $provision_command"
 fi
 
 # Progress goes to stderr so that --json keeps stdout to the doctor payload.
@@ -199,6 +206,15 @@ if policy not in {"venv", "scratch"}:
     raise SystemExit(f"unknown external-writer tree policy: {policy}")
 
 
+def shell_quote(value):
+    """Single-quote a value so a shell reading the pasted remedy takes it whole.
+
+    The remedy is copied into a shell, so a path holding a space, a dollar
+    sign, a quote, a backtick, or a newline has to survive that trip literally.
+    """
+    return "'" + str(value).replace("'", "'\\''") + "'"
+
+
 def stale_environment_report(relative, resolved, target_exists):
     """Report a venv an earlier provisioning run left pointing at its own Python.
 
@@ -222,7 +238,7 @@ def stale_environment_report(relative, resolved, target_exists):
             "  than reusing or repairing it.",
             "  remedy: move it aside and provision again. nothing is deleted, and the",
             "  moved copy stays readable if you want to inspect it.",
-            f"    mv \"{root}\" \"{aside}\"",
+            f"    mv {shell_quote(root)} {shell_quote(aside)}",
             f"    {provision_command}",
         ]
     )

@@ -257,6 +257,74 @@ import Testing
         #expect(attribution.candidates.map(\.speaker) == result.conflicts.first?.candidates)
     }
 
+    @Test func aNondefaultOverlapEpsilonDecidesTheWinnerAndIsSealedWithIt() throws {
+        // 6 s against 5 s clears a 0.5 share bar either way, so the assignment
+        // turns entirely on whether the one-second winner margin clears the
+        // overlap epsilon. Two runs that differ only in that value therefore
+        // name different speakers, which is why the value has to travel with
+        // the other two thresholds.
+        let timeline = Timeline(segments: [
+            TimelineSegment(speaker: "SPEAKER_00", startS: 0, endS: 6),
+            TimelineSegment(speaker: "SPEAKER_01", startS: 6, endS: 11),
+        ])
+        let chunks = singleChunk([
+            Segment(speaker: "UNASSIGNED", startS: 0, endS: 11, text: "one second apart"),
+        ])
+        var lenient = TimelineMergeConfiguration(
+            dominantSpeakerShare: 0.5,
+            minimumTimelineCoverage: 0.5
+        )
+        lenient.overlapEpsilonS = 1e-9
+        var strict = lenient
+        strict.overlapEpsilonS = 1.5
+
+        let named = try TimelineMerger(configuration: lenient)
+            .merge(chunks: chunks, timeline: timeline, source: source)
+        #expect(named.segmentsDocument.segments.first?.speaker == "SPEAKER_00")
+
+        let unnamed = try TimelineMerger(configuration: strict)
+            .merge(chunks: chunks, timeline: timeline, source: source)
+        #expect(unnamed.segmentsDocument.segments.first?.speaker == "UNKNOWN")
+        let attribution = try speakerAttribution(unnamed.conflicts)
+        #expect(attribution.outcome == .noDominantSpeaker)
+        #expect(attribution.thresholds.dominantSpeakerShare == 0.5)
+        #expect(attribution.thresholds.minimumTimelineCoverage == 0.5)
+        #expect(attribution.thresholds.overlapEpsilonS == 1.5)
+
+        let data = try JSONEncoder().encode(unnamed.conflicts)
+        let array = try #require(
+            JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        )
+        let serialized = try #require(
+            (array.first?["speaker_attribution"] as? [String: Any])?["thresholds"]
+                as? [String: Any]
+        )
+        #expect(serialized["overlap_epsilon_s"] as? Double == 1.5)
+        let decoded = try JSONDecoder().decode([MergeConflict].self, from: data)
+        #expect(decoded == unnamed.conflicts)
+        #expect(
+            decoded.first?.speakerAttribution?.thresholds.overlapEpsilonS == 1.5
+        )
+    }
+
+    @Test func thresholdsWrittenBeforeTheEpsilonFieldReadAsUnrecorded() throws {
+        // Conflict files sealed before 2026-09-02 do not carry the value, and
+        // a reader must be able to tell that from a recorded one rather than
+        // being handed today's default as though the run had used it.
+        let legacy = Data(#"""
+        {"dominant_speaker_share": 0.6, "minimum_timeline_coverage": 0.5}
+        """#.utf8)
+        let decoded = try JSONDecoder().decode(
+            SpeakerAttributionThresholds.self,
+            from: legacy
+        )
+        #expect(decoded.overlapEpsilonS == nil)
+        let object = try #require(JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(decoded)
+        ) as? [String: Any])
+        #expect(object["overlap_epsilon_s"] == nil)
+    }
+
     @Test func candidatesAreOrderedByOverlapAndTheirSharesSumToOne() throws {
         let timeline = Timeline(segments: [
             TimelineSegment(speaker: "SPEAKER_02", startS: 0, endS: 2),

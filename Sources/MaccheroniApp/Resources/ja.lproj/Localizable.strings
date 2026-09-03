@@ -12,6 +12,8 @@
 	<string>%@ をゴミ箱に移動できず、一部だけがゴミ箱にあります。Finder の「戻す」で元に戻してください。録音はライブラリに残っています。</string>
 	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
 	<string>%@ をゴミ箱に移動できませんでした。ファイルは元の場所のままで、録音はライブラリに残っています。</string>
+	<key>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</key>
+	<string>%@ はゴミ箱にありますが、ライブラリを保存できなかったため、この録音は一覧に残っています。Finder で元に戻してください。</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ はライブラリが想定する場所にないため、何も移動しませんでした。</string>
 	<key>%@ of %@ (%@)</key>
@@ -72,6 +74,8 @@
 	<string>実行アーティファクトが欠落しています: %@</string>
 	<key>ASR Model Cache</key>
 	<string>ASR モデルキャッシュ</string>
+	<key>Acoustic candidates: %@</key>
+	<string>音響候補: %@</string>
 	<key>Add</key>
 	<string>追加</string>
 	<key>Add a name, term, or place</key>
@@ -806,8 +810,8 @@
 	<string>応答した音声モデルがこのプロフィールの固定モデルと一致しないため、その出力は拒否されました。</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>このプロファイルに必要な音声認識モデルがこの Mac にインストールされていません。</string>
-	<key>The top speakers held exactly equal time in this segment.</key>
-	<string>このセグメントでは上位の話者がまったく同じ長さを占めています。</string>
+	<key>The top speakers held the same time in this segment, to within a nanosecond.</key>
+	<string>このセグメントでは上位の話者が1ナノ秒の差もなく同じ長さを占めています。</string>
 	<key>The transcript could not be copied.</key>
 	<string>文字起こしをコピーできませんでした。</string>
 	<key>The transcription engine could not start: %@</key>

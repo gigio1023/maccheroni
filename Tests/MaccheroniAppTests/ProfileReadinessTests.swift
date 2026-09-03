@@ -249,6 +249,63 @@ struct ProfileReadinessTests {
         #expect(model.records.isEmpty)
     }
 
+    /// Check Again is a question, so until it is answered there is no answer.
+    ///
+    /// A new evaluation used to keep the previous result: `hasResult` stayed
+    /// true and the blockers stayed the old ones while the probe ran. A run
+    /// started in that window read the stale success and proceeded, which is
+    /// exactly the race `awaitPendingProfileReadiness` exists to close and
+    /// which it cannot see, because it waits on `hasResult`.
+    @Test @MainActor
+    func reProbingAfterADependencyChangesWaitsForTheNewAnswerRatherThanTheOldOne() async throws {
+        let root = try readinessTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let probe = ReadinessStubProbe(outcome: .report(readyReport()))
+        let model = try readinessModel(root: root, probe: probe)
+
+        model.evaluateProfileReadiness()
+        await readinessWait { model.profileReadiness.hasResult }
+        #expect(model.profileReadiness.isReady)
+        #expect(model.canStartRecording)
+
+        // The dependency goes away, and the reader asks again.
+        await probe.answer(.report(unprovisionedReport()))
+        await probe.hold()
+        model.evaluateProfileReadiness()
+
+        // Inside the window: no answer, and none of the old one left standing.
+        #expect(!model.profileReadiness.hasResult)
+        #expect(!model.profileReadiness.isReady)
+        #expect(model.profileReadiness.blockingGroups.isEmpty)
+        #expect(model.profileReadiness.probeIssue == nil)
+        #expect(model.profileReadiness.isEvaluating)
+
+        let audioURL = root.appendingPathComponent("meeting.wav")
+        try Data("not audio".utf8).write(to: audioURL)
+        model.importAudio([audioURL])
+        // Still waiting: the import has neither succeeded on the stale answer
+        // nor been refused on an answer that does not exist yet.
+        #expect(model.errorMessage == nil)
+        #expect(model.records.isEmpty)
+
+        await probe.release()
+        await readinessWait(attempts: 400, napping: .milliseconds(5)) {
+            model.errorMessage != nil
+        }
+
+        #expect(model.errorMessage == appString("This profile is not ready to run."))
+        #expect(model.records.isEmpty)
+        #expect(model.profileReadiness.blockingGroups == [
+            .speechModel,
+            .speakerSeparation,
+            .voiceActivity,
+            .speechRuntime,
+        ])
+        #expect(!model.canStartRecording)
+        let requested = await probe.requestedProfiles
+        #expect(requested == ["ko-it-meeting", "ko-it-meeting"])
+    }
+
     @Test @MainActor
     func blockedImportRefusesAtTheModelAndReportsTheReason() async throws {
         let root = try readinessTemporaryDirectory()
@@ -558,8 +615,8 @@ private func readinessWait(
 }
 
 private actor ReadinessStubProbe: ProfileReadinessProbing {
-    private let outcomes: [String: ProfileReadinessProbeOutcome]
-    private let fallback: ProfileReadinessProbeOutcome?
+    private var outcomes: [String: ProfileReadinessProbeOutcome]
+    private var fallback: ProfileReadinessProbeOutcome?
     private(set) var requestedProfiles: [String] = []
     private var isHeld = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -572,6 +629,14 @@ private actor ReadinessStubProbe: ProfileReadinessProbing {
     init(outcomes: [String: ProfileReadinessProbeOutcome]) {
         self.outcomes = outcomes
         fallback = nil
+    }
+
+    /// What the machine answers from now on. A dependency that was there and
+    /// then is not is the whole of the re-probe scenario, and a probe that can
+    /// only ever give one answer cannot express it.
+    func answer(_ outcome: ProfileReadinessProbeOutcome) {
+        outcomes.removeAll()
+        fallback = outcome
     }
 
     /// Holds every probe open so a test can act inside the window before the first

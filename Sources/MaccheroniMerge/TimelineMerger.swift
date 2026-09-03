@@ -90,15 +90,31 @@ public struct SpeakerCandidate: Codable, Equatable, Sendable {
 public struct SpeakerAttributionThresholds: Codable, Equatable, Sendable {
     public var dominantSpeakerShare: Double
     public var minimumTimelineCoverage: Double
+    /// The smallest overlap the merger counts, and the smallest winner margin
+    /// it accepts. It is a threshold, not a rounding constant: with overlaps of
+    /// 6 s and 5 s, which clear a 0.50 dominant share either way, a tiny value
+    /// names the leader while a value above the one-second margin returns
+    /// `no_dominant_speaker`. Recorded so a sealed conflict file reproduces the
+    /// assignment rather than only two of the three numbers that decided it.
+    /// Optional because conflict files written before 2026-09-02 do not carry
+    /// it, and a reader must be able to tell an unrecorded value from a
+    /// recorded one.
+    public var overlapEpsilonS: Double?
 
-    public init(dominantSpeakerShare: Double, minimumTimelineCoverage: Double) {
+    public init(
+        dominantSpeakerShare: Double,
+        minimumTimelineCoverage: Double,
+        overlapEpsilonS: Double? = nil
+    ) {
         self.dominantSpeakerShare = dominantSpeakerShare
         self.minimumTimelineCoverage = minimumTimelineCoverage
+        self.overlapEpsilonS = overlapEpsilonS
     }
 
     enum CodingKeys: String, CodingKey {
         case dominantSpeakerShare = "dominant_speaker_share"
         case minimumTimelineCoverage = "minimum_timeline_coverage"
+        case overlapEpsilonS = "overlap_epsilon_s"
     }
 }
 
@@ -539,7 +555,8 @@ private extension TimelineMerger {
         let coverage = unionDuration(clipped.map { ($0.startS, $0.endS) }) / intervalDuration
         let thresholds = SpeakerAttributionThresholds(
             dominantSpeakerShare: configuration.dominantSpeakerShare,
-            minimumTimelineCoverage: configuration.minimumTimelineCoverage
+            minimumTimelineCoverage: configuration.minimumTimelineCoverage,
+            overlapEpsilonS: configuration.overlapEpsilonS
         )
         func attribution(_ outcome: SpeakerAttributionOutcome) -> SpeakerAttribution {
             SpeakerAttribution(

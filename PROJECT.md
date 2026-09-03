@@ -142,13 +142,13 @@ glossary entry inserted twice where the speaker said something else.
   `hike-20260831-t9-01` `8b5bdbccd5bb260b9c5cfb1882e8ab63b8f45ff15f38b5f5b4fa44d2f32b5b87`.
   The threshold declaration is still a placeholder, so none of this is a quality pass,
   a profile promotion, or closure of C3.
-- **next**: Work the reading experience against the real transcript that now exists,
-  starting with speaker attribution. Disclose the ranked acoustic candidates and their
-  shares that the merger already computes and discards, and re-examine the 0.60 dominant
-  share and 0.50 coverage thresholds against a 43.4 % overlap recording, before adding
-  any non-acoustic judgment. Then, for what remains, allow a derived run to carry a
-  marked LLM proposal under the amended judgment rule 4 and D46. Rework the transcript
-  reading, correcting, and visual surfaces against that transcript. Reopen the C3
+- **next** (revised 2026-09-03; the previous `next` landed in PR #30): close the review
+  findings on that PR — a run must keep completed siblings on every leaf failure, a
+  limit-stopped prefix must never be filed as end-of-sequence, the derived-manifest
+  schema and run-layout contract must describe the proposal and partial-source forms
+  the code now writes, the partial-source verifier must check coverage rather than
+  status, and the copy surface must export the layer it displays. Then measure the D50
+  confirmations against a ground truth before any revisit of overturns. Reopen the C3
   fixture only after one uninterrupted 10-minute completion through the shipped profile,
   and add overlap share and backchannel density to its acceptance criteria when
   reopening, because the current TTS candidate is concatenated and carries 0 % overlap.

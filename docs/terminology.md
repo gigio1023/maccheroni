@@ -26,15 +26,17 @@ field has no word for the distinction the project needs.
   create-only run directory, recorded by a single `manifest.json`. The ordinary
   word, narrowed here to exactly that unit.
   `Sources/MaccheroniCore/Contracts.swift:603`
-- **derived run** [project]: A sealed operation computed from an already
-  completed run's verified `merged/segments.json`, written under
-  `derived/<derived-id>/` with its own manifest. It never modifies the source
+- **derived run** [project]: A sealed operation computed from a source run's
+  verified `merged/segments.json`, written under `derived/<derived-id>/` with
+  its own manifest. The source was required to be complete until D49; a
+  speaker-proposal set may now derive from a partial source, and its manifest
+  then records the covered and missing durations. It never modifies the source
   run. The "derived" half is standard provenance vocabulary — W3C PROV-O's
   `prov:wasDerivedFrom`, and the code's own lineage type carries the same word —
   while the run-level artifact is the project's.
-  `Sources/MaccheroniCore/DerivedRuns.swift:287` for the manifest,
+  `Sources/MaccheroniCore/DerivedRuns.swift:306` for the manifest,
   `Sources/MaccheroniCore/DerivedRuns.swift:9` for the lineage that binds it to
-  the source, `docs/contracts/run-layout.md:49`
+  the source, `docs/contracts/run-layout.md:53`
 - **`DerivedOperationKind`** [project]: What a derived run produced: a text
   operation over the transcript, `text-postprocess`, or a marked non-acoustic
   speaker proposal over segments the source left unattributed,
@@ -97,7 +99,7 @@ field has no word for the distinction the project needs.
   is inferred rather than reported: `mlx-audio` consumes EOS without yielding
   it, so exhausting the generator produces exactly `max_tokens` tokens.
   `Sources/MaccheroniASR/ASRAdapters.swift:169`, inferred at
-  `Sources/MaccheroniASR/Python/maccheroni_asr_runner.py:884`
+  `Sources/MaccheroniASR/Python/maccheroni_asr_runner.py:950`
 - **`contextLimit`** [field]: Generation stopped at the model's context
   capacity. Only the MOSS path can report it; VibeVoice through `mlx-audio`
   0.4.6 exposes no context hard cap and records `null` plus an unavailable
@@ -115,8 +117,8 @@ field has no word for the distinction the project needs.
   range may promote a recovered prefix. The field names the individual values,
   `length` and `max_tokens`, and has no name for the class, which this project
   needs because the class is what decides recovery.
-  `Sources/MaccheroniASR/ASRAdapters.swift:179` for the test,
-  `Sources/MaccheroniASR/ASRAdapters.swift:224` for the record it carries.
+  `Sources/MaccheroniASR/ASRAdapters.swift:205` for the test,
+  `Sources/MaccheroniASR/ASRAdapters.swift:250` for the record it carries.
 - **limit exhausted** [project]: The state an attempt reaches when its limit
   outcome cannot be recovered: recovery is unavailable for the backend, the
   depth budget is spent, or a child would fall below the minimum recovery
@@ -124,7 +126,7 @@ field has no word for the distinction the project needs.
   exhausted leaf loses its own range and no more.
   `Sources/MaccheroniCLI/CLIApplication.swift:390` for the attempt status,
   decided at the recovery gate
-  `Sources/MaccheroniCLI/CLIApplication.swift:2626`. The error code follows the
+  `Sources/MaccheroniCLI/CLIApplication.swift:2979`. The error code follows the
   backend and the stop reason: `MOSS_LIMIT_EXHAUSTED` on MOSS,
   `ASR_REPETITION_LOOPING` for a repetition stop on any other backend, and
   `ASR_LIMIT_EXHAUSTED` otherwise.
@@ -140,9 +142,9 @@ field has no word for the distinction the project needs.
   portion of a truncated decode, which this project calls **prefix promotion**
   and lists apart in `primary/promotion.json`.
   `docs/engineering-constraint-policy.md:222` for the conditions,
-  `Sources/MaccheroniCLI/CLIApplication.swift:551` for the sealed
+  `Sources/MaccheroniCLI/CLIApplication.swift:656` for the sealed
   `CanonicalPromotionRecord`, and
-  `Sources/MaccheroniCLI/CLIApplication.swift:409` for the per-attempt flag.
+  `Sources/MaccheroniCLI/CLIApplication.swift:434` for the per-attempt flag.
 - **coverage** [project]: How much of the input was actually processed: input
   duration, processed duration, truncation flag, strategy, and chunks planned
   against chunks completed. This is the run-level sense; the per-segment
@@ -179,7 +181,7 @@ field has no word for the distinction the project needs.
   `Sources/MaccheroniASR/Python/maccheroni_asr_runner.py:703`. It cannot see a
   phrase longer than eight units cycling. The distinguishing
   evidence is preserved whole in `primary/chunks/<index>/backend.raw`,
-  `Sources/MaccheroniCLI/CLIApplication.swift:1909`.
+  `Sources/MaccheroniCLI/CLIApplication.swift:2057`.
 - **long-form hallucination** [field]: Output that is fluent and structurally
   plausible but not grounded in the audio, appearing as input length grows.
   "Hallucination" is universal in the generation literature and "long-form" is
@@ -201,13 +203,13 @@ field has no word for the distinction the project needs.
 - **diarization timeline** [field]: The speaker timeline computed once over the
   complete original audio, before enhancement, and used for the whole run.
   `Sources/MaccheroniCore/Contracts.swift:104`,
-  `docs/contracts/run-layout.md:78`
+  `docs/contracts/run-layout.md:111`
 - **turn** [field]: One entry of that timeline: one speaker label over one
   contiguous interval, with optional confidence. Standard in conversation
   analysis and in diarization; the contract type is `TimelineSegment`.
   `Sources/MaccheroniCore/Contracts.swift:84`; the
   merger names the same value `turn` at
-  `Sources/MaccheroniMerge/TimelineMerger.swift:513`, and the scoring side reads
+  `Sources/MaccheroniMerge/TimelineMerger.swift:529`, and the scoring side reads
   RTTM turns at `benchmarks/scripts/scoring/rttm.py:10`.
 - **overlap share** [project]: Two quantities carry this name. Use the full
   sub-term so a reader knows which one is meant.
@@ -215,20 +217,20 @@ field has no word for the distinction the project needs.
     clipped speaker-overlap time held by the top-ranked candidate. Attribution
     requires it to reach `dominantSpeakerShare`, 0.60 by default.
     `Sources/MaccheroniMerge/TimelineMerger.swift:74`, threshold at
-    `Sources/MaccheroniMerge/TimelineMerger.swift:187`.
+    `Sources/MaccheroniMerge/TimelineMerger.swift:203`.
   - **recording overlap share**: the share of speech time in which two or more
     speakers are concurrently active, a property of the recording rather than of
     one segment. The field term for this sense is *overlapped speech ratio*, as
     reported in the DIHARD challenge summaries. The concurrency test behind it
     is `hasConcurrentDistinctSpeakers`,
-    `Sources/MaccheroniMerge/TimelineMerger.swift:607`.
+    `Sources/MaccheroniMerge/TimelineMerger.swift:624`.
 - **timeline coverage** [project]: For one ASR segment, the union of the
   diarization turns clipped to it, over the segment's duration. Attribution
   requires it to reach `minimumTimelineCoverage`, 0.50 by default. It is the
   per-segment sense of *coverage*, and the field has no single name for it.
-  `Sources/MaccheroniMerge/TimelineMerger.swift:115`, threshold at
-  `Sources/MaccheroniMerge/TimelineMerger.swift:188`, applied at
-  `Sources/MaccheroniMerge/TimelineMerger.swift:561`.
+  `Sources/MaccheroniMerge/TimelineMerger.swift:131`, threshold at
+  `Sources/MaccheroniMerge/TimelineMerger.swift:204`, applied at
+  `Sources/MaccheroniMerge/TimelineMerger.swift:578`.
 - **order normalization** [project]: Putting diarization turns that start at the
   identical timestamp into the order the run artifact contract asks for, earlier
   end point first, and recording every turn that moved. Only array position
@@ -237,26 +239,26 @@ field has no word for the distinction the project needs.
   project keeps its own name because the shipped artifact
   `diarization/order-normalizations.json` already carries it.
   `Sources/MaccheroniDiarize/DiarizationAdapters.swift:99`, written at
-  `Sources/MaccheroniCLI/CLIApplication.swift:1836`.
+  `Sources/MaccheroniCLI/CLIApplication.swift:1968`.
 - **merge** [project]: Joining chunked ASR output with the whole-file
   diarization timeline by timestamp, producing `merged/segments.json` and
   `merged/conflicts.json`. The ordinary word, fixed here to that one stage.
-  `Sources/MaccheroniMerge/TimelineMerger.swift:228`,
-  `docs/contracts/run-layout.md:81`
+  `Sources/MaccheroniMerge/TimelineMerger.swift:244`,
+  `docs/contracts/run-layout.md:114`
 - **speaker attribution** [field]: Deciding which global speaker owns one ASR
   segment. It yields `UNKNOWN` when no timeline speaker overlaps the segment,
   when timeline coverage of the segment falls below `minimumTimelineCoverage`,
   or when no speaker's segment overlap share is dominant; the ranked candidates
   are preserved in the conflict record either way. Which branch it took is the
   segment's **attribution outcome**.
-  `Sources/MaccheroniMerge/TimelineMerger.swift:504`, outcomes at
+  `Sources/MaccheroniMerge/TimelineMerger.swift:520`, outcomes at
   `Sources/MaccheroniMerge/TimelineMerger.swift:54`.
 - **backend speaker evidence** [project]: A backend's own per-segment speaker
   label. It never becomes the segment's speaker: it is reduced to the flag
   `backend_speaker_evidence` while `speaker` stays `UNASSIGNED` until merge
   attributes it. The field has *speaker-attributed ASR* for the capability
   (Kanda et al., Interspeech 2020 and 2021) and no term for a label withheld
-  from authority on purpose. `Sources/MaccheroniASR/ASRAdapters.swift:832`
+  from authority on purpose. `Sources/MaccheroniASR/ASRAdapters.swift:858`
 - **global speaker namespace** [project]: The single set of speaker IDs produced
   by running diarization once over the complete file. Every chunk's segments are
   attributed into that one namespace; per-chunk speaker labels are never a
@@ -265,7 +267,7 @@ field has no word for the distinction the project needs.
   `num_speakers`. The field's framing is *global* against *local*, meaning
   per-window, speaker labels, so *global speaker label space* would be closer;
   "namespace" is the one word here imported from programming. `PROJECT.md:49`,
-  `docs/contracts/run-layout.md:196`
+  `docs/contracts/run-layout.md:248`
 - **confirm-or-decline** [project]: The constraint D50 places on the first
   speaker-proposal iteration. A proposal may confirm the top-ranked candidate,
   the one holding the largest segment overlap share below the bar that would

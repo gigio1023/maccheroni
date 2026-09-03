@@ -12,6 +12,8 @@
 	<string>%@ konnte nicht vollständig in den Papierkorb gelegt werden; ein Teil liegt jetzt dort. Legen Sie ihn im Finder zurück. Die Aufnahme bleibt in der Bibliothek.</string>
 	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
 	<string>%@ konnte nicht in den Papierkorb gelegt werden. Die Dateien liegen unverändert an ihrem Platz, und die Aufnahme bleibt in der Bibliothek.</string>
+	<key>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</key>
+	<string>%@ befindet sich im Papierkorb, aber die Bibliothek konnte nicht gespeichert werden, sodass die Aufnahme weiterhin aufgeführt ist. Legen Sie sie im Finder zurück.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ befindet sich nicht mehr dort, wo die Bibliothek es erwartet; es wurde nichts verschoben.</string>
 	<key>%@ of %@ (%@)</key>
@@ -72,6 +74,8 @@
 	<string>Ein Ausführungsartefakt fehlt: %@</string>
 	<key>ASR Model Cache</key>
 	<string>ASR-Modellcache</string>
+	<key>Acoustic candidates: %@</key>
+	<string>Akustische Kandidaten: %@</string>
 	<key>Add</key>
 	<string>Hinzufügen</string>
 	<key>Add a name, term, or place</key>
@@ -806,8 +810,8 @@
 	<string>Das antwortende Sprachmodell ist nicht genau das von diesem Profil festgelegte Modell, daher wurde seine Ausgabe abgelehnt.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>Das Spracherkennungsmodell, das dieses Profil benötigt, ist auf diesem Mac nicht installiert.</string>
-	<key>The top speakers held exactly equal time in this segment.</key>
-	<string>In diesem Segment hielten die führenden Sprecher genau gleich lange das Wort.</string>
+	<key>The top speakers held the same time in this segment, to within a nanosecond.</key>
+	<string>In diesem Segment hielten die führenden Sprecher bis auf eine Nanosekunde gleich lange das Wort.</string>
 	<key>The transcript could not be copied.</key>
 	<string>Das Transkript konnte nicht kopiert werden.</string>
 	<key>The transcription engine could not start: %@</key>

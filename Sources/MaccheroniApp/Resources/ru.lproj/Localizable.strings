@@ -12,6 +12,8 @@
 	<string>Не удалось переместить %@ в корзину, часть файлов уже там. Верните их через Finder. Запись по-прежнему в библиотеке.</string>
 	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
 	<string>Не удалось переместить %@ в корзину. Файлы остались на месте, а запись по-прежнему в библиотеке.</string>
+	<key>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</key>
+	<string>%@ находится в Корзине, но библиотеку не удалось сохранить, поэтому запись осталась в списке. Верните её на место в Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ больше не находится там, где ожидает библиотека, поэтому ничего не перемещено.</string>
 	<key>%@ of %@ (%@)</key>
@@ -72,6 +74,8 @@
 	<string>Артефакт выполнения отсутствует: %@</string>
 	<key>ASR Model Cache</key>
 	<string>Кэш модели ASR</string>
+	<key>Acoustic candidates: %@</key>
+	<string>Акустические кандидаты: %@</string>
 	<key>Add</key>
 	<string>Добавлять</string>
 	<key>Add a name, term, or place</key>
@@ -806,8 +810,8 @@
 	<string>Ответившая речевая модель не совпадает с моделью, закреплённой в этом профиле, поэтому её вывод отклонён.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>Модель распознавания речи, необходимая этому профилю, не установлена на этом Mac.</string>
-	<key>The top speakers held exactly equal time in this segment.</key>
-	<string>В этом сегменте ведущие говорящие занимали ровно одинаковое время.</string>
+	<key>The top speakers held the same time in this segment, to within a nanosecond.</key>
+	<string>В этом сегменте ведущие говорящие занимали одинаковое время с точностью до наносекунды.</string>
 	<key>The transcript could not be copied.</key>
 	<string>Не удалось скопировать расшифровку.</string>
 	<key>The transcription engine could not start: %@</key>

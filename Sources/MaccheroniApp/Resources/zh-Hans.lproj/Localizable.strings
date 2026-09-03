@@ -12,6 +12,8 @@
 	<string>无法将 %@ 移到垃圾箱，其中一部分现已在垃圾箱中。请在 Finder 中放回原处。录音仍在资料库中。</string>
 	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
 	<string>无法将 %@ 移到垃圾箱。其文件仍在原处，录音也仍在资料库中。</string>
+	<key>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</key>
+	<string>%@ 已在废纸篓中，但资源库未能保存，因此该录音仍在列表中。请在“访达”中将其放回原处。</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ 已不在资料库预期的位置，因此未移动任何内容。</string>
 	<key>%@ of %@ (%@)</key>
@@ -72,6 +74,8 @@
 	<string>缺少运行工件：%@</string>
 	<key>ASR Model Cache</key>
 	<string>ASR 模型缓存</string>
+	<key>Acoustic candidates: %@</key>
+	<string>声学候选说话人：%@</string>
 	<key>Add</key>
 	<string>添加</string>
 	<key>Add a name, term, or place</key>
@@ -806,8 +810,8 @@
 	<string>作出响应的语音模型并非此配置文件锁定的模型，其输出已被拒绝。</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
 	<string>此配置文件所需的语音识别模型尚未安装在这台 Mac 上。</string>
-	<key>The top speakers held exactly equal time in this segment.</key>
-	<string>在此片段中，居前的说话人占据的时长完全相同。</string>
+	<key>The top speakers held the same time in this segment, to within a nanosecond.</key>
+	<string>在此片段中，居前的说话人占据的时长相同，误差不超过一纳秒。</string>
 	<key>The transcript could not be copied.</key>
 	<string>无法复制转录文本。</string>
 	<key>The transcription engine could not start: %@</key>

@@ -183,6 +183,47 @@ struct LibraryMaintenanceTests {
         #expect(message.contains("nothing was moved"))
     }
 
+    /// The files go to the Trash first and the index follows, so the index
+    /// save is the step that can leave the two apart. It used to be
+    /// best-effort: the recycle succeeded, the entry left the list, the save
+    /// failed, and the saved library still pointed at a directory now in the
+    /// Trash. Relaunching restored that broken entry.
+    ///
+    /// The save failure is now undone rather than reported and left. What the
+    /// list shows and what the library holds agree again, the message says
+    /// where the files went, and one Put Back in the Finder makes the entry
+    /// whole. Persisting first instead would delete the entry while the files
+    /// stayed put, and nothing in the app brings that entry back.
+    @Test
+    func anIndexSaveThatFailsAfterTheRecycleKeepsTheEntryAndSaysWhereTheFilesWent() async throws {
+        let recycler = LibraryMaintenanceRecycler()
+        let world = try LibraryMaintenanceWorld(
+            recycler: recycler,
+            recordSaverFails: true
+        )
+        world.model.select(.record(world.record.id))
+        let plan = world.model.trashPlan(for: world.record)
+
+        await world.model.moveToTrash(plan)
+
+        // The recycle did happen, and is not undone: putting files back is the
+        // Finder's job and guessing at it here would be a second mover.
+        let calls = await recycler.calls
+        #expect(calls.count == 1)
+        #expect(!FileManager.default.fileExists(atPath: world.sourceURL.path))
+        #expect(!FileManager.default.fileExists(atPath: world.runURL.path))
+
+        // What the list shows and what the library saved are the same thing.
+        #expect(world.model.records.map(\.id) == [world.record.id])
+        #expect(try world.repository.loadRecords().map(\.id) == [world.record.id])
+
+        let message = try #require(world.model.errorMessage)
+        #expect(message.contains(world.record.displayName))
+        #expect(message.contains("is in the Trash"))
+        #expect(message.contains("still listed"))
+        #expect(message.contains("Put it back in the Finder"))
+    }
+
     @Test
     func aRunStillBeingWrittenIntoIsNotMovedAndTheReaderIsToldToWait() async throws {
         let recycler = LibraryMaintenanceRecycler()

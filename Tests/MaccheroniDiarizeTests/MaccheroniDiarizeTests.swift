@@ -728,6 +728,55 @@ import MaccheroniCore
         }
     }
 
+    @Test func oneSpeakerStartingTwiceIsRejectedWhenAnotherTurnSitsBetween() async throws {
+        // `contractOrdered` sorts a tied onset group by end point, so these
+        // three turns come out as A(2.9), B(4.1), A(5.475): the two `A` turns
+        // are never adjacent, in the emitted order or the canonical one, and
+        // an adjacent-pair test sees nothing. The duplicate still changes
+        // overlap totals and attribution downstream, so it is still fatal.
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let audioURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 28.8898125)
+
+        let outputURL = try writeFile(
+            """
+            {
+              "segments": [
+                { "speaker": 0, "start": 1.4, "end": 5.475, "duration": 4.075 },
+                { "speaker": 1, "start": 1.4, "end": 4.1, "duration": 2.7 },
+                { "speaker": 0, "start": 1.4, "end": 2.9, "duration": 1.5 }
+              ],
+              "num_speakers": 2
+            }
+
+            """,
+            named: "community1-nonadjacent-duplicate-onset.json",
+            in: directory
+        )
+        let backend = Community1Diarizer(configuration: .init(
+            executableURL: try writeExecutable(
+                "#!/bin/sh\ncat '\(outputURL.path)'\n",
+                in: directory
+            ),
+            hfHomeURL: directory,
+            timeoutS: 5,
+            validatesPinnedModel: false
+        ))
+
+        do {
+            _ = try await backend.diarize(DiarizationRequest(audioURL: audioURL))
+            Issue.record("expected a duplicate onset rejection")
+        } catch let error as DiarizationError {
+            guard case let .rejectedOutput(reason, _) = error else {
+                Issue.record("expected a preserved rejection, got \(error)")
+                return
+            }
+            // The rejection names the emitted index, not the canonical one.
+            #expect(reason == .duplicateOnset(segment: 2, speaker: "0", startS: 1.4))
+        }
+    }
+
     @Test func fluidAudioRejectionNamesTheHarnessOutputItRejected() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

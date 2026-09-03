@@ -33,10 +33,14 @@ derived run and do not commit them to the repository.
     │   └── postprocess/
     │       ├── segments.json
     │       └── conflicts.json
+    ├── <derived-id>/
+    │   ├── manifest.json
+    │   └── postprocess/
+    │       └── translation.json
     └── <derived-id>/
         ├── manifest.json
-        └── postprocess/
-            └── translation.json
+        └── speaker/
+            └── proposals.json
 ```
 
 Create `postprocess/` only when post-processing runs. A correction run creates
@@ -46,12 +50,41 @@ required for a successful complete run. An intermediate failure still leaves
 `manifest.json`. Do not include artifacts that could not be created in the
 manifest's `artifacts` field.
 
-Create `derived/` only for an operation on a completed run. Every immediate
-child is a create-only derived artifact set. It has its own manifest conforming
-to `derived-manifest.schema.json` and contains exactly one operation form:
-correction creates `segments.json` and `conflicts.json`; translation creates
-only `translation.json`. Never modify the source manifest, the source run's
-legacy `postprocess/` files, or an earlier derived set.
+Create `derived/` only for an operation on a run whose merge finished. Every
+immediate child is a create-only derived artifact set. It has its own manifest
+conforming to `derived-manifest.schema.json` and contains exactly one operation
+form. Never modify the source manifest, the source run's legacy `postprocess/`
+files, or an earlier derived set.
+
+`operation.kind` says which form a derived set is, and it is the field to read
+first. `text-postprocess` covers the two text operations, and `mode` is
+meaningful only after `kind` has said so, because a speaker-proposal manifest
+still carries a non-optional `mode`. A set written before 2026-09-02 has no
+`kind`; every one of those is a text operation and reads as
+`text-postprocess`.
+
+- `text-postprocess` with `mode: correction` creates `postprocess/segments.json`
+  and `postprocess/conflicts.json`, and its `postprocess.source_segments_sha256`
+  is null.
+- `text-postprocess` with `mode: translation` creates only
+  `postprocess/translation.json`.
+- `speaker-proposal` creates only `speaker/proposals.json` and carries a
+  non-null `postprocess.source_segments_sha256` naming the merged transcript the
+  proposal was made over. It records no glossary. Its `mode` is written as
+  `correction` and carries no meaning.
+
+The two text forms may be created only from a run whose ASR coverage is
+complete. A speaker proposal may also be created from a run that lost part of
+its input, which is the D49 extension and applies to no other form. Whichever
+form it is, `operation.source_coverage` records how much of the input the source
+transcript covers as `complete`, `input_duration_s`, `processed_duration_s`,
+`missing_duration_s` and the source run's own coverage `message`, and
+`operation.source_coverage_complete` repeats the flag at the top of the
+operation so a reader skimming the manifest cannot miss an incomplete source.
+The two must agree. Coverage completeness describes the audio, not the source
+run's exit status: a run whose ASR reached the whole input and whose text
+post-processing then failed exits `partial` and still has complete coverage
+with zero missing duration.
 
 ## Meaning of Each File
 
@@ -99,12 +132,23 @@ legacy `postprocess/` files, or an earlier derived set.
   operation. Its `source` field records the source run ID, the source
   `manifest.json` SHA-256, and the verified `merged/segments.json` path and
   SHA-256. Its `operation` field records the profile used for the operation,
-  correction or translation mode, optional target language, selected glossary
-  semantics, and the parsed glossary hash and item count. `current-profile`
-  means the current invocation profile or explicit override. `source-run`
-  means the revision named by the source manifest. Its `postprocess` field
-  carries the same backend, model, text-only, and bounded batch evidence as a
-  new-audio run. `artifacts` contains only files inside this derived set.
+  the derived `kind`, correction or translation mode, optional target language,
+  selected glossary semantics, the parsed glossary hash and item count, and the
+  source coverage described above. `current-profile` means the current
+  invocation profile or explicit override. `source-run` means the revision
+  named by the source manifest. Its `postprocess` field carries the same
+  backend, model, text-only, and bounded batch evidence as a new-audio run.
+  `artifacts` contains only files inside this derived set.
+- `derived/<derived-id>/speaker/proposals.json`: a marked, non-acoustic speaker
+  proposal over the segments the source run left `UNASSIGNED` or `UNKNOWN`. It
+  sits outside `postprocess/` because it is not a text operation. It names its
+  own `layer`, the merged transcript hash it was made over, the same source
+  coverage the manifest records, the constraint every entry was held to, the
+  unattributed speaker labels it may cover, the proposals, the declines with
+  their reasons, and the per-batch prompt and byte ledger. Each proposal carries
+  the acoustic candidates and their shares beside it. It cannot represent a
+  segment's text, time range, or source speaker, so it cannot change the
+  acoustic structure the source run recorded.
 
 ## Writing and Invariants
 
@@ -130,7 +174,15 @@ legacy `postprocess/` files, or an earlier derived set.
    after translation, `primary/raw.txt`, `primary/segments.json`,
    `merged/segments.json`, and the original input SHA-256 must remain unchanged.
 9. Before an existing-run operation creates `derived/<derived-id>` or calls a
-   backend, decode the source manifest and require a successful complete run.
+   backend, decode the source manifest and require a source the operation's
+   form admits. A text operation requires a successful complete run. A speaker
+   proposal requires a run whose merge finished and whose coverage record
+   proves what it claims: a `succeeded` source must record no failure and must
+   cover its input, a `partial` source must record the failure that made it
+   partial and must have promoted something, and a `partial` source whose
+   coverage is incomplete must also carry `primary/partial-coverage.json`
+   naming the ranges it lost. A `failed` or `canceled` run is never a source.
+   Every other check is identical for both forms.
    Validate every manifest artifact path, reject duplicates and unsafe paths,
    require every listed artifact to exist with its recorded SHA-256, and decode
    the uniquely identified `merged/segments.json` from the same bytes whose hash
@@ -215,6 +267,18 @@ checked.
   exact revision bytes selected by `glossary_semantics`. A missing hash requires
   a zero item count and means that the selected semantics deliberately supplied
   no glossary.
+- A derived manifest's `operation.source_coverage_complete` must equal its
+  `operation.source_coverage.complete`, and `missing_duration_s` must equal
+  `input_duration_s` minus `processed_duration_s`, never below zero. A manifest
+  whose two completeness claims disagree is rejected rather than resolved in
+  favour of either.
+- A `speaker-proposal` set records `source_coverage` and
+  `source_coverage_complete`, holds exactly one artifact, and that artifact is
+  `speaker_proposals` at `speaker/proposals.json`. Its
+  `speaker/proposals.json` repeats the same `source_coverage` and the same
+  merged transcript hash the manifest records. Every proposed segment index is
+  an index the source transcript left unattributed, appears once, and carries
+  the acoustic candidates the source run disclosed.
 
 `benchmarks/scripts/scoring/check_contracts.py` validates schema examples and
 the applicable conditions above against run manifests.

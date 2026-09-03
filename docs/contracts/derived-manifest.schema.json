@@ -42,7 +42,7 @@
     "postprocess": {
       "oneOf": [
         { "type": "null" },
-        { "$ref": "manifest.schema.json#/$defs/postprocess" }
+        { "$ref": "#/$defs/derived_postprocess" }
       ]
     }
   },
@@ -55,9 +55,7 @@
       "then": {
         "properties": {
           "failure": { "type": "null" },
-          "postprocess": {
-            "$ref": "manifest.schema.json#/$defs/postprocess"
-          }
+          "postprocess": { "$ref": "#/$defs/derived_postprocess" }
         },
         "minProperties": 9
       },
@@ -72,7 +70,10 @@
         "properties": {
           "status": { "const": "succeeded" },
           "operation": {
-            "properties": { "mode": { "const": "correction" } },
+            "properties": {
+              "mode": { "const": "correction" },
+              "kind": { "const": "text-postprocess" }
+            },
             "required": ["mode"]
           }
         },
@@ -132,7 +133,10 @@
         "properties": {
           "status": { "const": "succeeded" },
           "operation": {
-            "properties": { "mode": { "const": "translation" } },
+            "properties": {
+              "mode": { "const": "translation" },
+              "kind": { "const": "text-postprocess" }
+            },
             "required": ["mode"]
           }
         },
@@ -157,12 +161,104 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": { "const": "succeeded" },
+          "operation": {
+            "properties": { "kind": { "const": "speaker-proposal" } },
+            "required": ["kind"]
+          }
+        },
+        "required": ["status", "operation"]
+      },
+      "then": {
+        "properties": {
+          "operation": {
+            "required": ["source_coverage", "source_coverage_complete"]
+          },
+          "artifacts": {
+            "minItems": 1,
+            "maxItems": 1,
+            "contains": {
+              "properties": {
+                "kind": { "const": "speaker_proposals" },
+                "path": { "const": "speaker/proposals.json" }
+              },
+              "required": ["kind", "path"]
+            }
+          },
+          "postprocess": {
+            "$ref": "#/$defs/speaker_proposal_postprocess"
+          }
+        }
+      }
     }
   ],
   "$defs": {
     "sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "complete",
+        "input_duration_s",
+        "processed_duration_s",
+        "missing_duration_s"
+      ],
+      "properties": {
+        "complete": { "type": "boolean" },
+        "input_duration_s": { "type": "number", "exclusiveMinimum": 0 },
+        "processed_duration_s": { "type": "number", "minimum": 0 },
+        "missing_duration_s": { "type": "number", "minimum": 0 },
+        "message": { "type": ["string", "null"] }
+      }
+    },
+    "derived_postprocess": {
+      "anyOf": [
+        { "$ref": "manifest.schema.json#/$defs/postprocess" },
+        { "$ref": "#/$defs/speaker_proposal_postprocess" }
+      ]
+    },
+    "speaker_proposal_postprocess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend",
+        "model_id",
+        "model_revision",
+        "quantization",
+        "input_mode",
+        "glossary_sha256",
+        "mode",
+        "target_language",
+        "source_segments_sha256",
+        "batching"
+      ],
+      "properties": {
+        "backend": { "$ref": "manifest.schema.json#/$defs/backend" },
+        "model_id": { "type": "string", "minLength": 1 },
+        "model_revision": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "quantization": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+        },
+        "input_mode": { "const": "text-only" },
+        "glossary_sha256": { "type": "null" },
+        "mode": { "const": "correction" },
+        "target_language": { "type": "null" },
+        "source_segments_sha256": { "$ref": "#/$defs/sha256" },
+        "batching": {
+          "$ref": "manifest.schema.json#/$defs/postprocess_batching"
+        }
+      }
     },
     "failure": {
       "oneOf": [
@@ -224,7 +320,10 @@
             { "$ref": "#/$defs/sha256" }
           ]
         },
-        "glossary_item_count": { "type": "integer", "minimum": 0 }
+        "glossary_item_count": { "type": "integer", "minimum": 0 },
+        "kind": { "enum": ["text-postprocess", "speaker-proposal"] },
+        "source_coverage": { "$ref": "#/$defs/source_coverage" },
+        "source_coverage_complete": { "type": "boolean" }
       },
       "allOf": [
         {

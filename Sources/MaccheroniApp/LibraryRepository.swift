@@ -1092,13 +1092,28 @@ struct LibraryRepository: Sendable {
         case .speakerProposal:
             // Nothing in `document` or `conflicts` changes: a proposal is a
             // layer read beside the acoustic record, never written into it.
-            proposal = try verifiedSpeakerProposal(
-                manifest: manifest,
-                artifactPaths: artifactPaths,
-                artifactData: artifactData,
-                source: source,
-                canonicalConflicts: canonicalConflicts
-            )
+            //
+            // A proposal that fails verification is recorded as unreadable
+            // rather than thrown, so the source run still opens. Throwing here
+            // repeated the defect this loader was repaired for once already:
+            // a derived set beside a run decided whether the run could be read
+            // at all, and the run is the immutable thing.
+            do {
+                proposal = try verifiedSpeakerProposal(
+                    manifest: manifest,
+                    artifactPaths: artifactPaths,
+                    artifactData: artifactData,
+                    source: source,
+                    canonicalConflicts: canonicalConflicts
+                )
+            } catch {
+                return .unreadable(
+                    UnreadableDerivedSet(
+                        id: manifest.derivedID,
+                        reason: .speakerProposalContradictsSourceRun
+                    )
+                )
+            }
         }
 
         let conflictsBySegment = Dictionary(
@@ -1270,6 +1285,9 @@ struct LibraryRepository: Sendable {
                 coverage: decline.acousticTimelineCoverage,
                 candidates: decline.acousticCandidates
             )
+            guard declineExplainsItself(decline) else {
+                throw LibraryRepositoryError.derivedLineageMismatch(manifest.derivedID)
+            }
         }
         // Exactly once over proposals plus declined, across every segment the
         // source left unattributed. A proposal set that quietly skipped
@@ -1278,6 +1296,64 @@ struct LibraryRepository: Sendable {
             throw LibraryRepositoryError.derivedLineageMismatch(manifest.derivedID)
         }
         return document
+    }
+
+    /// Whether a decline's explanation agrees with the evidence it carries.
+    ///
+    /// `check` already proves the candidates, outcome and coverage are the
+    /// ones the run measured. That leaves the three fields D50 writes to make
+    /// a later measurement possible — `cause`, `top_ranked_candidate` and the
+    /// nested `model_answer` — which were read straight onto the screen: an
+    /// artifact could claim `no_acoustic_candidates` while carrying
+    /// candidates, name a speaker the shares do not rank first, or attach
+    /// another segment's model answer, and the app would display that
+    /// explanation as the reason a speaker was not proposed. The hash proves
+    /// the bytes; only this proves the sentence.
+    ///
+    /// Fields absent from artifacts written before the constraint of
+    /// 2026-09-02 are absent together and judged by nothing here, which is why
+    /// each check is conditional on the field being present.
+    private func declineExplainsItself(_ decline: SpeakerProposalDecline) -> Bool {
+        // The acoustics' own answer, recomputed from the candidates the run
+        // measured rather than read out of the artifact.
+        let topRanked = SpeakerProposalConstraint.topRankedCandidate(
+            among: decline.acousticCandidates
+        )
+        if let claimed = decline.topRankedCandidate, claimed != topRanked {
+            return false
+        }
+        if let answer = decline.modelAnswer,
+           answer.segmentIndex != decline.segmentIndex
+        {
+            return false
+        }
+        switch decline.cause {
+        case .noAcousticCandidates:
+            // Nothing overlapped the segment. Candidates contradict the cause.
+            return decline.acousticCandidates.isEmpty
+        case .noTopRankedCandidate:
+            // Candidates exist and none of them ranks first. A record with no
+            // candidates is the case above, and one with a clear leader had a
+            // candidate to confirm.
+            return !decline.acousticCandidates.isEmpty && topRanked == nil
+        case .modelDisagreedWithTopRankedCandidate:
+            // There was a top-ranked candidate, the model named a speaker, and
+            // that speaker is not it. Without the answer the disagreement is
+            // the one thing this cause exists to record and is not there.
+            guard let topRanked, let answer = decline.modelAnswer else { return false }
+            return answer.disposition == .propose
+                && answer.proposedSpeaker != topRanked
+        case .modelDeclined:
+            // The model decided, so the runner keeps no separate answer. One
+            // written anyway must at least be a decline.
+            return decline.modelAnswer.map { $0.disposition == .decline } ?? true
+        case .noDecision:
+            // The backend returned nothing for this segment, so there is no
+            // answer to carry.
+            return decline.modelAnswer == nil
+        case .none:
+            return true
+        }
     }
 
     /// One acoustic evidence record per unattributed segment, rebuilt from the

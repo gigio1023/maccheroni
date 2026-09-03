@@ -175,6 +175,32 @@ public enum ASRAttemptStopReason: String, Codable, Equatable, Sendable {
     /// recovered prefix travels with it in `ASRLimitRecord.partialPrefix`.
     case repetitionLooping
 
+    /// The value `repetitionLooping` carried before the 2026-09-02
+    /// terminology audit renamed repetition degeneration to repetition
+    /// looping.  Attempt artifacts sealed before that rename still hold it.
+    static let legacyRepetitionLoopingRawValue = "repetitionDegeneration"
+
+    /// D52: a renamed wire value keeps its legacy value accepted on read.  An
+    /// attempt outcome sealed before the rename decodes to the current case,
+    /// and judgment rule 3 keeps its bytes untouched: nothing here writes the
+    /// legacy value back, because encoding still uses the raw value.
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if let value = ASRAttemptStopReason(rawValue: raw) {
+            self = value
+        } else if raw == ASRAttemptStopReason.legacyRepetitionLoopingRawValue {
+            self = .repetitionLooping
+        } else {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription:
+                        "unknown ASR attempt stop reason \"\(raw)\""
+                )
+            )
+        }
+    }
+
     /// Whether this reason closes an attempt without a complete transcript.
     public var isLimitOutcome: Bool { self != .endOfSequence }
 }

@@ -530,13 +530,20 @@ import Testing
 
     /// Build a run directory that passes every integrity check, then let the
     /// caller decide whether its coverage is complete.
+    ///
+    /// `chunkBoundaries` overrides the single full-range chunk, so a caller can
+    /// build a run whose totals look complete while its boundaries leave a gap.
+    /// `partialCoverageArtifact` writes the `primary/partial-coverage.json` a
+    /// run that lost audio is required to carry.
     private func writeRunFixture(
         at root: URL,
         runID: String,
         status: RunStatus,
         truncated: Bool,
         processedDurationS: Double,
-        failure: Failure?
+        failure: Failure?,
+        chunkBoundaries: [ChunkBoundary]? = nil,
+        partialCoverageArtifact: Bool = false
     ) throws -> URL {
         let run = root.appendingPathComponent(runID, isDirectory: true)
         try FileManager.default.createDirectory(
@@ -577,6 +584,18 @@ import Testing
             ),
             ("merged_conflicts", "merged/conflicts.json", Data("[]".utf8)),
         ]
+        if partialCoverageArtifact {
+            files.append((
+                "partial_coverage",
+                "primary/partial-coverage.json",
+                Data(#"""
+                {"input_duration_s":2,"promoted_duration_s":1.5,
+                 "missing_duration_s":0.5,
+                 "missing":[{"start_s":1.5,"end_s":2}],
+                 "partial_attempt_ids":[]}
+                """#.utf8)
+            ))
+        }
         var artifacts: [Artifact] = []
         for file in files {
             let url = run.appendingPathComponent(file.path)
@@ -619,18 +638,23 @@ import Testing
                 inputDurationS: 2,
                 processedDurationS: processedDurationS,
                 truncated: truncated,
-                strategy: truncated ? .backendTruncated : .full,
-                chunksPlanned: processedDurationS > 0 ? 1 : 0,
-                chunksCompleted: processedDurationS > 0 ? 1 : 0
+                strategy: truncated
+                    ? .backendTruncated
+                    : ((chunkBoundaries?.count ?? 1) > 1 ? .chunked : .full),
+                chunksPlanned: chunkBoundaries?.count
+                    ?? (processedDurationS > 0 ? 1 : 0),
+                chunksCompleted: chunkBoundaries?.count
+                    ?? (processedDurationS > 0 ? 1 : 0)
             ),
-            chunkBoundaries: processedDurationS > 0
-                ? [ChunkBoundary(
-                    index: 0,
-                    startS: 0,
-                    endS: processedDurationS,
-                    status: .succeeded
-                )]
-                : [],
+            chunkBoundaries: chunkBoundaries
+                ?? (processedDurationS > 0
+                    ? [ChunkBoundary(
+                        index: 0,
+                        startS: 0,
+                        endS: processedDurationS,
+                        status: .succeeded
+                    )]
+                    : []),
             timing: RunTiming(
                 startedAt: "2026-09-02T12:00:00Z",
                 finishedAt: "2026-09-02T12:00:01Z",
@@ -678,7 +702,8 @@ import Testing
             failure: Failure(
                 code: "ASR_REPETITION_LOOPING",
                 message: "one range produced no transcript"
-            )
+            ),
+            partialCoverageArtifact: true
         )
         #expect(throws: RunIntegrityError.sourceRunNotComplete) {
             _ = try RunIntegrityVerifier.verifyCompletedRun(at: partial)
@@ -737,6 +762,166 @@ import Testing
         #expect(throws: RunIntegrityError.sourceRunNotComplete) {
             _ = try RunIntegrityVerifier.verifyMergedRun(at: empty)
         }
+    }
+
+    @Test func theMergedSourceGateProvesCoverageRatherThanReadingStatus() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "MaccheroniCoreCoverageProof-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // A run that claims success while its coverage record stops short of
+        // the input is a false claim, not a partial result, and must not seed
+        // a derived set.
+        let short = try writeRunFixture(
+            at: root,
+            runID: "succeeded-short",
+            status: .succeeded,
+            truncated: false,
+            processedDurationS: 1.5,
+            failure: nil
+        )
+        #expect(throws: RunIntegrityError.sourceCoverageContradictsStatus) {
+            _ = try RunIntegrityVerifier.verifyMergedRun(at: short)
+        }
+
+        // The same holds when the totals add up but the boundaries leave a
+        // hole between two chunks: the transcript has a gap the durations do
+        // not disclose.
+        let gapped = try writeRunFixture(
+            at: root,
+            runID: "succeeded-gapped",
+            status: .succeeded,
+            truncated: false,
+            processedDurationS: 2,
+            failure: nil,
+            chunkBoundaries: [
+                ChunkBoundary(index: 0, startS: 0, endS: 0.5, status: .succeeded),
+                ChunkBoundary(index: 1, startS: 1, endS: 2, status: .succeeded),
+            ]
+        )
+        #expect(throws: RunIntegrityError.sourceCoverageContradictsStatus) {
+            _ = try RunIntegrityVerifier.verifyMergedRun(at: gapped)
+        }
+
+        // `partial` is a claim that something was lost, so the run has to say
+        // what failed.
+        let unexplained = try writeRunFixture(
+            at: root,
+            runID: "partial-unexplained",
+            status: .partial,
+            truncated: true,
+            processedDurationS: 1.5,
+            failure: nil,
+            partialCoverageArtifact: true
+        )
+        #expect(throws: RunIntegrityError.sourceFailureEvidenceMissing) {
+            _ = try RunIntegrityVerifier.verifyMergedRun(at: unexplained)
+        }
+
+        // And it has to name the ranges it lost.
+        let unnamed = try writeRunFixture(
+            at: root,
+            runID: "partial-unnamed",
+            status: .partial,
+            truncated: true,
+            processedDurationS: 1.5,
+            failure: Failure(
+                code: "ASR_REPETITION_LOOPING",
+                message: "one range produced no transcript"
+            )
+        )
+        #expect(throws: RunIntegrityError.requiredArtifactMissing(
+            kind: "partial_coverage",
+            path: "primary/partial-coverage.json"
+        )) {
+            _ = try RunIntegrityVerifier.verifyMergedRun(at: unnamed)
+        }
+    }
+
+    @Test func aPostprocessFailureOverFullASRCoverageStaysCoverageComplete() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "MaccheroniCorePostprocessFailure-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // ASR reached every second of the input and text post-processing then
+        // failed. The run exits `partial`, but no audio was lost, so a derived
+        // proposal over it must not tell the reader that a transcript is
+        // missing for zero seconds of the meeting.
+        let run = try writeRunFixture(
+            at: root,
+            runID: "postprocess-failed",
+            status: .partial,
+            truncated: false,
+            processedDurationS: 2,
+            failure: Failure(
+                code: "POSTPROCESS_ERROR",
+                message: "the correction backend returned no output"
+            )
+        )
+        let source = try RunIntegrityVerifier.verifyMergedRun(at: run)
+        #expect(source.coverageIsComplete)
+        #expect(source.coverage.missingDurationS == 0)
+        #expect(source.coverage.processedDurationS == 2)
+
+        // The stricter gate is unchanged: correction and translation still
+        // require a run that finished.
+        #expect(throws: RunIntegrityError.sourceRunNotComplete) {
+            _ = try RunIntegrityVerifier.verifyCompletedRun(at: run)
+        }
+    }
+
+    @Test func aDerivedOperationRefusesDisagreeingCoverageClaims() throws {
+        let disagreeing = Data(#"""
+        {"profile_name":"ko-meeting","mode":"correction","target_language":null,
+         "glossary_semantics":"current-profile","glossary_sha256":null,
+         "glossary_item_count":0,"kind":"speaker-proposal",
+         "source_coverage":{"complete":false,"input_duration_s":1243.08,
+           "processed_duration_s":1212.52,"missing_duration_s":30.56,
+           "message":"1 range(s) produced no transcript"},
+         "source_coverage_complete":true}
+        """#.utf8)
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(DerivedOperation.self, from: disagreeing)
+        }
+
+        // The agreeing form still decodes, and the flag still reads back.
+        let agreeing = Data(#"""
+        {"profile_name":"ko-meeting","mode":"correction","target_language":null,
+         "glossary_semantics":"current-profile","glossary_sha256":null,
+         "glossary_item_count":0,"kind":"speaker-proposal",
+         "source_coverage":{"complete":false,"input_duration_s":1243.08,
+           "processed_duration_s":1212.52,"missing_duration_s":30.56,
+           "message":"1 range(s) produced no transcript"},
+         "source_coverage_complete":false}
+        """#.utf8)
+        let decoded = try JSONDecoder().decode(
+            DerivedOperation.self,
+            from: agreeing
+        )
+        #expect(!decoded.sourceCoverageComplete)
+
+        // A manifest written before either field is unaffected.
+        let legacy = Data(#"""
+        {"profile_name":"ko-meeting","mode":"correction","target_language":null,
+         "glossary_semantics":"current-profile","glossary_sha256":null,
+         "glossary_item_count":0}
+        """#.utf8)
+        #expect(try JSONDecoder().decode(
+            DerivedOperation.self,
+            from: legacy
+        ).sourceCoverageComplete)
     }
 
     @Test func completedRunVerifierRejectsTypedIntegrityFailures() throws {

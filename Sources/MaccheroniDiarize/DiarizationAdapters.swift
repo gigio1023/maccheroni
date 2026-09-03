@@ -948,6 +948,15 @@ private func normalizedTimeline(
     }
     // Validate what the backend emitted, in the order it emitted it, so a
     // rejection names the segment the backend actually wrote.
+    //
+    // One speaker opening two turns on the same frame is a defect wherever the
+    // two turns sit. `contractOrdered` sorts a tied onset group by end point,
+    // so `A@1.4, B@1.4, A@1.4` puts the two `A` turns on either side of `B`
+    // and an adjacent-pair test never sees them. Onsets are therefore
+    // accumulated per speaker across the whole timeline, which is the same
+    // check applied after canonical ordering, run before it so the rejection
+    // still names the emitted index.
+    var onsetsBySpeaker: [String: Set<Double>] = [:]
     for (index, segment) in rawSegments.enumerated() {
         guard !segment.speaker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw DiarizationError.invalidOutput("segment \(index) has no speaker")
@@ -958,19 +967,24 @@ private func normalizedTimeline(
         if let confidence = segment.confidence, !confidence.isFinite || !(0...1).contains(confidence) {
             throw DiarizationError.invalidOutput("segment \(index) has invalid confidence")
         }
-        guard index > 0 else { continue }
-        let previous = rawSegments[index - 1]
-        // Overlapping turns are ordinary in a multi-speaker recording and stay
-        // legal: only the start points are compared. Time must not run
-        // backwards, and one speaker must not open two turns on one frame.
-        guard segment.startS >= previous.startS else {
-            throw DiarizationError.outputUnordered(
-                segment: index,
-                startS: segment.startS,
-                previousStartS: previous.startS
-            )
+        if index > 0 {
+            let previous = rawSegments[index - 1]
+            // Overlapping turns are ordinary in a multi-speaker recording and
+            // stay legal: only the start points are compared. Time must not
+            // run backwards. Checked before the onset ledger so a timeline
+            // that is both unordered and repeated keeps naming the ordering
+            // defect first.
+            guard segment.startS >= previous.startS else {
+                throw DiarizationError.outputUnordered(
+                    segment: index,
+                    startS: segment.startS,
+                    previousStartS: previous.startS
+                )
+            }
         }
-        guard segment.startS > previous.startS || segment.speaker != previous.speaker else {
+        guard onsetsBySpeaker[segment.speaker, default: []]
+            .insert(segment.startS).inserted
+        else {
             throw DiarizationError.duplicateOnset(
                 segment: index,
                 speaker: segment.speaker,

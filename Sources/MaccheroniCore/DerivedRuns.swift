@@ -193,6 +193,25 @@ public struct DerivedOperation: Codable, Equatable, Sendable {
             DerivedSourceCoverage.self,
             forKey: .sourceCoverage
         )
+        // The flat flag is written so a reader skimming the manifest cannot
+        // miss an incomplete source, which only works if the two claims are
+        // the same claim. A manifest whose flat flag disagrees with its nested
+        // coverage object states two different things about how much audio the
+        // proposal covers, so it is refused rather than silently resolved in
+        // favour of one of them.
+        if let flat = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .sourceCoverageComplete
+        ), flat != (sourceCoverage?.complete ?? true) {
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: container.codingPath + [CodingKeys.sourceCoverageComplete],
+                debugDescription: """
+                source_coverage_complete (\(flat)) disagrees with \
+                source_coverage.complete (\(sourceCoverage.map(\.complete)
+                    .map(String.init) ?? "absent"))
+                """
+            ))
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -512,6 +531,12 @@ public enum RunIntegrityError: Error, Equatable, Sendable, LocalizedError {
     case mergedSegmentsInvalid
     case mergedSegmentsSourceMismatch
     case sourceChangedDuringOperation
+    /// The run reports `succeeded` while its coverage record shows the input
+    /// was truncated, cut short, or left with a gap between chunks.
+    case sourceCoverageContradictsStatus
+    /// The run reports `partial` without recording the failure that made it
+    /// partial, so nothing says what was lost or why.
+    case sourceFailureEvidenceMissing
 
     public var errorDescription: String? {
         switch self {
@@ -545,9 +570,19 @@ public enum RunIntegrityError: Error, Equatable, Sendable, LocalizedError {
             "The source run merged transcript does not match the manifest input."
         case .sourceChangedDuringOperation:
             "The source run changed while the derived operation was running."
+        case .sourceCoverageContradictsStatus:
+            "The source run reports success but its coverage record does not cover the input."
+        case .sourceFailureEvidenceMissing:
+            "The source run reports partial coverage without recording what failed."
         }
     }
 }
+
+/// Where a run names the audio it planned but could not transcribe. A
+/// `partial` source has to carry it before a derived set may be built over the
+/// transcript that survived; see D49.
+let partialCoverageArtifactPath = "primary/partial-coverage.json"
+let partialCoverageArtifactKind = "partial_coverage"
 
 public enum RunIntegrityVerifier {
     public static func verifyCompletedRun(at runURL: URL) throws -> VerifiedRunSource {
@@ -619,24 +654,66 @@ public enum RunIntegrityVerifier {
                 actual: manifest.runID
             )
         }
-        let coverageIsComplete = manifest.status == .succeeded
-            && manifest.failure == nil
-            && !manifest.coverage.truncated
+        // Coverage completeness is a statement about the audio, not about how
+        // the run exited. A run whose ASR reached every second of the input
+        // and whose text post-processing then failed carries a whole
+        // transcript, and recording it as coverage-incomplete produced a
+        // derived manifest that claimed an incomplete source with zero seconds
+        // missing. So the flag is read out of the numbers that describe the
+        // audio: nothing was truncated, the processed duration reaches the
+        // input duration, and the chunk boundaries account for it.
+        let coverage = manifest.coverage
+        let coverageIsComplete = !coverage.truncated
+            && abs(coverage.processedDurationS - coverage.inputDurationS)
+                <= RunArtifactContract.timeToleranceS
             && successfulCoverageIsComplete(manifest)
         guard successfulGlossaryIsValid(manifest.glossary) else {
             throw RunIntegrityError.sourceRunNotComplete
         }
         if requiringCompleteCoverage {
-            guard coverageIsComplete else {
+            guard manifest.status == .succeeded,
+                  manifest.failure == nil,
+                  coverageIsComplete
+            else {
                 throw RunIntegrityError.sourceRunNotComplete
             }
         } else {
-            // A run that failed outright, or that a user canceled, never
-            // reached a merge worth deriving from. Only a completed run and a
-            // run that promoted what it could are sources.
-            guard manifest.status == .succeeded || manifest.status == .partial,
-                  manifest.coverage.processedDurationS > 0
-            else {
+            // D49 drops the completeness gate for the speaker-proposal family
+            // and nothing else. What replaces it is not a weaker check but a
+            // different one: the source must prove the coverage it claims,
+            // because a proposal over a transcript with an unnamed hole in it
+            // is the same class of false claim the 2026-09-01 repairs removed.
+            switch manifest.status {
+            case .succeeded:
+                // A successful run states that it covered its input. A short
+                // or gapped coverage record contradicts that, and accepting it
+                // would seed a derived set that inherits the false claim.
+                guard manifest.failure == nil, coverageIsComplete else {
+                    throw RunIntegrityError.sourceCoverageContradictsStatus
+                }
+            case .partial:
+                // `partial` is a claim that something was lost, so the run has
+                // to say what and why.
+                guard manifest.failure != nil else {
+                    throw RunIntegrityError.sourceFailureEvidenceMissing
+                }
+                guard coverage.processedDurationS > 0 else {
+                    throw RunIntegrityError.sourceRunNotComplete
+                }
+                if !coverageIsComplete {
+                    guard manifest.artifacts.contains(where: {
+                        $0.kind == partialCoverageArtifactKind
+                            && $0.path == partialCoverageArtifactPath
+                    }) else {
+                        throw RunIntegrityError.requiredArtifactMissing(
+                            kind: partialCoverageArtifactKind,
+                            path: partialCoverageArtifactPath
+                        )
+                    }
+                }
+            case .failed, .canceled:
+                // A run that failed outright, or that a user canceled, never
+                // reached a merge worth deriving from.
                 throw RunIntegrityError.sourceRunNotComplete
             }
         }

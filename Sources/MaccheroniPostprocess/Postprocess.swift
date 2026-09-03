@@ -1204,9 +1204,11 @@ public struct SpeakerProposer: Sendable {
     /// passed `validate`. A proposal survives only when it names the top-ranked
     /// candidate. Everything else becomes a decline that says why, and whenever
     /// the constraint rather than the model decided, the model's own answer is
-    /// kept beside it: the 21 overturns and 23 tie-picks of the first real run
-    /// are the evidence a later measurement needs, and dropping them would
-    /// make the constraint indistinguishable from a model that never disagreed.
+    /// kept beside it: on the first real run all 23 disagreements with the
+    /// acoustics were tie-picks and none was a justified overturn of a clear
+    /// lean, which is the corrected D50 record, and that is exactly the
+    /// evidence a later measurement needs. Dropping it would make the
+    /// constraint indistinguishable from a model that never disagreed.
     private func resolveUnderConstraint(
         _ decision: SpeakerProposalDecision?,
         segmentIndex: Int,

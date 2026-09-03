@@ -591,13 +591,55 @@ class BackendEvidenceTests(unittest.TestCase):
         self.assertEqual(prefix["complete_object_count"], 4)
         self.assertEqual(prefix["validated_object_count"], 4)
         self.assertEqual(prefix["promoted_object_count"], 3)
-        self.assertEqual(prefix["degenerate_object_count"], 2)
+        # The discarded fourth object is degenerate too, but the count
+        # describes the promoted prefix, which kept exactly one.
+        self.assertEqual(prefix["degenerate_object_count"], 1)
         self.assertEqual(prefix["coverage_s"], 30.0)
         self.assertTrue(prefix["terminal_collapse"])
         self.assertEqual([item["degenerate"] for item in prefix["segments"]], [False, True, False])
         self.assertTrue(prefix["raw_text"].startswith("[{"))
         self.assertTrue(prefix["raw_text"].endswith("]"))
         self.assertEqual(len(json.loads(prefix["raw_text"])), 3)
+
+    def test_prefix_recovery_types_a_closed_collapsed_array_as_terminal(self) -> None:
+        # An end-of-sequence stop closes the array, so the only text left over
+        # is the terminator.  It is not repeated content, and treating it as a
+        # repeatable unit produced `terminal_collapse = false` beside a
+        # `repetitionLooping` stop reason, which the Swift adapter rejects.
+        collapsed = "ok, " * 40
+        text = "[" + ",".join([
+            self.transcript_object(0.0, 10.0, "first clean passage"),
+            self.transcript_object(10.0, 20.0, collapsed),
+        ]) + "]"
+
+        prefix = runner.recover_vibevoice_prefix(text, 30.0)
+
+        self.assertTrue(prefix["terminal_collapse"])
+        self.assertEqual(prefix["tail_repetition_run"], 0)
+        self.assertEqual(prefix["tail_characters"], 0)
+        self.assertEqual(prefix["promoted_object_count"], 1)
+        self.assertEqual(prefix["coverage_s"], 10.0)
+
+    def test_prefix_evidence_describes_only_the_promoted_prefix(self) -> None:
+        collapsed = "ok, " * 40
+        worse = "no, " * 90
+        text = "[" + ",".join([
+            self.transcript_object(0.0, 10.0, "first clean passage"),
+            self.transcript_object(10.0, 20.0, collapsed),
+            self.transcript_object(20.0, 30.0, "recovered clean passage"),
+            self.transcript_object(30.0, 40.0, worse),
+        ]) + "]"
+
+        prefix = runner.recover_vibevoice_prefix(text, 60.0)
+
+        self.assertEqual(prefix["validated_object_count"], 4)
+        self.assertEqual(prefix["promoted_object_count"], 3)
+        # The fourth object is discarded, so neither its degeneracy nor its
+        # longer repeated run may appear in evidence the CLI describes as
+        # applying to the promoted prefix.
+        self.assertEqual(prefix["degenerate_object_count"], 1)
+        self.assertEqual(prefix["repetition_run_maximum"], 40)
+        self.assertTrue(prefix["terminal_collapse"])
 
     def test_prefix_recovery_stops_at_the_first_unusable_object(self) -> None:
         text = "[" + ",".join([
@@ -673,6 +715,11 @@ class BackendEvidenceTests(unittest.TestCase):
         self.assertEqual(result["segments"], [])
         self.assertEqual(result["partial_prefix"]["promoted_object_count"], 1)
         self.assertAlmostEqual(result["partial_prefix"]["coverage_s"], 0.6)
+        # The evidence must agree with the stop reason it travels with: the
+        # Swift adapter rejects a repetition-looping outcome whose prefix
+        # reports no terminal collapse.
+        self.assertTrue(result["partial_prefix"]["terminal_collapse"])
+        self.assertEqual(result["partial_prefix"]["tail_repetition_run"], 0)
 
     def test_vibevoice_end_of_sequence_below_the_threshold_stays_complete(self) -> None:
         mild = "ok, " * (runner.VIBEVOICE_REPETITION_RUN_THRESHOLD - 1)
