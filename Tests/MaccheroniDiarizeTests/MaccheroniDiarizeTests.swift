@@ -300,10 +300,14 @@ import MaccheroniCore
             _ = try await outOfRange.diarize(DiarizationRequest(audioURL: audio))
             Issue.record("expected out-of-range failure")
         } catch let error as DiarizationError {
-            guard case .outputOutOfRange = error else {
-                Issue.record("expected outputOutOfRange, got \(error)")
+            guard case let .rejectedOutput(reason, rawOutputPath) = error,
+                  case .outputOutOfRange = reason
+            else {
+                Issue.record("expected a preserved outputOutOfRange rejection, got \(error)")
                 return
             }
+            #expect(try Data(contentsOf: URL(fileURLWithPath: rawOutputPath))
+                == Data(contentsOf: outOfRangeJSON))
         }
 
         let truncatedDirectory = try temporaryDirectory()
@@ -478,6 +482,347 @@ import MaccheroniCore
         let rawSegments = try #require(rawObject["segments"] as? [[String: Any]])
         let rawLast = try #require(rawSegments.last)
         #expect(rawLast["end"] as? Double == warning.rawEndS)
+    }
+
+    @Test func community1KeepsOverlappingTurnsFromSeparateSpeakers() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let audioURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 28.8898125)
+        // Two speakers talking over each other: every turn starts after the one
+        // before it, and each one ends after the next has already begun.
+        let rawOutputURL = try writeFile(
+            """
+            {
+              "segments": [
+                { "speaker": 0, "start": 0.031, "end": 6.4, "duration": 6.369 },
+                { "speaker": 1, "start": 5.2, "end": 9.8, "duration": 4.6 },
+                { "speaker": 0, "start": 9.1, "end": 12.75, "duration": 3.65 }
+              ],
+              "num_speakers": 2
+            }
+
+            """,
+            named: "community1-overlapping.json",
+            in: directory
+        )
+        let backend = Community1Diarizer(configuration: .init(
+            executableURL: try writeExecutable(
+                "#!/bin/sh\ncat '\(rawOutputURL.path)'\n",
+                in: directory
+            ),
+            hfHomeURL: directory,
+            timeoutS: 5,
+            validatesPinnedModel: false
+        ))
+
+        let timeline = try await backend.diarize(DiarizationRequest(audioURL: audioURL))
+
+        #expect(timeline.segments.map(\.speaker) == ["0", "1", "0"])
+        #expect(timeline.segments.map(\.startS) == [0.031, 5.2, 9.1])
+        #expect(timeline.segments.map(\.endS) == [6.4, 9.8, 12.75])
+    }
+
+    @Test func community1OrdersSimultaneousOnsetsIntoContractOrder() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let audioURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 28.8898125)
+
+        // The 2026-09-01 offset-600 timeline, first two turns verbatim: a clip
+        // cut into the middle of a conversation begins with both speakers
+        // already talking, so Community-1 starts both in the first frame at the
+        // same timestamp and breaks the tie by speaker id. The run artifact
+        // wants the earlier end point first, which is the writer's tie-break to
+        // apply, not something the backend can deliver.
+        let rawOutputURL = try writeFile(
+            """
+            {
+              "segments": [
+                { "speaker": 0, "start": 0.031, "end": 2.039, "duration": 2.008 },
+                { "speaker": 1, "start": 0.031, "end": 2.005, "duration": 1.974 },
+                { "speaker": 1, "start": 2.039, "end": 2.883, "duration": 0.844 }
+              ],
+              "num_speakers": 2
+            }
+
+            """,
+            named: "community1-simultaneous-onset.json",
+            in: directory
+        )
+        let backend = Community1Diarizer(configuration: .init(
+            executableURL: try writeExecutable(
+                "#!/bin/sh\ncat '\(rawOutputURL.path)'\n",
+                in: directory
+            ),
+            hfHomeURL: directory,
+            timeoutS: 5,
+            validatesPinnedModel: false
+        ))
+
+        let result = try await backend.diarizeWithEvidence(
+            DiarizationRequest(audioURL: audioURL)
+        )
+
+        // Both turns survive with their own speaker and their own timestamps.
+        #expect(result.timeline.segments == [
+            TimelineSegment(speaker: "1", startS: 0.031, endS: 2.005),
+            TimelineSegment(speaker: "0", startS: 0.031, endS: 2.039),
+            TimelineSegment(speaker: "1", startS: 2.039, endS: 2.883),
+        ])
+        // The move is stated rather than applied quietly, and the emitted order
+        // stays byte-exact in the raw evidence.
+        #expect(result.orderNormalizations == [
+            DiarizationOrderNormalization(
+                emittedIndex: 1,
+                normalizedIndex: 0,
+                speaker: "1",
+                startS: 0.031,
+                endS: 2.005
+            ),
+            DiarizationOrderNormalization(
+                emittedIndex: 0,
+                normalizedIndex: 1,
+                speaker: "0",
+                startS: 0.031,
+                endS: 2.039
+            ),
+        ])
+        #expect(result.rawJSON == (try Data(contentsOf: rawOutputURL)))
+    }
+
+    @Test func community1OrdersASimultaneousOnsetAwayFromTheClipEdge() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let audioURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 28.8898125)
+
+        // The offset-300 timeline failed at index 257, not at the clip edge: a
+        // speaker resolved only within that clip contributed a single-frame turn
+        // starting on the same frame as a real one. The tie-break must be a
+        // property of the tie, not of the first pair.
+        let rawOutputURL = try writeFile(
+            """
+            {
+              "segments": [
+                { "speaker": 0, "start": 0.031, "end": 3.4, "duration": 3.369 },
+                { "speaker": 1, "start": 4.2, "end": 5.399, "duration": 1.199 },
+                { "speaker": 2, "start": 4.2, "end": 4.217, "duration": 0.017 },
+                { "speaker": 0, "start": 6.1, "end": 7.4, "duration": 1.3 }
+              ],
+              "num_speakers": 3
+            }
+
+            """,
+            named: "community1-mid-timeline-onset.json",
+            in: directory
+        )
+        let backend = Community1Diarizer(configuration: .init(
+            executableURL: try writeExecutable(
+                "#!/bin/sh\ncat '\(rawOutputURL.path)'\n",
+                in: directory
+            ),
+            hfHomeURL: directory,
+            timeoutS: 5,
+            validatesPinnedModel: false
+        ))
+
+        let result = try await backend.diarizeWithEvidence(
+            DiarizationRequest(audioURL: audioURL)
+        )
+
+        #expect(result.timeline.segments.map(\.speaker) == ["0", "2", "1", "0"])
+        #expect(result.timeline.segments.map(\.startS) == [0.031, 4.2, 4.2, 6.1])
+        #expect(result.timeline.segments.map(\.endS) == [3.4, 4.217, 5.399, 7.4])
+        // Only the tied pair moves; turns with different starts keep their
+        // emitted position.
+        #expect(result.orderNormalizations.map(\.emittedIndex) == [2, 1])
+        #expect(result.orderNormalizations.map(\.normalizedIndex) == [1, 2])
+    }
+
+    @Test func community1RejectsTimeThatRunsBackwardsAndOneSpeakerStartingTwice() async throws {
+        let audioDirectory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: audioDirectory) }
+        let audioURL = audioDirectory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 28.8898125)
+
+        let unorderedDirectory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: unorderedDirectory) }
+        let unorderedURL = try writeFile(
+            """
+            {
+              "segments": [
+                { "speaker": 0, "start": 3.2, "end": 5.475, "duration": 2.275 },
+                { "speaker": 1, "start": 1.4, "end": 2.9, "duration": 1.5 }
+              ],
+              "num_speakers": 2
+            }
+
+            """,
+            named: "community1-unordered.json",
+            in: unorderedDirectory
+        )
+        let unordered = Community1Diarizer(configuration: .init(
+            executableURL: try writeExecutable(
+                "#!/bin/sh\ncat '\(unorderedURL.path)'\n",
+                in: unorderedDirectory
+            ),
+            hfHomeURL: unorderedDirectory,
+            timeoutS: 5,
+            validatesPinnedModel: false
+        ))
+        do {
+            _ = try await unordered.diarize(DiarizationRequest(audioURL: audioURL))
+            Issue.record("expected an unordered timeline rejection")
+        } catch let error as DiarizationError {
+            guard case let .rejectedOutput(reason, rawOutputPath) = error else {
+                Issue.record("expected a preserved rejection, got \(error)")
+                return
+            }
+            // Time running backwards is a real ordering defect and stays fatal.
+            #expect(reason == .outputUnordered(
+                segment: 1,
+                startS: 1.4,
+                previousStartS: 3.2
+            ))
+            #expect(try Data(contentsOf: URL(fileURLWithPath: rawOutputPath))
+                == Data(contentsOf: unorderedURL))
+        }
+
+        let duplicateDirectory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: duplicateDirectory) }
+        let duplicateURL = try writeFile(
+            """
+            {
+              "segments": [
+                { "speaker": 0, "start": 1.4, "end": 5.475, "duration": 4.075 },
+                { "speaker": 0, "start": 1.4, "end": 2.9, "duration": 1.5 }
+              ],
+              "num_speakers": 1
+            }
+
+            """,
+            named: "community1-duplicate-onset.json",
+            in: duplicateDirectory
+        )
+        let duplicate = Community1Diarizer(configuration: .init(
+            executableURL: try writeExecutable(
+                "#!/bin/sh\ncat '\(duplicateURL.path)'\n",
+                in: duplicateDirectory
+            ),
+            hfHomeURL: duplicateDirectory,
+            timeoutS: 5,
+            validatesPinnedModel: false
+        ))
+        do {
+            _ = try await duplicate.diarize(DiarizationRequest(audioURL: audioURL))
+            Issue.record("expected a duplicate onset rejection")
+        } catch let error as DiarizationError {
+            guard case let .rejectedOutput(reason, _) = error else {
+                Issue.record("expected a preserved rejection, got \(error)")
+                return
+            }
+            // One speaker cannot open two turns on one frame, so no ordering of
+            // the pair is correct and there is nothing to tie-break.
+            #expect(reason == .duplicateOnset(segment: 1, speaker: "0", startS: 1.4))
+        }
+    }
+
+    @Test func oneSpeakerStartingTwiceIsRejectedWhenAnotherTurnSitsBetween() async throws {
+        // `contractOrdered` sorts a tied onset group by end point, so these
+        // three turns come out as A(2.9), B(4.1), A(5.475): the two `A` turns
+        // are never adjacent, in the emitted order or the canonical one, and
+        // an adjacent-pair test sees nothing. The duplicate still changes
+        // overlap totals and attribution downstream, so it is still fatal.
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let audioURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 28.8898125)
+
+        let outputURL = try writeFile(
+            """
+            {
+              "segments": [
+                { "speaker": 0, "start": 1.4, "end": 5.475, "duration": 4.075 },
+                { "speaker": 1, "start": 1.4, "end": 4.1, "duration": 2.7 },
+                { "speaker": 0, "start": 1.4, "end": 2.9, "duration": 1.5 }
+              ],
+              "num_speakers": 2
+            }
+
+            """,
+            named: "community1-nonadjacent-duplicate-onset.json",
+            in: directory
+        )
+        let backend = Community1Diarizer(configuration: .init(
+            executableURL: try writeExecutable(
+                "#!/bin/sh\ncat '\(outputURL.path)'\n",
+                in: directory
+            ),
+            hfHomeURL: directory,
+            timeoutS: 5,
+            validatesPinnedModel: false
+        ))
+
+        do {
+            _ = try await backend.diarize(DiarizationRequest(audioURL: audioURL))
+            Issue.record("expected a duplicate onset rejection")
+        } catch let error as DiarizationError {
+            guard case let .rejectedOutput(reason, _) = error else {
+                Issue.record("expected a preserved rejection, got \(error)")
+                return
+            }
+            // The rejection names the emitted index, not the canonical one.
+            #expect(reason == .duplicateOnset(segment: 2, speaker: "0", startS: 1.4))
+        }
+    }
+
+    @Test func fluidAudioRejectionNamesTheHarnessOutputItRejected() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let audioURL = directory.appendingPathComponent("synthetic.wav")
+        try writeSilentWAV(to: audioURL, durationS: 28.8898125)
+        let rawOutputURL = try writeFile(
+            """
+            {
+              "model": {
+                "hf_id": "FluidInference/speaker-diarization-coreml",
+                "revision": "1ed7a662fdc7109e36d822db793ee6eebdaf8594",
+                "quantization": "CoreML storage Float32 Float16"
+              },
+              "audio": { "duration_s": 28.8898125 },
+              "segments": [
+                { "speaker": "S1", "start_s": 1.4, "end_s": 5.4, "quality_score": 1.0 },
+                { "speaker": "S1", "start_s": 1.4, "end_s": 2.9, "quality_score": 0.9 }
+              ]
+            }
+
+            """,
+            named: "fluid-duplicate-onset.json",
+            in: directory
+        )
+        let outputRootURL = directory.appendingPathComponent("outputs", isDirectory: true)
+        let backend = FluidAudioDiarizer(configuration: .init(
+            executableURL: try writeFluidHarnessCopying(rawOutputURL, in: directory),
+            modelsRootURL: directory,
+            outputRootURL: outputRootURL,
+            timeoutS: 5,
+            validatesPinnedModel: false
+        ))
+
+        do {
+            _ = try await backend.diarize(DiarizationRequest(audioURL: audioURL))
+            Issue.record("expected a duplicate onset rejection")
+        } catch let error as DiarizationError {
+            guard case let .rejectedOutput(reason, rawOutputPath) = error else {
+                Issue.record("expected a preserved rejection, got \(error)")
+                return
+            }
+            #expect(reason == .duplicateOnset(segment: 1, speaker: "S1", startS: 1.4))
+            #expect(rawOutputPath.hasPrefix(outputRootURL.path))
+            #expect(try Data(contentsOf: URL(fileURLWithPath: rawOutputPath))
+                == Data(contentsOf: rawOutputURL))
+        }
     }
 
     private var community1RuntimeRelativePaths: [String] {

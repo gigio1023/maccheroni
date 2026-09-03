@@ -36,7 +36,7 @@ public enum CodexAvailability: Equatable, Sendable {
     }
 }
 
-public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, Sendable {
+public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, SpeakerProposalBackend, Sendable {
     public static let modelName = "gpt-5.6-sol"
     static let maximumVersionOutputUTF8Bytes = 256 * 1_024
     public static let defaultBatchPolicy = PostprocessBatchPolicy(
@@ -188,6 +188,22 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
         )
         return TranslationBackendResponse(
             translations: try decodeTranslations(data: data, backend: "codex"),
+            responseUTF8Bytes: data.count
+        )
+    }
+
+    public func proposeSpeakers(
+        prompt: String
+    ) async throws -> SpeakerProposalBackendResponse {
+        let data = try await execute(
+            prompt: prompt,
+            schema: .generated(
+                name: "speaker-proposal-output.schema.json",
+                data: Self.speakerProposalSchema
+            )
+        )
+        return SpeakerProposalBackendResponse(
+            decisions: try decodeSpeakerDecisions(data: data, backend: "codex"),
             responseUTF8Bytes: data.count
         )
     }
@@ -387,6 +403,35 @@ public struct CodexPostprocessBackend: PostprocessBackend, TranslationBackend, S
         }
     }
 
+    /// `proposed_speaker` has no `minLength`: a decline carries the empty
+    /// string, which is how this schema stays strictly typed without a
+    /// nullable field.
+    private static let speakerProposalSchema = Data(#"""
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Maccheroni speaker proposal output",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["speaker_proposals"],
+      "properties": {
+        "speaker_proposals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["segment_index", "proposed_speaker", "disposition", "reason"],
+            "properties": {
+              "segment_index": { "type": "integer", "minimum": 0 },
+              "proposed_speaker": { "type": "string" },
+              "disposition": { "type": "string", "enum": ["propose", "decline"] },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    }
+    """#.utf8)
+
     private static let translationSchema = Data(#"""
     {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -525,7 +570,7 @@ public struct LocalPostprocessRuntime: Sendable {
     }
 }
 
-public struct LocalPostprocessBackend: PostprocessBackend, TranslationBackend, Sendable {
+public struct LocalPostprocessBackend: PostprocessBackend, TranslationBackend, SpeakerProposalBackend, Sendable {
     public static let descriptor = BackendDescriptor(name: "mlx-vlm", version: "0.6.6")
     public static let pinnedModel = ModelDescriptor(
         role: .postprocess,
@@ -586,6 +631,16 @@ public struct LocalPostprocessBackend: PostprocessBackend, TranslationBackend, S
         )
     }
 
+    public func proposeSpeakers(
+        prompt: String
+    ) async throws -> SpeakerProposalBackendResponse {
+        let data = try await execute(prompt: prompt, mode: "speaker-proposal")
+        return SpeakerProposalBackendResponse(
+            decisions: try decodeSpeakerDecisions(data: data, backend: "local"),
+            responseUTF8Bytes: data.count
+        )
+    }
+
     private func execute(prompt: String, mode: String) async throws -> Data {
         let maximumOutputTokens = batchPolicy.maximumOutputTokens ?? 0
         let result = try await executor.run(SubprocessInvocation(
@@ -618,6 +673,14 @@ private struct TranslationEnvelope: Codable {
     var translations: [SegmentTranslation]
 }
 
+private struct SpeakerProposalEnvelope: Codable {
+    var speakerProposals: [SpeakerProposalDecision]
+
+    enum CodingKeys: String, CodingKey {
+        case speakerProposals = "speaker_proposals"
+    }
+}
+
 private func decodeProposals(data: Data, backend: String) throws -> [PostprocessProposal] {
     do {
         try validateProposalEnvelope(data)
@@ -637,6 +700,43 @@ private func decodeTranslations(data: Data, backend: String) throws -> [SegmentT
         throw error
     } catch {
         throw PostprocessError.malformedOutput("\(backend) backend output is not schema-compatible JSON: \(error.localizedDescription)")
+    }
+}
+
+private func decodeSpeakerDecisions(
+    data: Data,
+    backend: String
+) throws -> [SpeakerProposalDecision] {
+    do {
+        try validateSpeakerProposalEnvelope(data)
+        return try JSONDecoder().decode(
+            SpeakerProposalEnvelope.self,
+            from: data
+        ).speakerProposals
+    } catch let error as PostprocessError {
+        throw error
+    } catch {
+        throw PostprocessError.malformedOutput("\(backend) backend output is not schema-compatible JSON: \(error.localizedDescription)")
+    }
+}
+
+private func validateSpeakerProposalEnvelope(_ data: Data) throws {
+    let object = try JSONSerialization.jsonObject(with: data)
+    guard let envelope = object as? [String: Any],
+          Set(envelope.keys) == ["speaker_proposals"],
+          let decisions = envelope["speaker_proposals"] as? [[String: Any]]
+    else {
+        throw PostprocessError.malformedOutput(
+            "output must contain only a speaker_proposals array"
+        )
+    }
+    let requiredKeys: Set<String> = [
+        "segment_index", "proposed_speaker", "disposition", "reason",
+    ]
+    for decision in decisions where Set(decision.keys) != requiredKeys {
+        throw PostprocessError.malformedOutput(
+            "each speaker proposal must contain only schema fields"
+        )
     }
 }
 

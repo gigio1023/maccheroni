@@ -85,9 +85,13 @@ insufficient privacy control regardless of transcription quality.
 3. **No stage overwrites an original.** Source audio and raw transcripts are immutable;
    corrected transcripts are separate files. The underlying transcript-cleaning
    operational notes live outside this repository.
-4. **Do not change speakers or timestamps without acoustic evidence.** Text
-   post-processing, including LLM processing, cannot modify speaker assignments or time
-   intervals.
+4. **Do not change speakers or timestamps without acoustic evidence.** A source run's
+   speaker assignments and time intervals come from acoustic evidence only; text
+   post-processing, including LLM processing, cannot modify them there. Amended
+   2026-09-02: a *derived* run may carry a non-acoustic speaker proposal, provided it is
+   marked as a proposal, shows the acoustic candidates and their shares beside it, and
+   leaves the source run untouched. Whether such a proposal may ever become the default
+   reading layer is deliberately left open; see D46.
 5. **Mark uncertain corrections instead of replacing them.** A conflict list for human
    review is safer than plausible automatic correction.
 6. **Put external dependencies behind adapters.** If one backend fails, only its adapter
@@ -105,52 +109,70 @@ insufficient privacy control regardless of transcription quality.
 
 ## 5. Most Important Current Question (Risk)
 
-**Can the shipped `ko-meeting` profile produce a reliable mixed-language,
-multi-speaker record with every applied correction aligned to reference evidence?** The
-2026-08-31 HiKE run verifies mixed-language ASR and decoding-time glossary use. The AMI
-IN1009 clean IHM mix verifies long-form ASR and one global four-speaker timeline. These
-are separate component measurements: neither fixture combines mixed-language speech
-with multiple scored speakers, and neither measures human correction time. The
-four-state correction comparison observed aggregate CER and WER improvements, but all
-five applied changes were unscorable under exact-interval reference alignment.
-`correct_to_incorrect` and broader per-change regression therefore remain unknown. A
-valid next measurement campaign needs one sealed C3 condition that combines the two
-speech properties, complete structural evidence, scorable correction changes, and a
-predeclared calibration method with held-out or repeated observation.
+**How much of a real meeting must a reader re-check by ear before the record is worth
+trusting?** Superseded 2026-09-02. The previous question presumed the shipped
+`ko-meeting` profile could process a real recording at all; on 2026-09-01 it could not,
+and the repair changed what is worth asking. One real 20.7-minute Korean meeting now
+completes at 97.5 % coverage with the lost 30.56 s named. What it does not settle is
+attribution: 110 of 248 merged segments carry no speaker, against a 43.4 % overlap
+share and 761 diarization turns averaging 2.11 s. The acoustic evidence for most of
+those segments exists and sits just under the assignment thresholds rather than being
+absent. So the open question is where the remaining judgment should come from, how much
+of it a reader must verify, and what a non-acoustic proposal may claim. The public
+component measurements still do not combine mixed-language speech with multiple scored
+speakers, and `correct_to_incorrect` remains unmeasured, with one observed instance: a
+glossary entry inserted twice where the speaker said something else.
 
 ## 6. Current Position
 
-- **now**: The 2026-08-31 post-v1 reliability reset is merged on the default branch with
-  fresh-cache `ko-meeting` provisioning, cache-independent tests, bounded subprocess
-  fixtures, immutable evaluation envelopes, correction comparison, and reproducible
-  Stage 2 fixture construction. Two consecutive empty-cache Swift runs passed 324 tests
-  in 25 suites. The explicit model integration, package build, strict codesign, and
-  product doctor also passed. Unpublished evaluation `hike-20260831-t7-04` is sealed by
-  SHA-256 `055122968710f3b3732b8eb2cd9e0c8bc8d137919b4f8ac2835bbe5b931d533d`;
-  unpublished evaluation `ami-20260831-t8-02` by
-  `41336850701d0bd368aab7b726b6e32d0483303864904b3c830753f8f77a15fd`;
-  and unpublished comparison `hike-20260831-t9-01` by
-  `8b5bdbccd5bb260b9c5cfb1882e8ab63b8f45ff15f38b5f5b4fa44d2f32b5b87`.
-  Exact metrics remain local. The threshold declaration remains a placeholder, so none
-  of these observations is a quality pass, profile promotion, product acceptance, or
-  closure of C3.
-- **next**: Add or select a public mixed-language, multi-speaker C3 fixture. Run a
-  measurement-only campaign through the fixed shipped profile with a predeclared
-  calibration method and held-out or repeated observation. Make every applied
-  correction alignable to reference evidence and record a nonzero adequate denominator
-  for both correction paths. Keep the D43 DiCoW conversion lane separate from this
-  shipped-baseline campaign. Do not change a model, backend, chunk, token, timeout,
-  retry, fallback, or cache setting to make the measurement pass.
-- **under review**: Raw-quality thresholds and their campaign scope; a rate or scoped
-  maximum for `correct_to_incorrect`; broader per-change regression measurement;
-  generalization to real-meeting accents, overlap, and noise; the Codex backend's
-  OS-level read scope; the output coefficient for new models; and VibeVoice memory use.
+- **now**: On 2026-09-01 one real 20.7-minute Korean meeting was run through the shipped
+  `ko-meeting` profile for the first time. It failed outright, and so did four other
+  things that 324 passing tests and two public fixtures had not surfaced: VibeVoice
+  collapsed into repetition on real Korean meeting audio and the run discarded every
+  completed chunk with it; the diarization validator rejected roughly half of all
+  mid-file clips on an arbitrary tie-break; a `/private`-spelled output root failed its
+  own containment check, which also turned out to accept a symlink escaping the run
+  directory; the capture screen offered to start runs the profile could not perform; and
+  a failed run named no cause. All are repaired. The same recording now completes at
+  **1212.52 s of 1243.08 s (97.5 %)**, naming the one lost range `[871.552, 902.112) s`,
+  with `merged/segments.json` written. Suite is 374 Swift tests in 27 suites plus 36 and
+  37 Python tests. The 2026-08-31 sealed evaluations stand unchanged:
+  `hike-20260831-t7-04` `055122968710f3b3732b8eb2cd9e0c8bc8d137919b4f8ac2835bbe5b931d533d`,
+  `ami-20260831-t8-02` `41336850701d0bd368aab7b726b6e32d0483303864904b3c830753f8f77a15fd`,
+  `hike-20260831-t9-01` `8b5bdbccd5bb260b9c5cfb1882e8ab63b8f45ff15f38b5f5b4fa44d2f32b5b87`.
+  The threshold declaration is still a placeholder, so none of this is a quality pass,
+  a profile promotion, or closure of C3.
+- **next** (revised 2026-09-03; the previous `next` landed in PR #30): close the review
+  findings on that PR — a run must keep completed siblings on every leaf failure, a
+  limit-stopped prefix must never be filed as end-of-sequence, the derived-manifest
+  schema and run-layout contract must describe the proposal and partial-source forms
+  the code now writes, the partial-source verifier must check coverage rather than
+  status, and the copy surface must export the layer it displays. Then measure the D50
+  confirmations against a ground truth before any revisit of overturns. Reopen the C3
+  fixture only after one uninterrupted 10-minute completion through the shipped profile,
+  and add overlap share and backchannel density to its acceptance criteria when
+  reopening, because the current TTS candidate is concatenated and carries 0 % overlap.
+  Keep the D43 DiCoW lane separate and re-aimed per D47. Do not change a model, backend,
+  chunk, token, timeout, retry, fallback, or cache setting to make a measurement pass.
+- **under review**: The ASR-to-diarization granularity mismatch and the merge assignment
+  thresholds; whether a marked non-acoustic speaker proposal may ever be the default
+  reading layer (D46); per-term glossary insertion risk for short acronyms, with one
+  observed false insertion; speaker identity and speaker count varying with the
+  diarization window, since the whole file resolves 2 speakers where a 420 s clip
+  resolves 3; raw-quality thresholds and a rate or scoped maximum for
+  `correct_to_incorrect`; a decoder-level early abort for repetition, which would have
+  saved roughly 10 of one run's 28 minutes but cannot be validated without truncating
+  leaves that would have recovered; generalization to other accents, overlap, and noise;
+  the Codex backend's OS-level read scope; and VibeVoice memory use.
 - **success measure**: Retain the north-star question: can 1 important meeting become a
   reliable speaker-attributed record with no more than 30 minutes of human correction?
-  The current public component measurements did not measure human review time, so this
-  is not a current acceptance gate. Supporting observations remain reference-term
-  recall, omitted utterance count, speaker-count accuracy, processing time, and human
-  review time.
+  Still not a current acceptance gate, because human review time has never been measured.
+  The 2026-09-01 run gives the first input to it: 248 segments of which 110 carry no
+  speaker and 192 are flagged. Under D48 the agent produces a structural correction-effort
+  estimate from artifacts instead, which sharpens the question without answering it — a
+  timed human pass remains the only thing that can close it, and stays available and
+  unscheduled. Supporting observations remain reference-term recall, omitted utterance
+  count, speaker-count accuracy, processing time, and human review time.
 
 ## Decisions
 
@@ -513,14 +535,140 @@ not deleted.
   limit. Revisit the human outcome after one timed local review that records only timing
   and structural metadata. A private real recording remains optional under D19.
 
+- D45 [maintainer] Replaces D19's clause that a private real recording is optional final
+  validation rather than a gate (decided 2026-09-02). One real-recording smoke run
+  through the shipped profile is required before any quality campaign or quality claim.
+  Basis: on 2026-09-01 a single 20.7-minute private recording surfaced five defects in
+  minutes that 324 passing tests and two public fixtures had not, including a run that
+  discarded a complete transcript and a diarization validator rejecting about half of
+  all mid-file clips on an arbitrary tie-break. D19's other terms are unchanged and
+  binding: no recording, transcript, or run output enters version control, and only
+  structural metadata such as durations, counts, ratios, and stop reasons may be
+  quoted into a tracked document. The gate is a smoke run. It asks whether the profile runs and what it produces;
+  scoring the output is a separate campaign.
+- D46 [maintainer] Adopt a layered reading model for speaker attribution, provisionally
+  (decided 2026-09-02). The source run keeps acoustic-only assignment. A derived run may
+  carry a non-acoustic speaker proposal, including one from an LLM, when it is marked as
+  a proposal, carries the acoustic candidates and their shares beside it, and leaves the
+  source untouched. Judgment rule 4 is amended to that effect and judgment rules 3 and 5
+  are unchanged. Order matters and is part of this decision: first disclose the ranked
+  candidates and per-candidate shares that `TimelineMerger.speakerAssignment` already
+  computes and discards, then re-examine the 0.60 dominant-share and 0.50 coverage
+  thresholds against real overlap, and only then apply a non-acoustic proposal to what
+  remains. Basis: on the 2026-09-01 run 110 of 248 segments carry no speaker, and the
+  measured cases sit just below the thresholds rather than lacking evidence, so disclosure
+  closes most of the gap before any inference is needed. This decision deliberately does not settle
+  whether a proposal may become the default reading layer, which model produces it, or
+  what it may claim. Revisit when the disclosure and threshold work lands and the
+  remaining unattributed share is known, or if any measured `correct_to_incorrect` rate
+  suggests a non-acoustic proposal harms more than it helps.
+- D47 [maintainer] Re-aim the D43 DiCoW conversion lane's value question at
+  overlap-region speaker attribution rather than mixed-language ASR (decided 2026-09-02).
+  This does not promote DiCoW into a product profile and does not schedule the lane.
+  Basis: the 2026-09-01 recording carries a 43.4 % overlap share, and the attribution gap
+  is concentrated where speakers overlap, which is the property that lane could speak to.
+
+- D48 [maintainer] Verification of app-facing and taste-shaped work is done by the agent
+  inspecting rendered artifacts, not by the maintainer acting as the instrument (decided
+  2026-09-02). Basis: the maintainer is not a specialist in transcript-reading interface
+  design, and three app surfaces shipped on 2026-09-01 with test-level evidence only
+  because the agent environment has no Screen Recording or Accessibility permission and
+  `screencapture` fails with `could not create image from display`. Offscreen rendering
+  needs neither permission: the package targets `.macOS(.v26)` and the app test target
+  links the app module, so SwiftUI's `ImageRenderer` can rasterise a view with no window
+  server. The standing expectation is therefore that a screen is rendered to an image
+  from real fixture data, at more than one width and in both appearances, and that the
+  agent reads the image back and names concrete defects or states why it found none.
+  "It looks fine" is not a report. This does not move any decision away from the
+  maintainer, who still owns intent, pillars, non-goals and judgment rules; it moves the
+  act of looking. It also does not close anything that genuinely requires a human: human
+  correction time in particular stays unmeasured and cannot be estimated into existence,
+  and an agent-produced effort estimate must say so rather than stand in for it.
+  Known limits, recorded 2026-09-02 after the first use: SwiftUI's offscreen renderer
+  returns nothing for content inside a `ScrollView`, `List` or grouped `Form`, and
+  draws `TextField`, `Slider` and AppKit-backed button styles as placeholders. Views
+  must be structured so their content can be rendered outside a scroll container, and
+  text fields, sliders and hover-revealed affordances remain unjudged by this method.
+  A report under D48 states which controls it could not see rather than implying full
+  coverage. Amended 2026-09-02, second use: laying the view out in an `NSHostingView`
+  and drawing it with `cacheDisplay(in:to:)` renders text fields, sliders, scroll-view
+  content, grouped forms and spinners, under the same permissions budget. `List` still
+  renders blank. The hosting-view path is the one to use; `ImageRenderer` remains
+  acceptable only for views that contain none of those controls.
+
+- D49 [maintainer] Extend D39 so a derived set may be created from a run whose coverage
+  is incomplete, for the speaker-proposal family only (decided 2026-09-02). D39 says a
+  *completed* run may create correction or translation sets; the real 20.7-minute
+  recording is `status: partial` with 30.56 s missing, so under D39 alone it could never
+  carry the layer D46 exists to enable. Every integrity check D39 requires is kept:
+  source manifest and artifact hash verification, inventory, merged-document validity,
+  the required artifact set, immutability of the source run and of earlier sets, and no
+  preprocessing, ASR, diarization or merge. `verifyCompletedRun` itself is unchanged, so
+  correction and translation keep their existing gate; the extension is a sibling entry
+  point. Two conditions, both of which exist because a proposal over an incomplete
+  transcript that presents as complete would be the same class of false claim the
+  2026-09-01 repairs removed: the derived manifest records whether the source coverage
+  was complete, and the covered and missing durations travel with that flag. Revisit if a derived family other than speaker-proposal wants the same
+  relaxation, which should be argued separately rather than inherited.
+
+- D50 [maintainer] Constrain the first speaker-proposal iteration to confirm-or-decline
+  (decided 2026-09-02). On the first real proposal run over the 2026-09-01 recording,
+  110 unattributed segments produced 99 proposals and 11 declines; of the 99, 76
+  agreed with the top-ranked candidate (the speaker with the largest overlap share, below the
+  0.60 bar) and 23 did not. Basis corrected the same day: those 23 were not overturns
+  of a clear lean — every one was an exact overlap tie with no top-ranked candidate to
+  contradict, and the model had picked one side of the tie. A tie-break is still a
+  speaker assignment resting on no acoustic evidence, which is what judgment rule 4 was
+  written against and the distortion the maintainer named when proposing this
+  direction; the correction changes the description of the 23, not the decision. With no ground truth to tell a correct overturn from a
+  plausible wrong one, the first iteration permits a proposal only when it names the
+  top-ranked candidate, and otherwise declines with its reason. The 76 confirmations alone
+  fill about 69 % of the unattributed segments. Overturns become permissible only after
+  a measurement shows they are right more often than wrong, which is a separate
+  campaign. D46's provisional status and revisit triggers are unchanged.
+- D51 [maintainer] A run that loses one leaf keeps everything else, on every backend
+  (decided 2026-09-02). Before this, a leaf that exhausted split recovery aborted the
+  whole run before merge and discarded every completed chunk; on the 2026-09-01
+  recording, 30.56 s of unrecoverable audio destroyed sixteen minutes of correct
+  transcript, and the manifest reported `status: partial` with a processed duration
+  while no transcript existed anywhere. The abort path was generic, so the repair
+  applies to MOSS as well as VibeVoice; the MOSS behaviour it replaces was asserted by a
+  test but recorded in no decision, and D28 governs MOSS leaf durations only. D28's
+  bounds, depth 3, the token cap and the promotion conditions are unchanged. A run now
+  fails outright only when nothing anywhere was promotable, `partial` is written only
+  when canonical artifacts exist, and `processed_duration_s` sums every promoted range
+  rather than stopping at the first gap. Recorded as a decision because it reverses a
+  prior assertion that a test had made on purpose.
+
+- D52 [maintainer] A renamed wire value keeps its legacy value accepted on read, and a
+  sealed artifact is never rewritten to follow a rename (decided 2026-09-02). Basis: the
+  2026-09-02 terminology audit renamed the failure code `ASR_REPETITION_DEGENERATION`
+  to `ASR_REPETITION_LOOPING` and the proposal key `acoustic_leader` to
+  `top_ranked_candidate`. The first rename silently regressed every run written
+  before it — the app's classifier accepted only the new code, so a sealed manifest
+  carrying the old one lost its specific cause and its stopped-at stage on screen. The
+  second was migrated on disk in the private working directory, and the migration was
+  incomplete on its first pass because the derived set's manifest still carried the
+  pre-migration content hash, so the app rejected the set with `artifactHashMismatch`
+  until the hash was refreshed; the integrity check did its job. Rule: a reader accepts
+  the legacy value at the same case as the new one, with a comment naming the rename;
+  judgment rule 3 governs artifacts, so a sealed manifest is read through the alias
+  and left byte-identical. Where a private artifact must be migrated for local use,
+  every hash that seals it is refreshed in the same step and the original is kept
+  beside it.
+
 ## Project-wide Done Criteria
 
 - After D26, v1 completion additionally requires the completion judgment in the MOSS
   long-form token-budget refinement plan kept in local working notes outside the tracked
   tree. A public or synthetic long-file MOSS run must prove, in an inspectable artifact,
-  the backend leaf limit, EOS for every promoted leaf, glossary application,
-  chunk-boundary global speakers, model and runner fingerprints, and immutable source
-  hashes.
+  the backend leaf limit, glossary application, chunk-boundary global speakers, model and
+  runner fingerprints, and immutable source hashes. Restated 2026-09-02: the former "EOS
+  for every promoted leaf" is now checked as `primary/promotion.json` listing every
+  attempt in exactly one of `eos_leaf_attempt_ids` or `partial_prefix_attempt_ids`, with
+  `partial_prefix_attempt_ids` empty. Prefix promotion means a promoted leaf may not have
+  reached end of sequence, so the criterion is made checkable rather than loosened; a run
+  with a promoted prefix states so instead of being counted as fully EOS.
 - Swift code must pass `swift build` and `swift test` with the Xcode 26 general-release
   toolchain (D21), and new features require fixture-based tests.
 - Every completion claim includes the command that ran and its observed result. A prose

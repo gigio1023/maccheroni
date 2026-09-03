@@ -65,6 +65,32 @@ def validate_output(value: dict[str, Any], mode: str) -> dict[str, Any]:
                 raise ValueError("reason must be a string")
         return value
 
+    if mode == "speaker-proposal":
+        if set(value) != {"speaker_proposals"} or not isinstance(
+            value["speaker_proposals"], list
+        ):
+            raise ValueError("output must contain only speaker_proposals")
+        for decision in value["speaker_proposals"]:
+            if not isinstance(decision, dict) or set(decision) != {
+                "segment_index", "proposed_speaker", "disposition", "reason"
+            }:
+                raise ValueError("each speaker proposal must contain only schema fields")
+            if not isinstance(decision["segment_index"], int) or decision["segment_index"] < 0:
+                raise ValueError("segment_index must be a nonnegative integer")
+            if not isinstance(decision["proposed_speaker"], str):
+                raise ValueError("proposed_speaker must be a string")
+            if decision["disposition"] not in {"propose", "decline"}:
+                raise ValueError("disposition must be propose or decline")
+            # A decline names no speaker; that is what makes it a decline and
+            # not a proposal the reader could mistake for one.
+            if decision["disposition"] == "decline" and decision["proposed_speaker"]:
+                raise ValueError("a declined segment must not name a speaker")
+            if decision["disposition"] == "propose" and not decision["proposed_speaker"]:
+                raise ValueError("a proposed segment must name a speaker")
+            if not isinstance(decision["reason"], str) or not decision["reason"].strip():
+                raise ValueError("reason must not be empty")
+        return value
+
     if set(value) != {"translations"} or not isinstance(value["translations"], list):
         raise ValueError("output must contain only translations")
     for translation in value["translations"]:
@@ -82,7 +108,11 @@ def validate_output(value: dict[str, Any], mode: str) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", required=True)
-    parser.add_argument("--mode", choices=("correction", "translation"), required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("correction", "translation", "speaker-proposal"),
+        required=True,
+    )
     parser.add_argument("--max-tokens", type=int, required=True)
     args = parser.parse_args()
 

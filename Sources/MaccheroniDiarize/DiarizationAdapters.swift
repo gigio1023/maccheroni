@@ -89,6 +89,35 @@ public struct DiarizationNormalizationWarning: Equatable, Sendable {
     }
 }
 
+/// One turn moved while putting turns that start at the identical timestamp
+/// into the order the run artifact contract asks for, earlier end point first
+/// (`docs/contracts/run-layout.md`, "Identifiers and Time"). A backend has no
+/// end-time tie-break to offer — Community-1 breaks a tie by speaker id — so
+/// this reordering is the writer's job. Nothing but array position changes: the
+/// speaker and both timestamps are carried through untouched, and the emitted
+/// order stays byte-exact in `DiarizationTimelineResult.rawJSON`.
+public struct DiarizationOrderNormalization: Equatable, Sendable {
+    public let emittedIndex: Int
+    public let normalizedIndex: Int
+    public let speaker: String
+    public let startS: Double
+    public let endS: Double
+
+    public init(
+        emittedIndex: Int,
+        normalizedIndex: Int,
+        speaker: String,
+        startS: Double,
+        endS: Double
+    ) {
+        self.emittedIndex = emittedIndex
+        self.normalizedIndex = normalizedIndex
+        self.speaker = speaker
+        self.startS = startS
+        self.endS = endS
+    }
+}
+
 /// Backend evidence kept separate from the normalized common `Timeline`.
 /// `rawJSON` is the exact JSON byte range emitted by the backend, without a
 /// decode/encode round trip.
@@ -96,15 +125,18 @@ public struct DiarizationTimelineResult: Sendable {
     public let timeline: Timeline
     public let rawJSON: Data
     public let normalizationWarnings: [DiarizationNormalizationWarning]
+    public let orderNormalizations: [DiarizationOrderNormalization]
 
     public init(
         timeline: Timeline,
         rawJSON: Data,
-        normalizationWarnings: [DiarizationNormalizationWarning]
+        normalizationWarnings: [DiarizationNormalizationWarning],
+        orderNormalizations: [DiarizationOrderNormalization] = []
     ) {
         self.timeline = timeline
         self.rawJSON = rawJSON
         self.normalizationWarnings = normalizationWarnings
+        self.orderNormalizations = orderNormalizations
     }
 }
 
@@ -121,10 +153,24 @@ public enum DiarizationError: Error, Equatable, LocalizedError, Sendable {
     case missingOutput
     case invalidJSON(String)
     case invalidOutput(String)
+    /// A turn starts before the turn emitted ahead of it. The timeline is not in
+    /// time order at all, which no backend contract allows. Two *different*
+    /// speakers sharing a start timestamp is not this: they really are both
+    /// talking, and the timeline saying so is correct.
+    case outputUnordered(segment: Int, startS: Double, previousStartS: Double)
+    /// One speaker opens two turns at the identical timestamp. Per-speaker
+    /// binarization walks one speaker's frames and closes a turn before opening
+    /// the next, so a speaker cannot start twice on one frame. Unlike a
+    /// simultaneous onset by different speakers, no ordering of these two turns
+    /// is correct, so it stays an error rather than a tie-break.
+    case duplicateOnset(segment: Int, speaker: String, startS: Double)
     case outputOutOfRange(segment: Int, startS: Double, endS: Double, durationS: Double)
     case truncatedCoverage(expectedDurationS: Double, reportedDurationS: Double)
     case coverageShortfall(expectedDurationS: Double, finalSegmentEndS: Double)
     case outputPathAlreadyExists(String)
+    /// A rejected timeline together with the file holding the exact bytes the
+    /// backend emitted. Every rejection carries the evidence that caused it.
+    indirect case rejectedOutput(reason: DiarizationError, rawOutputPath: String)
 
     public var errorDescription: String? {
         switch self {
@@ -152,6 +198,10 @@ public enum DiarizationError: Error, Equatable, LocalizedError, Sendable {
             return "diarization JSON is invalid: \(message)"
         case let .invalidOutput(message):
             return "diarization output is invalid: \(message)"
+        case let .outputUnordered(segment, startS, previousStartS):
+            return "segment \(segment) starts at \(startS) seconds, before segment \(segment - 1) at \(previousStartS) seconds"
+        case let .duplicateOnset(segment, speaker, startS):
+            return "segments \(segment - 1) and \(segment) both start speaker \(speaker) at \(startS) seconds"
         case let .outputOutOfRange(segment, startS, endS, durationS):
             return "segment \(segment) [\(startS), \(endS)) is outside input duration \(durationS)"
         case let .truncatedCoverage(expected, reported):
@@ -160,6 +210,8 @@ public enum DiarizationError: Error, Equatable, LocalizedError, Sendable {
             return "backend timeline ends at \(finalEnd) seconds for \(expected)-second input"
         case let .outputPathAlreadyExists(path):
             return "refusing to overwrite diarization output: \(path)"
+        case let .rejectedOutput(reason, rawOutputPath):
+            return "\(reason.errorDescription ?? "diarization output was rejected"); rejected backend timeline kept at \(rawOutputPath)"
         }
     }
 }
@@ -224,6 +276,19 @@ public enum DiarizationWorkspace {
     ) -> URL {
         temporaryDirectory.appendingPathComponent(
             "Maccheroni/diarization/process",
+            isDirectory: true
+        )
+    }
+
+    /// Where a timeline that failed validation is kept. A rejection used to
+    /// discard the backend's bytes, so the only record of why a run failed was
+    /// the error string: on 2026-09-01 an ordering rejection left a run
+    /// directory with no diarization artifact at all.
+    public static func rejectedOutputRootURL(
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory
+    ) -> URL {
+        temporaryDirectory.appendingPathComponent(
+            "Maccheroni/diarization/rejected",
             isDirectory: true
         )
     }
@@ -360,16 +425,22 @@ public struct Community1Diarizer: DiarizerBackend {
             timeoutS: configuration.timeoutS
         )
         let decoded: JSONOutput<Community1Output> = try decodeJSONOutput(output)
-        let normalized = try normalizedTimeline(
-            decoded.value.segments.map { .init(speaker: $0.speaker, startS: $0.startS, endS: $0.endS, confidence: nil) },
-            durationS: duration,
-            terminalRoundingToleranceS: configuration.timestampRoundingToleranceS,
-            requiresTerminalCoverage: false
-        )
+        let normalized: NormalizedTimeline
+        do {
+            normalized = try normalizedTimeline(
+                decoded.value.segments.map { .init(speaker: $0.speaker, startS: $0.startS, endS: $0.endS, confidence: nil) },
+                durationS: duration,
+                terminalRoundingToleranceS: configuration.timestampRoundingToleranceS,
+                requiresTerminalCoverage: false
+            )
+        } catch {
+            throw quarantined(decoded.rawJSON, rejectedBy: error)
+        }
         return DiarizationTimelineResult(
             timeline: normalized.timeline,
             rawJSON: decoded.rawJSON,
-            normalizationWarnings: normalized.warnings
+            normalizationWarnings: normalized.warnings,
+            orderNormalizations: normalized.orderNormalizations
         )
     }
 }
@@ -429,9 +500,13 @@ public struct FluidAudioDiarizer: DiarizerBackend {
         guard FileManager.default.fileExists(atPath: outputURL.path) else {
             throw DiarizationError.missingOutput
         }
+        // Read the harness file once and decode those exact bytes, so the
+        // evidence returned or named in a rejection is what was validated.
+        let rawJSON: Data
         let payload: FluidAudioOutput
         do {
-            payload = try JSONDecoder().decode(FluidAudioOutput.self, from: Data(contentsOf: outputURL))
+            rawJSON = try Data(contentsOf: outputURL)
+            payload = try JSONDecoder().decode(FluidAudioOutput.self, from: rawJSON)
         } catch {
             throw DiarizationError.invalidJSON(error.localizedDescription)
         }
@@ -442,23 +517,31 @@ public struct FluidAudioDiarizer: DiarizerBackend {
                 reportedDurationS: payload.audio.durationS
             )
         }
-        let normalized = try normalizedTimeline(
-            payload.segments.map {
-                .init(
-                    speaker: $0.speaker,
-                    startS: $0.rawStartS ?? $0.startS,
-                    endS: $0.rawEndS ?? $0.endS,
-                    confidence: $0.qualityScore
-                )
-            },
-            durationS: duration,
-            terminalRoundingToleranceS: 0,
-            requiresTerminalCoverage: false
-        )
+        let normalized: NormalizedTimeline
+        do {
+            normalized = try normalizedTimeline(
+                payload.segments.map {
+                    .init(
+                        speaker: $0.speaker,
+                        startS: $0.rawStartS ?? $0.startS,
+                        endS: $0.rawEndS ?? $0.endS,
+                        confidence: $0.qualityScore
+                    )
+                },
+                durationS: duration,
+                terminalRoundingToleranceS: 0,
+                requiresTerminalCoverage: false
+            )
+        } catch {
+            // This harness writes its timeline to a file that outlives the run,
+            // so the rejection names that file instead of copying the bytes.
+            throw rejectedOutput(error, keptAt: outputURL.path)
+        }
         return DiarizationTimelineResult(
             timeline: normalized.timeline,
-            rawJSON: try Data(contentsOf: outputURL),
-            normalizationWarnings: normalized.warnings
+            rawJSON: rawJSON,
+            normalizationWarnings: normalized.warnings,
+            orderNormalizations: normalized.orderNormalizations
         )
     }
 }
@@ -548,6 +631,7 @@ private struct RawTimelineSegment {
 private struct NormalizedTimeline {
     let timeline: Timeline
     let warnings: [DiarizationNormalizationWarning]
+    let orderNormalizations: [DiarizationOrderNormalization]
 }
 
 private func validateInput(_ audioURL: URL) throws {
@@ -764,6 +848,92 @@ private func audioDuration(_ audioURL: URL) throws -> Double {
     }
 }
 
+/// Name a validation failure with the file that already holds the rejected
+/// bytes. Errors raised before the backend produced any output pass through.
+private func rejectedOutput(_ original: Error, keptAt path: String) -> Error {
+    guard let reason = original as? DiarizationError else { return original }
+    return DiarizationError.rejectedOutput(reason: reason, rawOutputPath: path)
+}
+
+/// Write the bytes a backend emitted before naming the failure that rejected
+/// them. The raw timeline is the only evidence of why a rejection happened, and
+/// a backend that streams its result to standard output leaves nothing behind
+/// otherwise. A write that fails rethrows the original error unchanged rather
+/// than replacing a diagnosis with a filesystem complaint.
+private func quarantined(_ rawJSON: Data, rejectedBy original: Error) -> Error {
+    guard original is DiarizationError else { return original }
+    let root = DiarizationWorkspace.rejectedOutputRootURL()
+    do {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent(
+            "rejected-\(UUID().uuidString.lowercased()).json"
+        )
+        try rawJSON.write(to: file, options: [.withoutOverwriting])
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: file.path
+        )
+        return rejectedOutput(original, keptAt: file.path)
+    } catch {
+        return original
+    }
+}
+
+/// Put turns that start at the identical timestamp into the run artifact's
+/// order, earlier end point first, and report every turn the move displaced.
+///
+/// The backend cannot deliver this order: Community-1's final sort is
+/// `(startTime, speakerId)`, so which of two simultaneous turns comes first is
+/// decided by cluster numbering. Rejecting a timeline for that made acceptance
+/// a coin flip — measured on 2026-09-01, 8 of 12 clips carrying a tie were
+/// rejected purely on which tied turn ended first. The reordering is confined
+/// to exact start ties and is stable inside one: turns with different starts
+/// never move, no timestamp or speaker is touched, and the emitted order stays
+/// byte-exact in the raw artifact.
+private func contractOrdered(
+    _ rawSegments: [RawTimelineSegment]
+) -> ([RawTimelineSegment], [DiarizationOrderNormalization]) {
+    var ordered: [RawTimelineSegment] = []
+    ordered.reserveCapacity(rawSegments.count)
+    var emittedIndexes: [Int] = []
+    emittedIndexes.reserveCapacity(rawSegments.count)
+    var index = rawSegments.startIndex
+    while index < rawSegments.endIndex {
+        var tie = index + 1
+        while tie < rawSegments.endIndex,
+              rawSegments[tie].startS == rawSegments[index].startS {
+            tie += 1
+        }
+        // `sorted` is not documented as stable, so the emitted position is the
+        // final key: turns that already agree on their end point keep their
+        // relative order.
+        let group = (index..<tie).sorted { left, right in
+            if rawSegments[left].endS != rawSegments[right].endS {
+                return rawSegments[left].endS < rawSegments[right].endS
+            }
+            return left < right
+        }
+        for emitted in group {
+            ordered.append(rawSegments[emitted])
+            emittedIndexes.append(emitted)
+        }
+        index = tie
+    }
+    var normalizations: [DiarizationOrderNormalization] = []
+    for (normalizedIndex, emittedIndex) in emittedIndexes.enumerated()
+    where normalizedIndex != emittedIndex {
+        let segment = rawSegments[emittedIndex]
+        normalizations.append(DiarizationOrderNormalization(
+            emittedIndex: emittedIndex,
+            normalizedIndex: normalizedIndex,
+            speaker: segment.speaker,
+            startS: segment.startS,
+            endS: segment.endS
+        ))
+    }
+    return (ordered, normalizations)
+}
+
 private func normalizedTimeline(
     _ rawSegments: [RawTimelineSegment],
     durationS: Double,
@@ -776,9 +946,17 @@ private func normalizedTimeline(
     guard !rawSegments.isEmpty else {
         throw DiarizationError.invalidOutput("timeline has no segments")
     }
-    var normalized: [TimelineSegment] = []
-    normalized.reserveCapacity(rawSegments.count)
-    var warnings: [DiarizationNormalizationWarning] = []
+    // Validate what the backend emitted, in the order it emitted it, so a
+    // rejection names the segment the backend actually wrote.
+    //
+    // One speaker opening two turns on the same frame is a defect wherever the
+    // two turns sit. `contractOrdered` sorts a tied onset group by end point,
+    // so `A@1.4, B@1.4, A@1.4` puts the two `A` turns on either side of `B`
+    // and an adjacent-pair test never sees them. Onsets are therefore
+    // accumulated per speaker across the whole timeline, which is the same
+    // check applied after canonical ordering, run before it so the rejection
+    // still names the emitted index.
+    var onsetsBySpeaker: [String: Set<Double>] = [:]
     for (index, segment) in rawSegments.enumerated() {
         guard !segment.speaker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw DiarizationError.invalidOutput("segment \(index) has no speaker")
@@ -786,14 +964,40 @@ private func normalizedTimeline(
         guard segment.startS.isFinite, segment.endS.isFinite, segment.endS > segment.startS else {
             throw DiarizationError.invalidOutput("segment \(index) has invalid interval")
         }
+        if let confidence = segment.confidence, !confidence.isFinite || !(0...1).contains(confidence) {
+            throw DiarizationError.invalidOutput("segment \(index) has invalid confidence")
+        }
         if index > 0 {
             let previous = rawSegments[index - 1]
-            guard segment.startS > previous.startS || (
-                segment.startS == previous.startS && segment.endS >= previous.endS
-            ) else {
-                throw DiarizationError.invalidOutput("segment \(index) is not ordered after segment \(index - 1)")
+            // Overlapping turns are ordinary in a multi-speaker recording and
+            // stay legal: only the start points are compared. Time must not
+            // run backwards. Checked before the onset ledger so a timeline
+            // that is both unordered and repeated keeps naming the ordering
+            // defect first.
+            guard segment.startS >= previous.startS else {
+                throw DiarizationError.outputUnordered(
+                    segment: index,
+                    startS: segment.startS,
+                    previousStartS: previous.startS
+                )
             }
         }
+        guard onsetsBySpeaker[segment.speaker, default: []]
+            .insert(segment.startS).inserted
+        else {
+            throw DiarizationError.duplicateOnset(
+                segment: index,
+                speaker: segment.speaker,
+                startS: segment.startS
+            )
+        }
+    }
+
+    let (ordered, orderNormalizations) = contractOrdered(rawSegments)
+    var normalized: [TimelineSegment] = []
+    normalized.reserveCapacity(ordered.count)
+    var warnings: [DiarizationNormalizationWarning] = []
+    for (index, segment) in ordered.enumerated() {
         guard segment.startS >= 0 else {
             throw DiarizationError.outputOutOfRange(
                 segment: index,
@@ -805,7 +1009,7 @@ private func normalizedTimeline(
         var end = segment.endS
         if segment.endS > durationS {
             let delta = segment.endS - durationS
-            guard index == rawSegments.indices.last, delta <= terminalRoundingToleranceS else {
+            guard index == ordered.indices.last, delta <= terminalRoundingToleranceS else {
                 throw DiarizationError.outputOutOfRange(
                     segment: index,
                     startS: segment.startS,
@@ -820,9 +1024,6 @@ private func normalizedTimeline(
                 normalizedEndS: end,
                 deltaS: delta
             ))
-        }
-        if let confidence = segment.confidence, !confidence.isFinite || !(0...1).contains(confidence) {
-            throw DiarizationError.invalidOutput("segment \(index) has invalid confidence")
         }
         let start = segment.startS
         guard end > start else {
@@ -846,7 +1047,11 @@ private func normalizedTimeline(
             finalSegmentEndS: finalEnd
         )
     }
-    return NormalizedTimeline(timeline: Timeline(segments: normalized), warnings: warnings)
+    return NormalizedTimeline(
+        timeline: Timeline(segments: normalized),
+        warnings: warnings,
+        orderNormalizations: orderNormalizations
+    )
 }
 
 private func freshFluidOutputURL(in root: URL) throws -> URL {

@@ -4,6 +4,11 @@ struct RunProgressView: View {
     @Bindable var model: MaccheroniAppModel
     let record: LibraryRecord
 
+    /// What the run's own records say happened. Loaded off the first render
+    /// so no manifest is read during a view update, and reloaded whenever the
+    /// entry, its state, or its run directory changes.
+    @State private var outcome: RunOutcome?
+
     private var recordProgress: RunProgressSnapshot? {
         model.progress(for: record.id)
     }
@@ -12,18 +17,37 @@ struct RunProgressView: View {
         model.isTranscribing(recordID: record.id)
     }
 
+    /// A finished run has an outcome to explain. A recording waiting to be
+    /// transcribed and a run in flight do not.
+    private var isFinishedRun: Bool {
+        switch record.state {
+        case .failed, .cancelled, .interrupted: !recordIsTranscribing
+        default: false
+        }
+    }
+
+    private var diagnosis: RunOutcome? {
+        isFinishedRun ? outcome : nil
+    }
+
+    private var cause: RunFailureCause? {
+        guard let diagnosis, diagnosis.isFailureLike else { return nil }
+        return diagnosis.cause
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.screen) {
                 header
                 if model.isMOSSLimitExhausted(record),
                    model.usesUnchangedMOSSConfiguration(record) {
-                    MOSSConstraintFailureNotice(
-                        detail: model.failure(for: record)?.message
-                    )
+                    MOSSConstraintRetryNotice()
                 }
                 stageList
                 runDetails
+                if let detail = diagnosis?.detail, !detail.isEmpty {
+                    RunFailureDetailBox(detail: detail)
+                }
                 actions
             }
             .frame(maxWidth: 680, alignment: .leading)
@@ -31,33 +55,61 @@ struct RunProgressView: View {
             .frame(maxWidth: .infinity)
         }
         .navigationTitle(record.displayName)
+        .task(id: outcomeReloadKey) {
+            guard isFinishedRun else {
+                outcome = nil
+                return
+            }
+            outcome = RunOutcome.load(
+                runURL: record.runURL,
+                recordState: record.state,
+                recordFailureMessage: record.failureMessage,
+                postprocessRequested: record.postprocess != .none
+            )
+        }
+    }
+
+    private var outcomeReloadKey: String {
+        [
+            record.id.uuidString,
+            record.state.rawValue,
+            record.runURL?.path ?? "",
+            recordIsTranscribing ? "active" : "idle",
+        ].joined(separator: "|")
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.small) {
             Label(headerTitle, systemImage: headerSymbol)
-                .font(.largeTitle)
+                .font(AppTheme.Typography.screenTitle)
                 .foregroundStyle(headerColor)
             Text(headerMessage)
-                .font(.body)
-                .foregroundStyle(.secondary)
+                .font(AppTheme.Typography.body)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let supporting = headerSupportingMessage {
+                Text(supporting)
+                    .font(AppTheme.Typography.meta)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
     private var stageList: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(visibleStages, id: \.self) { stage in
-                HStack(spacing: 12) {
+                HStack(spacing: AppTheme.Spacing.medium) {
                     Image(systemName: stageSymbol(stage))
                         .frame(width: 20)
                         .foregroundStyle(stageColor(stage))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(stage.title)
+                            .font(AppTheme.Typography.sectionTitle)
                         if let elapsedS = recordProgress?.stageElapsedS[stage] {
                             Text(Duration.seconds(elapsedS), format: .time(pattern: .hourMinuteSecond))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(AppTheme.Typography.meta)
+                                .foregroundStyle(AppTheme.Palette.inkSecondary)
                                 .monospacedDigit()
                                 .accessibilityLabel(appLocalized("Elapsed"))
                         }
@@ -65,8 +117,14 @@ struct RunProgressView: View {
                            let snapshot = recordProgress,
                            snapshot.plannedChunks > 0 {
                             Text(appLocalized("Chunk \(snapshot.completedChunks) of \(snapshot.plannedChunks)"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(AppTheme.Typography.meta)
+                                .foregroundStyle(AppTheme.Palette.inkSecondary)
+                        }
+                        if let note = stageNote(stage) {
+                            Text(note)
+                                .font(AppTheme.Typography.meta)
+                                .foregroundStyle(AppTheme.Palette.inkSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     Spacer()
@@ -81,23 +139,23 @@ struct RunProgressView: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, AppTheme.Spacing.large)
         .background(Color(nsColor: .controlBackgroundColor), in: .rect(cornerRadius: 12))
     }
 
     private var runDetails: some View {
-        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+        Grid(alignment: .leading, horizontalSpacing: AppTheme.Spacing.large, verticalSpacing: AppTheme.Spacing.small) {
             if let snapshot = recordProgress {
                 GridRow {
                     Text(appLocalized("Elapsed"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
                     Text(Duration.seconds(snapshot.elapsedS), format: .time(pattern: .hourMinuteSecond))
                         .monospacedDigit()
                 }
                 if let modelID = snapshot.modelID {
                     GridRow {
                         Text(snapshot.modelLabel())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.Palette.inkSecondary)
                         Text(modelID)
                             .textSelection(.enabled)
                     }
@@ -105,25 +163,48 @@ struct RunProgressView: View {
                 if let message = snapshot.message, !message.isEmpty {
                     GridRow {
                         Text(appLocalized("Status"))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.Palette.inkSecondary)
                         Text(message)
+                    }
+                }
+            }
+            if let stage = diagnosis?.failedStage {
+                GridRow {
+                    Text(appLocalized("Stopped At"))
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
+                    Text(stage.title)
+                }
+            }
+            if let coverage = diagnosis?.coverage, coverage.inputDurationS > 0 {
+                GridRow {
+                    Text(appLocalized("Transcribed"))
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
+                    Text(coverage.transcribedLabel)
+                        .monospacedDigit()
+                }
+                if let ranges = coverage.missingRangeLabel() {
+                    GridRow {
+                        Text(appLocalized("Not Transcribed"))
+                            .foregroundStyle(AppTheme.Palette.inkSecondary)
+                        Text(verbatim: ranges)
+                            .monospacedDigit()
                     }
                 }
             }
             GridRow {
                 Text(appLocalized("Profile"))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
                 Text(record.profileID.title)
             }
             GridRow {
                 Text(appLocalized("Post-processing"))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
                 Text(record.postprocess.title)
             }
             if record.postprocess != .none {
                 GridRow {
                     Text(appLocalized("Operation"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
                     Text(PostprocessOperationChoice(
                         record.postprocessMode ?? .correction
                     ).title)
@@ -134,7 +215,7 @@ struct RunProgressView: View {
             {
                 GridRow {
                     Text(appLocalized("Target Language"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
                     if let language = AppLanguage(rawValue: target) {
                         Text(language.title)
                     } else {
@@ -143,7 +224,7 @@ struct RunProgressView: View {
                 }
             }
         }
-        .font(.callout)
+        .font(AppTheme.Typography.meta)
     }
 
     @ViewBuilder
@@ -156,8 +237,8 @@ struct RunProgressView: View {
                 .keyboardShortcut(.cancelAction)
                 Spacer()
                 Label(appLocalized("Cancelling keeps completed chunks and intermediate artifacts."), systemImage: "archivebox")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(AppTheme.Typography.meta)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
             }
         } else if model.isMOSSLimitExhausted(record),
                   model.usesUnchangedMOSSConfiguration(record) {
@@ -191,12 +272,16 @@ struct RunProgressView: View {
     }
 
     private var visibleStages: [PipelineStage] {
-        var stages: [PipelineStage] = [.preprocessing, .diarization, .asr, .merge]
-        if record.postprocess != .none { stages.append(.postprocess) }
-        return stages
+        RunOutcome.stageOrder(includesPostprocess: record.postprocess != .none)
     }
 
     private var headerTitle: LocalizedStringResource {
+        if let diagnosis, diagnosis.completion == .partial {
+            return appLocalized("Partial Transcript")
+        }
+        if let diagnosis, diagnosis.completion == .unreadable {
+            return appLocalized("Run Record Unreadable")
+        }
         if model.isMOSSLimitExhausted(record) {
             return appLocalized("Transcription Limit Reached")
         }
@@ -214,10 +299,16 @@ struct RunProgressView: View {
         }
     }
 
+    /// The reason, in user language. It is the first thing a failed run says,
+    /// and it comes from the manifest's own failure code and coverage rather
+    /// than from one sentence shared by every failure.
     private var headerMessage: LocalizedStringResource {
-        if model.isMOSSLimitExhausted(record) {
+        if let cause {
+            return cause.sentence()
+        }
+        if let diagnosis, diagnosis.completion == .partial {
             return appLocalized(
-                "The original audio and completed attempt artifacts were preserved. MOSS still reached its output limit after the failed range was split into smaller chunks."
+                "Part of this recording was transcribed and the rest produced no text."
             )
         }
         return switch record.state {
@@ -228,7 +319,24 @@ struct RunProgressView: View {
         }
     }
 
+    /// The preservation promise, kept as its own line so the reason above it
+    /// stays one sentence.
+    private var headerSupportingMessage: LocalizedStringResource? {
+        guard let diagnosis, diagnosis.isFailureLike else { return nil }
+        if diagnosis.completion == .partial {
+            return appLocalized(
+                "The recovered transcript, the original audio, and every completed artifact were preserved. This run is recorded as partial, not complete."
+            )
+        }
+        return appLocalized(
+            "The original audio and completed artifacts were preserved. You can inspect the run or try again."
+        )
+    }
+
     private var headerSymbol: String {
+        if let diagnosis, diagnosis.completion == .partial {
+            return "exclamationmark.triangle.fill"
+        }
         if model.isMOSSLimitExhausted(record) {
             return "exclamationmark.triangle.fill"
         }
@@ -240,18 +348,45 @@ struct RunProgressView: View {
         }
     }
 
+    /// The token set, not the system semantic colours. Rendered in the light
+    /// appearance the system orange measured **2.31:1** on the *Partial
+    /// Transcript* title — below even the 3:1 floor that applies to text this
+    /// large — and the system red 3.57:1. The open and error tokens are
+    /// chosen against the same grounds every other surface is.
     private var headerColor: Color {
+        if let diagnosis, diagnosis.completion == .partial {
+            return AppTheme.Palette.open
+        }
         if model.isMOSSLimitExhausted(record) {
-            return .orange
+            return AppTheme.Palette.open
         }
         return switch record.state {
-        case .failed: .red
-        case .cancelled, .interrupted, .recorded: .secondary
-        default: .primary
+        case .failed: AppTheme.Palette.error
+        case .cancelled, .interrupted, .recorded: AppTheme.Palette.inkSecondary
+        default: AppTheme.Palette.ink
+        }
+    }
+
+    /// The note under the stage that stopped. Only the failing stage carries
+    /// one, so the checklist stays a checklist.
+    private func stageNote(_ stage: PipelineStage) -> LocalizedStringResource? {
+        guard let diagnosis, stage == diagnosis.failedStage else { return nil }
+        return switch diagnosis.status(of: stage) {
+        case .failed: appLocalized("This stage stopped the run.")
+        case .incomplete: appLocalized("This stage covered only part of the recording.")
+        case .finished, .notReached: nil
         }
     }
 
     private func stageSymbol(_ stage: PipelineStage) -> String {
+        if let diagnosis {
+            return switch diagnosis.status(of: stage) {
+            case .finished: "checkmark.circle.fill"
+            case .incomplete: "exclamationmark.circle.fill"
+            case .failed: "xmark.circle.fill"
+            case .notReached: "circle"
+            }
+        }
         guard let current = recordProgress?.stage else { return "circle" }
         if current == .failed { return "xmark.circle.fill" }
         if current == .cancelled { return "stop.circle.fill" }
@@ -263,20 +398,166 @@ struct RunProgressView: View {
         return "circle"
     }
 
+    /// One colour per state, from the token set. A finished stage takes no
+    /// colour of its own: the check glyph is what says it finished, and the
+    /// token set has no green because a green check is not a state a reader
+    /// has to act on. What stays coloured is the stage that stopped the run
+    /// and the stage that covered only part of it.
     private func stageColor(_ stage: PipelineStage) -> Color {
-        let symbol = stageSymbol(stage)
-        if symbol == "xmark.circle.fill" { return .red }
-        if symbol == "checkmark.circle.fill" { return .green }
-        return symbol == "circle" ? .secondary : .accentColor
+        switch stageSymbol(stage) {
+        case "xmark.circle.fill": AppTheme.Palette.error
+        case "exclamationmark.circle.fill": AppTheme.Palette.open
+        case "checkmark.circle.fill": AppTheme.Palette.inkSecondary
+        case "circle": AppTheme.Palette.inkSecondary
+        default: AppTheme.Palette.accent
+        }
     }
 }
 
-private struct MOSSConstraintFailureNotice: View {
-    let detail: String?
+extension RunFailureCause {
+    /// One sentence per cause. Two failures the manifest told apart must not
+    /// arrive on the screen as the same words.
+    func sentence(locale: Locale? = nil) -> LocalizedStringResource {
+        switch self {
+        case .repetitionLooping:
+            appLocalized(
+                "Speech recognition stopped producing new words and repeated itself to the end of its output budget, so that stretch of audio produced no usable text.",
+                locale: locale
+            )
+        case .asrLimitExhausted:
+            appLocalized(
+                "Speech recognition reached the output limit for this audio before it finished, and splitting the audio into smaller pieces did not bring it back under the limit.",
+                locale: locale
+            )
+        case .mossLimitExhausted:
+            appLocalized(
+                "Speech recognition reached the MOSS output limit even after the failed range had been split into smaller pieces.",
+                locale: locale
+            )
+        case .asrTimedOut:
+            appLocalized(
+                "Speech recognition ran past the time budget for this audio and was stopped.",
+                locale: locale
+            )
+        case .asrOutputUnusable:
+            appLocalized(
+                "Speech recognition returned output Maccheroni could not verify, so nothing was promoted into the transcript.",
+                locale: locale
+            )
+        case .modelIdentityMismatch:
+            appLocalized(
+                "The speech model that answered is not the exact model this profile pins, so its output was refused.",
+                locale: locale
+            )
+        case .diarizationRejectedTimeline:
+            appLocalized(
+                "Speaker separation returned a speaker timeline Maccheroni cannot trust, so the run stopped before transcription.",
+                locale: locale
+            )
+        case .audioNotPreparable:
+            appLocalized(
+                "Maccheroni could not prepare this audio for transcription.",
+                locale: locale
+            )
+        case .mergeRejected:
+            appLocalized(
+                "Maccheroni could not join the transcript with the speaker timeline.",
+                locale: locale
+            )
+        case .postprocessFailed:
+            appLocalized(
+                "Post-processing did not finish. The speaker-labelled transcript is unaffected.",
+                locale: locale
+            )
+        case .glossaryRejected:
+            appLocalized(
+                "The glossary for this profile could not be used for this run.",
+                locale: locale
+            )
+        case .profileRejected:
+            appLocalized(
+                "This profile could not run with the settings it was given.",
+                locale: locale
+            )
+        case .missingDependency:
+            appLocalized(
+                "A component this profile needs is not installed on this Mac, so the run never got started.",
+                locale: locale
+            )
+        case .missingFile:
+            appLocalized(
+                "A file this run needs is no longer where Maccheroni left it.",
+                locale: locale
+            )
+        case .integrityMismatch:
+            appLocalized(
+                "A file this run depends on no longer matches the fingerprint recorded for it, so Maccheroni stopped rather than trust it.",
+                locale: locale
+            )
+        case .unreadableRunRecord:
+            appLocalized(
+                "The run record for this transcription cannot be read, so Maccheroni cannot say what happened.",
+                locale: locale
+            )
+        case .canceled:
+            appLocalized(
+                "The run was cancelled before it finished.",
+                locale: locale
+            )
+        case .unspecified:
+            appLocalized(
+                "Maccheroni stopped this run and its record does not name a more specific cause.",
+                locale: locale
+            )
+        }
+    }
 
+    /// The same sentence as a `String`, for callers that need one.
+    func sentenceText(locale: Locale? = nil) -> String {
+        String(localized: sentence(locale: locale))
+    }
+}
+
+extension RunCoverageSummary {
+    /// How much audio the run transcribed, stated from `processed_duration_s`
+    /// against `input_duration_s`. The chunk counts are never used: a chunk
+    /// whose leaf promoted only a prefix is still recorded `succeeded`.
+    var transcribedLabel: LocalizedStringResource {
+        let covered = runDurationLabel(processedDurationS)
+        let total = runDurationLabel(inputDurationS)
+        let share = coveredFraction.formatted(.percent.precision(.fractionLength(0)))
+        return appLocalized("\(covered) of \(total) (\(share))")
+    }
+
+    /// The source ranges that produced no transcript, from
+    /// `primary/partial-coverage.json`. Their terminal reasons are read but
+    /// never shown: the reason is already stated in user language above.
+    func missingRangeLabel(limit: Int = 3) -> String? {
+        guard !missingRanges.isEmpty else { return nil }
+        let shown = missingRanges.prefix(limit).map {
+            "\(runDurationLabel($0.startS))\u{2013}\(runDurationLabel($0.endS))"
+        }
+        let list = shown.joined(separator: ", ")
+        return missingRanges.count > limit ? "\(list), \u{2026}" : list
+    }
+}
+
+/// Clock-style label for a duration in seconds. Digits only, so it carries no
+/// wording to translate.
+func runDurationLabel(_ seconds: Double) -> String {
+    let clamped = max(0, seconds)
+    return Duration.seconds(clamped).formatted(
+        .time(pattern: clamped >= 3600 ? .hourMinuteSecond : .minuteSecond)
+    )
+}
+
+/// Why an identical retry is withheld after the MOSS recovery tree is spent.
+/// It explains a disabled control; the reason for the failure itself is in the
+/// header.
+private struct MOSSConstraintRetryNotice: View {
     var body: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.medium) {
                 Text(appLocalized(
                     "An identical retry is disabled because it would use the same model, glossary, and chunk policy."
                 ))
@@ -284,18 +565,8 @@ private struct MOSSConstraintFailureNotice: View {
                 Text(appLocalized(
                     "Inspect the preserved run. For a new attempt, choose a different profile or transcribe a shorter copy. The original recording stays unchanged."
                 ))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-                if let detail, !detail.isEmpty {
-                    Divider()
-                    Text(appLocalized("Failure Details"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(detail)
-                        .font(.caption.monospaced())
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
@@ -303,6 +574,24 @@ private struct MOSSConstraintFailureNotice: View {
                 appLocalized("Same-settings retry unavailable"),
                 systemImage: "arrow.clockwise.circle"
             )
+        }
+    }
+}
+
+/// The engine's own words, after the run directory, run ID, and any hex
+/// fingerprint have been stripped out.
+private struct RunFailureDetailBox: View {
+    let detail: String
+
+    var body: some View {
+        GroupBox {
+            Text(verbatim: detail)
+                .font(AppTheme.Typography.meta.monospaced())
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label(appLocalized("Failure Details"), systemImage: "text.magnifyingglass")
         }
     }
 }

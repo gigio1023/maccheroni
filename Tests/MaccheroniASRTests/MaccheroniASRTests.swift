@@ -223,7 +223,10 @@ import Testing
         )
     }
 
-    private func fakeVibeVoiceLimitRuntime() throws -> (ASRRuntime, URL) {
+    private func fakeVibeVoiceLimitRuntime(
+        stopReason: String = "maximumTokens",
+        partialPrefixJSON: String? = nil
+    ) throws -> (ASRRuntime, URL) {
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "maccheroni-asr-fake-vibe-limit-\(UUID().uuidString)",
@@ -267,9 +270,25 @@ import Testing
           "metrics":{"preprocessing_s":None,"audio_encoder_s":None,"decoder_prefill_s":None,"token_decode_s":None,"total_s":0.1,"model_load_s":None,"audio_duration_s":duration,"prompt_tokens":4,"generated_tokens":args.max_tokens,"requested_max_tokens":args.max_tokens,"max_tokens":args.max_tokens,"context_hard_cap_tokens":None,"peak_rss_bytes":None},
           "metrics_unavailable":unavailable
         }
+        document["stop_reason"] = STOP_REASON
+        if PARTIAL_PREFIX is not None:
+            document["partial_prefix"] = json.loads(base64.b64decode(PARTIAL_PREFIX))
         with output.open("x", encoding="utf-8") as stream: json.dump(document, stream)
         """#
-        try Data(source.utf8).write(to: runner, options: .withoutOverwriting)
+        // The prefix fixture travels as base64 so no escaping convention has
+        // to agree between the Swift literal and the generated Python.
+        let encodedPrefix = partialPrefixJSON
+            .map { "\"\(Data($0.utf8).base64EncodedString())\"" } ?? "None"
+        let prelude = """
+        import base64
+        STOP_REASON = "\(stopReason)"
+        PARTIAL_PREFIX = \(encodedPrefix)
+
+        """
+        try Data((prelude + source).utf8).write(
+            to: runner,
+            options: .withoutOverwriting
+        )
         return (
             ASRRuntime(
                 pythonExecutable: systemPython,
@@ -507,6 +526,193 @@ import Testing
         #expect(limit.helperFingerprint == nil)
         await #expect(throws: ASRAdapterError.inferenceLimit(.maximumTokens)) {
             _ = try await adapter.transcribeDetailed(request)
+        }
+    }
+
+    /// D52: a sealed attempt artifact written before the 2026-09-02
+    /// terminology rename still carries `repetitionDegeneration`. The typed
+    /// reader accepts it at the same case as the current value, and never
+    /// writes it back.
+    @Test func legacyRepetitionStopReasonStillDecodes() throws {
+        let decoder = JSONDecoder()
+        #expect(
+            try decoder.decode(
+                ASRAttemptStopReason.self,
+                from: Data("\"repetitionDegeneration\"".utf8)
+            ) == .repetitionLooping
+        )
+        #expect(
+            try decoder.decode(
+                ASRAttemptStopReason.self,
+                from: Data("\"repetitionLooping\"".utf8)
+            ) == .repetitionLooping
+        )
+        // The encoder keeps writing only the current value.
+        let encoded = try JSONEncoder().encode(ASRAttemptStopReason.repetitionLooping)
+        #expect(String(decoding: encoded, as: UTF8.self) == "\"repetitionLooping\"")
+        #expect(throws: (any Error).self) {
+            _ = try decoder.decode(
+                ASRAttemptStopReason.self,
+                from: Data("\"repetitionSomethingElse\"".utf8)
+            )
+        }
+    }
+
+    private func vibeVoicePrefixJSON(
+        promoted: Int = 2,
+        coverageS: Double = 2.5,
+        terminalCollapse: Bool = true,
+        tailRepetitionRun: Int? = nil,
+        segments: String = """
+        [{"start_s":0.0,"end_s":1.2,"text":"clean opening","speaker":"0"},\
+        {"start_s":1.2,"end_s":2.5,"text":"second clean passage","speaker":"0","degenerate":true}]
+        """
+    ) -> String {
+        let tailRun = tailRepetitionRun ?? (terminalCollapse ? 900 : 1)
+        return """
+        {"complete_object_count":4,"validated_object_count":4,\
+        "promoted_object_count":\(promoted),"degenerate_object_count":1,\
+        "coverage_s":\(coverageS),"repetition_run_threshold":12,\
+        "repetition_run_maximum":40,"tail_repetition_run":\
+        \(tailRun),"terminal_collapse":\(terminalCollapse),\
+        "raw_text":"[{}]","segments":\(segments)}
+        """
+    }
+
+    @Test func vibeVoiceCollapseIsTypedApartAndCarriesTheRecoveredPrefix() async throws {
+        let (runtime, scratch) = try fakeVibeVoiceLimitRuntime(
+            stopReason: "repetitionLooping",
+            partialPrefixJSON: vibeVoicePrefixJSON()
+        )
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
+        let adapter = PinnedASRAdapter(.vibeVoice, runtime: runtime)
+        let request = ASRRequest(
+            audioURL: audio,
+            startS: 0,
+            endS: 4.08,
+            language: .fixed("ko")
+        )
+
+        let outcome = try await adapter.transcribeAttempt(
+            request,
+            maximumTokens: 7
+        )
+        guard case let .limit(limit) = outcome else {
+            Issue.record("expected a typed VibeVoice looping limit")
+            return
+        }
+        #expect(limit.stopReason == .repetitionLooping)
+        #expect(limit.stopReason.isLimitOutcome)
+        let prefix = try #require(limit.partialPrefix)
+        #expect(prefix.terminalCollapse)
+        #expect(prefix.promotedObjectCount == 2)
+        #expect(prefix.completeObjectCount == 4)
+        #expect(abs(prefix.coverageS - 2.5) < 0.000_1)
+        #expect(prefix.segments.count == 2)
+        #expect(prefix.segments.allSatisfy { $0.speaker == "UNASSIGNED" })
+        #expect(prefix.segments[0].flags == ["backend_speaker_evidence"])
+        #expect(prefix.segments[1].flags == [
+            "backend_speaker_evidence", "repetition_looping",
+        ])
+        await #expect(throws: ASRAdapterError.inferenceLimit(.repetitionLooping)) {
+            _ = try await adapter.transcribeDetailed(request)
+        }
+    }
+
+    /// The end-of-sequence collapse path: the transcript array is closed, so
+    /// the only text after the last decoded object is the array terminator and
+    /// the tail repetition run is zero. The document is still a
+    /// repetition-looping outcome, and the adapter must accept it rather than
+    /// convert a recoverable prefix into a generic leaf error.
+    @Test func vibeVoiceClosedArrayCollapseWithNoTailRunIsAccepted() async throws {
+        let (runtime, scratch) = try fakeVibeVoiceLimitRuntime(
+            stopReason: "repetitionLooping",
+            partialPrefixJSON: vibeVoicePrefixJSON(tailRepetitionRun: 0)
+        )
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
+        let adapter = PinnedASRAdapter(.vibeVoice, runtime: runtime)
+
+        let outcome = try await adapter.transcribeAttempt(
+            ASRRequest(
+                audioURL: audio,
+                startS: 0,
+                endS: 4.08,
+                language: .fixed("ko")
+            ),
+            maximumTokens: 7
+        )
+        guard case let .limit(limit) = outcome else {
+            Issue.record("expected a typed VibeVoice looping limit")
+            return
+        }
+        #expect(limit.stopReason == .repetitionLooping)
+        let prefix = try #require(limit.partialPrefix)
+        #expect(prefix.terminalCollapse)
+        #expect(prefix.tailRepetitionRun == 0)
+        #expect(prefix.promotedObjectCount == 2)
+    }
+
+    @Test func vibeVoiceLoopingWithoutRecoveryEvidenceIsRejected() async throws {
+        let (runtime, scratch) = try fakeVibeVoiceLimitRuntime(
+            stopReason: "repetitionLooping"
+        )
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
+        let adapter = PinnedASRAdapter(.vibeVoice, runtime: runtime)
+
+        await #expect(throws: ASRAdapterError.malformedOutput(
+            "ASR repetition-looping outcome carries no recovery evidence"
+        )) {
+            _ = try await adapter.transcribeAttempt(
+                ASRRequest(
+                    audioURL: audio,
+                    startS: 0,
+                    endS: 4.08,
+                    language: .fixed("ko")
+                ),
+                maximumTokens: 7
+            )
+        }
+    }
+
+    @Test func vibeVoicePrefixMustAgreeWithItsOwnSegments() async throws {
+        let inconsistent = [
+            "coverage": vibeVoicePrefixJSON(coverageS: 3.9),
+            "count": vibeVoicePrefixJSON(promoted: 1),
+            "collapse": vibeVoicePrefixJSON(terminalCollapse: false),
+            "range": vibeVoicePrefixJSON(
+                coverageS: 9.5,
+                segments: """
+                [{"start_s":0.0,"end_s":1.2,"text":"clean","speaker":"0"},\
+                {"start_s":1.2,"end_s":9.5,"text":"beyond the chunk","speaker":"0"}]
+                """
+            ),
+        ]
+        for (name, prefixJSON) in inconsistent {
+            let (runtime, scratch) = try fakeVibeVoiceLimitRuntime(
+                stopReason: "repetitionLooping",
+                partialPrefixJSON: prefixJSON
+            )
+            defer { try? FileManager.default.removeItem(at: scratch) }
+            let audio = try syntheticAudio(in: scratch)
+            let adapter = PinnedASRAdapter(.vibeVoice, runtime: runtime)
+            var thrown: Error?
+            do {
+                _ = try await adapter.transcribeAttempt(
+                    ASRRequest(
+                        audioURL: audio,
+                        startS: 0,
+                        endS: 4.08,
+                        language: .fixed("ko")
+                    ),
+                    maximumTokens: 7
+                )
+            } catch {
+                thrown = error
+            }
+            #expect(thrown is ASRAdapterError, "case \(name) was accepted")
         }
     }
 

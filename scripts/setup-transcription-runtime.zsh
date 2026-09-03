@@ -4,6 +4,7 @@ set -euo pipefail
 umask 077
 
 repo_root=${0:A:h:h}
+script_path=${0:A}
 python_project="$repo_root/Sources/MaccheroniASR/Python"
 cache_root="${MACCHERONI_BENCHMARK_CACHE:-$HOME/Library/Caches/Maccheroni/benchmarks}"
 cache_root=$(/usr/bin/python3 - "$cache_root" <<'PY'
@@ -88,6 +89,25 @@ while (( $# > 0 )); do
 done
 [[ $profile == ko-meeting ]] || usage
 
+# The remedy printed by a stale-environment refusal has to reproduce this
+# invocation: the cache root the caller selected and every flag it was given.
+# The remedy is meant to be pasted into a shell, so every interpolated value is
+# single-quoted with ${(qq)}. A valid path holding a space, a dollar sign, a
+# quote, a backtick, or a newline then reaches the rerun unchanged instead of
+# being reinterpreted.
+provision_command="zsh ${(qq)script_path} --profile ${(qq)profile}"
+if [[ $json == true ]]; then
+    provision_command+=' --json'
+fi
+if [[ -n ${MACCHERONI_BENCHMARK_CACHE:-} ]]; then
+    provision_command="MACCHERONI_BENCHMARK_CACHE=${(qq)cache_root} $provision_command"
+fi
+
+# Progress goes to stderr so that --json keeps stdout to the doctor payload.
+announce() {
+    print -u2 -- "setup: $*"
+}
+
 for tool in uv shasum swift; do
     command -v "$tool" >/dev/null || {
         print -u2 -- "error: $tool is required"
@@ -170,7 +190,9 @@ validate_external_writer_tree() {
     local directory=$1
     local policy=$2
     local trusted_python=${3:-}
-    /usr/bin/python3 - "$directory" "$policy" "$trusted_python" <<'PY' || return 65
+    /usr/bin/python3 - "$directory" "$policy" "$trusted_python" \
+        "$provision_command" <<'PY' || return 65
+import datetime
 import os
 import pathlib
 import stat
@@ -179,8 +201,49 @@ import sys
 root = pathlib.Path(sys.argv[1]).resolve(strict=True)
 policy = sys.argv[2]
 trusted_python_string = sys.argv[3]
+provision_command = sys.argv[4]
 if policy not in {"venv", "scratch"}:
     raise SystemExit(f"unknown external-writer tree policy: {policy}")
+
+
+def shell_quote(value):
+    """Single-quote a value so a shell reading the pasted remedy takes it whole.
+
+    The remedy is copied into a shell, so a path holding a space, a dollar
+    sign, a quote, a backtick, or a newline has to survive that trip literally.
+    """
+    return "'" + str(value).replace("'", "'\\''") + "'"
+
+
+def stale_environment_report(relative, resolved, target_exists):
+    """Report a venv an earlier provisioning run left pointing at its own Python.
+
+    This is residue, not tampering, so it gets its own wording and a remedy
+    that moves the directory aside. The script never removes it.
+    """
+    today = datetime.date.today().strftime("%Y%m%d")
+    aside = root.with_name(f"{root.name}.stale-{today}")
+    attempt = 2
+    while aside.exists() or aside.is_symlink():
+        aside = root.with_name(f"{root.name}.stale-{today}-{attempt}")
+        attempt += 1
+    target = resolved if target_exists else f"{resolved} (no longer present)"
+    return "\n".join(
+        [
+            f"stale provisioning environment: {root}",
+            f"  cause: its interpreter link {relative} points outside the cache tree, at",
+            f"    {target}",
+            "  a provisioning run that used a different Python leaves this behind. the",
+            "  environment cannot be vouched for, so provisioning stops here rather",
+            "  than reusing or repairing it.",
+            "  remedy: move it aside and provision again. nothing is deleted, and the",
+            "  moved copy stays readable if you want to inspect it.",
+            f"    mv {shell_quote(root)} {shell_quote(aside)}",
+            f"    {provision_command}",
+        ]
+    )
+
+
 trusted_python = None
 if trusted_python_string:
     try:
@@ -218,6 +281,12 @@ for current, directories, files in os.walk(root, topdown=True, followlinks=False
                     and stat.S_ISREG(target_metadata.st_mode)
                     and os.access(resolved, os.X_OK)
                 ):
+                    if interpreter_link:
+                        raise SystemExit(
+                            stale_environment_report(
+                                relative, resolved, target_metadata is not None
+                            )
+                        )
                     raise SystemExit(
                         f"refusing external writer symlink outside cache tree: {entry}"
                     )
@@ -469,13 +538,20 @@ if [[ -e "$runtime_tool_root" ]]; then
         print -u2 -- "error: refusing unsafe offline speech runtime path: $runtime_tool_root"
         exit 65
     }
+    announce 'offline speech runtime is already installed in this cache; verifying it instead of rebuilding'
     verify_installed_runtime "$runtime_binary" "$runtime_sidecar"
 else
+    announce 'offline speech runtime is not installed in this cache'
+    announce 'it is compiled from source, not downloaded: swift build walks the whole pinned speech dependency tree'
+    announce 'on a first provisioning this step takes tens of minutes and prints hundreds of compile lines; that is progress, not a hang'
+    announce 'build stage 1 of 4: validating the build scratch tree'
     validate_external_writer_tree "$runtime_scratch" scratch
+    announce 'build stage 2 of 4: compiling maccheroni-offline-speech-runtime in release configuration (swift build output follows)'
     swift build --package-path "$runtime_source" \
         --scratch-path "$runtime_scratch" --disable-automatic-resolution \
         --disable-dependency-cache -c release \
         --product maccheroni-offline-speech-runtime 1>&2
+    announce 'build stage 3 of 4: checking the built executable against the pinned sources'
     runtime_build_bin=$(swift build --package-path "$runtime_source" \
         --scratch-path "$runtime_scratch" --disable-automatic-resolution \
         --disable-dependency-cache -c release --show-bin-path)
@@ -493,6 +569,7 @@ else
         exit 70
     }
 
+    announce 'build stage 4 of 4: installing the runtime and recording its provenance'
     temporary_install=$(mktemp -d "$cache_root/tools/.offline-speech-runtime.XXXXXX")
     temporary_bin="$temporary_install/bin"
     temporary_runtime="$temporary_bin/maccheroni-offline-speech-runtime"
@@ -544,6 +621,7 @@ if rename_exclusive(source, destination, 0x00000004) != 0:
 PY
     temporary_install=''
     verify_installed_runtime "$runtime_binary" "$runtime_sidecar"
+    announce 'offline speech runtime build finished'
 fi
 
 "$hf_tool" download "$vibe_id" --revision "$vibe_revision" --cache-dir "$hf_cache" --quiet >/dev/null

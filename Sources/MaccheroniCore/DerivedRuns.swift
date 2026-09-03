@@ -32,13 +32,107 @@ public struct DerivedSourceLineage: Codable, Equatable, Sendable {
     }
 }
 
+/// How much of the source run's input its transcript actually covers.
+///
+/// A derived run over an incomplete transcript must record which range is
+/// missing. A bare "incomplete" flag is not enough for that: a reader
+/// deciding whether to trust a speaker proposal needs to know it was made over
+/// 1212.52 s of 1243.08 s with 30.56 s missing, and which range went missing.
+/// So the durations and the source run's own coverage message travel with the
+/// flag, in the derived manifest and again in the derived artifact.
+public struct DerivedSourceCoverage: Codable, Equatable, Sendable {
+    public var complete: Bool
+    public var inputDurationS: Double
+    public var processedDurationS: Double
+    /// `inputDurationS - processedDurationS`, never negative.
+    public var missingDurationS: Double
+    /// The source run's coverage message, which names the lost ranges when
+    /// there are any.
+    public var message: String?
+
+    public init(
+        complete: Bool,
+        inputDurationS: Double,
+        processedDurationS: Double,
+        message: String?
+    ) {
+        self.complete = complete
+        self.inputDurationS = inputDurationS
+        self.processedDurationS = processedDurationS
+        missingDurationS = max(0, inputDurationS - processedDurationS)
+        self.message = message
+    }
+
+    public init(coverage: Coverage, complete: Bool) {
+        self.init(
+            complete: complete,
+            inputDurationS: coverage.inputDurationS,
+            processedDurationS: coverage.processedDurationS,
+            message: coverage.message
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case complete, message
+        case inputDurationS = "input_duration_s"
+        case processedDurationS = "processed_duration_s"
+        case missingDurationS = "missing_duration_s"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        complete = try container.decode(Bool.self, forKey: .complete)
+        inputDurationS = try container.decode(Double.self, forKey: .inputDurationS)
+        processedDurationS = try container.decode(
+            Double.self,
+            forKey: .processedDurationS
+        )
+        // Recomputed rather than trusted, so the difference and the durations
+        // can never disagree in a file someone edited.
+        missingDurationS = max(0, inputDurationS - processedDurationS)
+        message = try container.decodeIfPresent(String.self, forKey: .message)
+    }
+}
+
+/// What family of derived run this is.
+///
+/// `mode` says which *text* operation ran, and every derived run that existed
+/// before 2026-09-02 was one of those two. A speaker proposal is not a text
+/// operation at all, so it needs its own discriminator rather than a third
+/// `PostprocessMode`: `ManifestPostprocess.mode` is non-optional, so every
+/// derived manifest carries a `mode` whether or not text was touched. Read
+/// `kind` to decide what a derived run produced; read `mode` only after `kind`
+/// says a text operation ran.
+public enum DerivedOperationKind: String, Codable, Equatable, Sendable {
+    /// Correction or translation of the source transcript's text. `mode` is
+    /// meaningful.
+    case textPostprocess = "text-postprocess"
+    /// A marked, non-acoustic speaker proposal over segments the source run
+    /// left unattributed. `mode` carries no meaning here.
+    case speakerProposal = "speaker-proposal"
+}
+
 public struct DerivedOperation: Codable, Equatable, Sendable {
     public var profileName: String
+    /// Which text operation ran. Meaningful only when `kind` is
+    /// `.textPostprocess`; see `DerivedOperationKind`.
     public var mode: PostprocessMode
     public var targetLanguage: String?
     public var glossarySemantics: DerivedGlossarySemantics
     public var glossarySHA256: String?
     public var glossaryItemCount: Int
+    /// Absent in manifests written before 2026-09-02, which were all text
+    /// operations, so a missing value decodes as `.textPostprocess`.
+    public var kind: DerivedOperationKind
+    /// How much of the source run's input its transcript covers. Absent only in
+    /// manifests written before 2026-09-02, every one of which came from a
+    /// completed run.
+    public var sourceCoverage: DerivedSourceCoverage?
+    /// Whether the source run's ASR coverage was complete. A projection of
+    /// `sourceCoverage`, so the flag and the durations can never disagree.
+    public var sourceCoverageComplete: Bool {
+        sourceCoverage?.complete ?? true
+    }
 
     public init(
         profileName: String,
@@ -46,7 +140,9 @@ public struct DerivedOperation: Codable, Equatable, Sendable {
         targetLanguage: String? = nil,
         glossarySemantics: DerivedGlossarySemantics,
         glossarySHA256: String? = nil,
-        glossaryItemCount: Int
+        glossaryItemCount: Int,
+        kind: DerivedOperationKind = .textPostprocess,
+        sourceCoverage: DerivedSourceCoverage? = nil
     ) {
         self.profileName = profileName
         self.mode = mode
@@ -54,15 +150,68 @@ public struct DerivedOperation: Codable, Equatable, Sendable {
         self.glossarySemantics = glossarySemantics
         self.glossarySHA256 = glossarySHA256
         self.glossaryItemCount = glossaryItemCount
+        self.kind = kind
+        self.sourceCoverage = sourceCoverage
     }
 
     enum CodingKeys: String, CodingKey {
-        case mode
+        case mode, kind
         case profileName = "profile_name"
         case targetLanguage = "target_language"
         case glossarySemantics = "glossary_semantics"
         case glossarySHA256 = "glossary_sha256"
         case glossaryItemCount = "glossary_item_count"
+        case sourceCoverage = "source_coverage"
+        case sourceCoverageComplete = "source_coverage_complete"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        profileName = try container.decode(String.self, forKey: .profileName)
+        mode = try container.decode(PostprocessMode.self, forKey: .mode)
+        targetLanguage = try container.decodeIfPresent(
+            String.self,
+            forKey: .targetLanguage
+        )
+        glossarySemantics = try container.decode(
+            DerivedGlossarySemantics.self,
+            forKey: .glossarySemantics
+        )
+        glossarySHA256 = try container.decodeIfPresent(
+            String.self,
+            forKey: .glossarySHA256
+        )
+        glossaryItemCount = try container.decode(
+            Int.self,
+            forKey: .glossaryItemCount
+        )
+        kind = try container.decodeIfPresent(
+            DerivedOperationKind.self,
+            forKey: .kind
+        ) ?? .textPostprocess
+        sourceCoverage = try container.decodeIfPresent(
+            DerivedSourceCoverage.self,
+            forKey: .sourceCoverage
+        )
+        // The flat flag is written so a reader skimming the manifest cannot
+        // miss an incomplete source, which only works if the two claims are
+        // the same claim. A manifest whose flat flag disagrees with its nested
+        // coverage object states two different things about how much audio the
+        // proposal covers, so it is refused rather than silently resolved in
+        // favour of one of them.
+        if let flat = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .sourceCoverageComplete
+        ), flat != (sourceCoverage?.complete ?? true) {
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: container.codingPath + [CodingKeys.sourceCoverageComplete],
+                debugDescription: """
+                source_coverage_complete (\(flat)) disagrees with \
+                source_coverage.complete (\(sourceCoverage.map(\.complete)
+                    .map(String.init) ?? "absent"))
+                """
+            ))
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -73,6 +222,84 @@ public struct DerivedOperation: Codable, Equatable, Sendable {
         try container.encode(glossarySemantics, forKey: .glossarySemantics)
         try container.encode(glossarySHA256, forKey: .glossarySHA256)
         try container.encode(glossaryItemCount, forKey: .glossaryItemCount)
+        try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(sourceCoverage, forKey: .sourceCoverage)
+        // Written even when `source_coverage` is, and read back through it, so
+        // a reader skimming the manifest cannot miss an incomplete source.
+        try container.encode(sourceCoverageComplete, forKey: .sourceCoverageComplete)
+    }
+}
+
+/// One global speaker that overlapped an unattributed segment, with how much of
+/// the segment it held.
+///
+/// This mirrors `MaccheroniMerge.SpeakerCandidate` field for field, including
+/// its JSON keys, because it carries exactly those numbers onwards. It is
+/// declared here rather than imported because `MaccheroniPostprocess` does not
+/// depend on `MaccheroniMerge`, and because a derived artifact should not make
+/// its reader link the merger to decode it.
+public struct SpeakerCandidateEvidence: Codable, Equatable, Sendable {
+    public var speaker: String
+    /// Union of that speaker's turns clipped to the segment, in seconds.
+    public var overlapS: Double
+    /// That speaker's fraction of the segment's total clipped overlap time.
+    /// Shares over all candidates sum to 1.
+    public var share: Double
+
+    public init(speaker: String, overlapS: Double, share: Double) {
+        self.speaker = speaker
+        self.overlapS = overlapS
+        self.share = share
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case speaker, share
+        case overlapS = "overlap_s"
+    }
+}
+
+/// What the acoustics said about one segment: which speakers were candidates,
+/// for how long each, how much of the interval the timeline covered, and why
+/// no speaker was named. This is the disclosure P1 added to
+/// `merged/conflicts.json`, restated as the input a non-acoustic proposer reads
+/// and as the evidence that travels beside every proposal it makes.
+public struct SegmentSpeakerEvidence: Codable, Equatable, Sendable {
+    public var segmentIndex: Int
+    /// One of `MaccheroniMerge.SpeakerAttributionOutcome`'s raw values, carried
+    /// as text so this contract does not fix the merger's enum.
+    public var outcome: String
+    /// Ordered by descending overlap, ties by ascending speaker ID. Empty only
+    /// when no diarization turn overlapped the segment at all.
+    public var candidates: [SpeakerCandidateEvidence]
+    /// Union of every clipped turn over the segment's duration, in `0...1`.
+    public var timelineCoverage: Double
+
+    public init(
+        segmentIndex: Int,
+        outcome: String,
+        candidates: [SpeakerCandidateEvidence],
+        timelineCoverage: Double
+    ) {
+        self.segmentIndex = segmentIndex
+        self.outcome = outcome
+        self.candidates = candidates
+        self.timelineCoverage = timelineCoverage
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case outcome, candidates
+        case segmentIndex = "segment_index"
+        case timelineCoverage = "timeline_coverage"
+    }
+}
+
+/// The speaker labels a merged transcript uses when it declines to name a
+/// speaker. A derived proposal may only cover segments carrying one of these.
+public enum UnattributedSpeaker {
+    public static let labels: [String] = ["UNASSIGNED", "UNKNOWN"]
+
+    public static func isUnattributed(_ speaker: String) -> Bool {
+        labels.contains(speaker)
     }
 }
 
@@ -135,19 +362,27 @@ public struct VerifiedRunSource: Sendable {
     public var document: SegmentsDocument
     public var lineage: DerivedSourceLineage
     public var verifiedArtifacts: [Artifact]
+    /// How much of the input this run's transcript covers. Always complete for
+    /// a source accepted by `verifyCompletedRun`; only `verifyMergedRun` can
+    /// return an incomplete one.
+    public var coverage: DerivedSourceCoverage
+
+    public var coverageIsComplete: Bool { coverage.complete }
 
     public init(
         runURL: URL,
         manifest: Manifest,
         document: SegmentsDocument,
         lineage: DerivedSourceLineage,
-        verifiedArtifacts: [Artifact]
+        verifiedArtifacts: [Artifact],
+        coverage: DerivedSourceCoverage
     ) {
         self.runURL = runURL
         self.manifest = manifest
         self.document = document
         self.lineage = lineage
         self.verifiedArtifacts = verifiedArtifacts
+        self.coverage = coverage
     }
 }
 
@@ -296,6 +531,12 @@ public enum RunIntegrityError: Error, Equatable, Sendable, LocalizedError {
     case mergedSegmentsInvalid
     case mergedSegmentsSourceMismatch
     case sourceChangedDuringOperation
+    /// The run reports `succeeded` while its coverage record shows the input
+    /// was truncated, cut short, or left with a gap between chunks.
+    case sourceCoverageContradictsStatus
+    /// The run reports `partial` without recording the failure that made it
+    /// partial, so nothing says what was lost or why.
+    case sourceFailureEvidenceMissing
 
     public var errorDescription: String? {
         switch self {
@@ -329,9 +570,19 @@ public enum RunIntegrityError: Error, Equatable, Sendable, LocalizedError {
             "The source run merged transcript does not match the manifest input."
         case .sourceChangedDuringOperation:
             "The source run changed while the derived operation was running."
+        case .sourceCoverageContradictsStatus:
+            "The source run reports success but its coverage record does not cover the input."
+        case .sourceFailureEvidenceMissing:
+            "The source run reports partial coverage without recording what failed."
         }
     }
 }
+
+/// Where a run names the audio it planned but could not transcribe. A
+/// `partial` source has to carry it before a derived set may be built over the
+/// transcript that survived; see D49.
+let partialCoverageArtifactPath = "primary/partial-coverage.json"
+let partialCoverageArtifactKind = "partial_coverage"
 
 public enum RunIntegrityVerifier {
     public static func verifyCompletedRun(at runURL: URL) throws -> VerifiedRunSource {
@@ -340,6 +591,44 @@ public enum RunIntegrityVerifier {
 
     static func verifyCompletedRun(
         at runURL: URL,
+        onArtifactVerified: ((Artifact, URL) throws -> Void)?
+    ) throws -> VerifiedRunSource {
+        try verify(
+            at: runURL,
+            requiringCompleteCoverage: true,
+            onArtifactVerified: onArtifactVerified
+        )
+    }
+
+    /// Verify a run that finished its merge, whether or not ASR covered the
+    /// whole input.
+    ///
+    /// Every integrity check `verifyCompletedRun` performs still runs: the
+    /// manifest is semantically valid, its run ID matches the directory, every
+    /// listed artifact exists and matches its hash, the directory holds nothing
+    /// the manifest does not list, the required artifact set is present, and
+    /// `merged/segments.json` decodes and agrees with the manifest's input. The
+    /// one gate this drops is coverage completeness, so a run that reported
+    /// `partial` with a named lost range is accepted and reported through
+    /// `VerifiedRunSource.coverageIsComplete`.
+    ///
+    /// Correction and translation keep the stricter gate: they rewrite or
+    /// mirror every segment, so a transcript with a hole in it would silently
+    /// produce a set that claims coverage it does not have. A speaker proposal
+    /// makes a per-segment claim about segments that exist, which a partial
+    /// transcript can still support as long as the reader is told it is
+    /// partial.
+    public static func verifyMergedRun(at runURL: URL) throws -> VerifiedRunSource {
+        try verify(
+            at: runURL,
+            requiringCompleteCoverage: false,
+            onArtifactVerified: nil
+        )
+    }
+
+    private static func verify(
+        at runURL: URL,
+        requiringCompleteCoverage: Bool,
         onArtifactVerified: ((Artifact, URL) throws -> Void)?
     ) throws -> VerifiedRunSource {
         let runURL = runURL.standardizedFileURL
@@ -365,13 +654,68 @@ public enum RunIntegrityVerifier {
                 actual: manifest.runID
             )
         }
-        guard manifest.status == .succeeded,
-              manifest.failure == nil,
-              !manifest.coverage.truncated,
-              successfulCoverageIsComplete(manifest),
-              successfulGlossaryIsValid(manifest.glossary)
-        else {
+        // Coverage completeness is a statement about the audio, not about how
+        // the run exited. A run whose ASR reached every second of the input
+        // and whose text post-processing then failed carries a whole
+        // transcript, and recording it as coverage-incomplete produced a
+        // derived manifest that claimed an incomplete source with zero seconds
+        // missing. So the flag is read out of the numbers that describe the
+        // audio: nothing was truncated, the processed duration reaches the
+        // input duration, and the chunk boundaries account for it.
+        let coverage = manifest.coverage
+        let coverageIsComplete = !coverage.truncated
+            && abs(coverage.processedDurationS - coverage.inputDurationS)
+                <= RunArtifactContract.timeToleranceS
+            && successfulCoverageIsComplete(manifest)
+        guard successfulGlossaryIsValid(manifest.glossary) else {
             throw RunIntegrityError.sourceRunNotComplete
+        }
+        if requiringCompleteCoverage {
+            guard manifest.status == .succeeded,
+                  manifest.failure == nil,
+                  coverageIsComplete
+            else {
+                throw RunIntegrityError.sourceRunNotComplete
+            }
+        } else {
+            // D49 drops the completeness gate for the speaker-proposal family
+            // and nothing else. What replaces it is not a weaker check but a
+            // different one: the source must prove the coverage it claims,
+            // because a proposal over a transcript with an unnamed hole in it
+            // is the same class of false claim the 2026-09-01 repairs removed.
+            switch manifest.status {
+            case .succeeded:
+                // A successful run states that it covered its input. A short
+                // or gapped coverage record contradicts that, and accepting it
+                // would seed a derived set that inherits the false claim.
+                guard manifest.failure == nil, coverageIsComplete else {
+                    throw RunIntegrityError.sourceCoverageContradictsStatus
+                }
+            case .partial:
+                // `partial` is a claim that something was lost, so the run has
+                // to say what and why.
+                guard manifest.failure != nil else {
+                    throw RunIntegrityError.sourceFailureEvidenceMissing
+                }
+                guard coverage.processedDurationS > 0 else {
+                    throw RunIntegrityError.sourceRunNotComplete
+                }
+                if !coverageIsComplete {
+                    guard manifest.artifacts.contains(where: {
+                        $0.kind == partialCoverageArtifactKind
+                            && $0.path == partialCoverageArtifactPath
+                    }) else {
+                        throw RunIntegrityError.requiredArtifactMissing(
+                            kind: partialCoverageArtifactKind,
+                            path: partialCoverageArtifactPath
+                        )
+                    }
+                }
+            case .failed, .canceled:
+                // A run that failed outright, or that a user canceled, never
+                // reached a merge worth deriving from.
+                throw RunIntegrityError.sourceRunNotComplete
+            }
         }
 
         try requireSuccessfulArtifactSet(manifest)
@@ -463,7 +807,11 @@ public enum RunIntegrityVerifier {
                 segmentsPath: mergedArtifact.path,
                 segmentsSHA256: mergedArtifact.sha256
             ),
-            verifiedArtifacts: manifest.artifacts
+            verifiedArtifacts: manifest.artifacts,
+            coverage: DerivedSourceCoverage(
+                coverage: manifest.coverage,
+                complete: coverageIsComplete
+            )
         )
     }
 

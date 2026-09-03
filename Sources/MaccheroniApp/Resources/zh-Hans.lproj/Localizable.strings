@@ -2,80 +2,122 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>Speaker-labelled</key>
-	<string>已标注说话人</string>
-	<key>Corrected</key>
-	<string>已校正</string>
-	<key>Translated</key>
-	<string>已翻译</string>
-	<key>Transcript layer: Speaker-labelled</key>
-	<string>转录层：已标注说话人</string>
-	<key>Transcript layer: Corrected</key>
-	<string>转录层：已校正</string>
-	<key>Transcript layer: Translated</key>
-	<string>转录层：已翻译</string>
-	<key>Copy Transcript</key>
-	<string>复制转录文本</string>
-	<key>Copy Selection</key>
-	<string>复制所选内容</string>
-	<key>The transcript could not be copied.</key>
-	<string>无法复制转录文本。</string>
-	<key>Select this segment for copying.</key>
-	<string>选择此片段以复制。</string>
-	<key>Remove this segment from the copy selection.</key>
-	<string>从复制所选内容中移除此片段。</string>
-	<key>Copied the speaker-labelled transcript.</key>
-	<string>已复制标注说话人的转录文本。</string>
-	<key>Copied the corrected transcript.</key>
-	<string>已复制校正后的转录文本。</string>
-	<key>Copied the translated transcript.</key>
-	<string>已复制翻译后的转录文本。</string>
-	<key>Copied the speaker-labelled selection.</key>
-	<string>已复制标注说话人层的所选内容。</string>
-	<key>Copied the corrected selection.</key>
-	<string>已复制校正层的所选内容。</string>
-	<key>Copied the translated selection.</key>
-	<string>已复制翻译层的所选内容。</string>
 	<key>%@ %@</key>
 	<string>%@ %@</string>
+	<key>%@ The system reported: %@</key>
+	<string>%@ 系统报告：%@</string>
+	<key>%@ could not be moved because its folder is not writable. Nothing was moved.</key>
+	<string>无法移动 %@，因为其所在文件夹不可写入。未移动任何内容。</string>
+	<key>%@ could not be moved to the Trash, and part of it is in the Trash now. Put it back in the Finder. The recording is still in your library.</key>
+	<string>无法将 %@ 移到垃圾箱，其中一部分现已在垃圾箱中。请在 Finder 中放回原处。录音仍在资料库中。</string>
+	<key>%@ could not be moved to the Trash. Its files are where they were, and the recording is still in your library.</key>
+	<string>无法将 %@ 移到垃圾箱。其文件仍在原处，录音也仍在资料库中。</string>
+	<key>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</key>
+	<string>%@ 已在废纸篓中，但资源库未能保存，因此该录音仍在列表中。请在“访达”中将其放回原处。</string>
+	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
+	<string>%@ 已不在资料库预期的位置，因此未移动任何内容。</string>
+	<key>%@ of %@ (%@)</key>
+	<string>%2$@ 中的 %1$@（%3$@）</string>
+	<key>%@ of speech</key>
+	<string>占语音 %@</string>
+	<key>%@ of this recording produced no transcript, so these proposals cover %@ of %@.</key>
+	<string>本录音中有 %@ 未产生转录，因此这些建议覆盖 %@ / %@。</string>
 	<key>%@, %@</key>
 	<string>%@, %@</string>
+	<key>%lld bytes</key>
+	<string>%lld 字节</string>
+	<key>%lld matching</key>
+	<string>%lld 个匹配</string>
+	<key>%lld of %lld to review</key>
+	<string>待复核 %lld / %lld</string>
 	<key>%lld percent</key>
 	<string>%lld 百分比</string>
+	<key>%lld proposed, %lld declined. Not acoustic evidence, and not measured.</key>
+	<string>建议 %lld 条，放弃 %lld 条。既非声学证据，也非测量结果。</string>
+	<key>%lld segments · %lld speakers · %lld without a speaker · %lld to review</key>
+	<string>%lld 个片段 · %lld 位说话人 · %lld 个无说话人 · %lld 个待复核</string>
 	<key>%lld segments, %lld speakers</key>
 	<string>%lld 个片段，%lld 个发言者</string>
+	<key>%lld to review</key>
+	<string>%lld 个待复核</string>
 	<key>%lld unresolved</key>
 	<string>%lld 未解决</string>
+	<key>%lld, %lld without a speaker</key>
+	<string>%lld 个，其中 %lld 个无说话人</string>
 	<key>%lld/%lld chunks</key>
 	<string>%lld/%lld 个块</string>
 	<key>+</key>
 	<string>+</string>
+	<key>A component this profile needs is not installed on this Mac, so the run never got started.</key>
+	<string>此配置文件所需的组件未安装在这台 Mac 上，因此运行未能启动。</string>
+	<key>A configured storage folder is no longer available. Choose the folder again in Settings.</key>
+	<string>已配置的存储文件夹不再可用。请在设置中重新选择该文件夹。</string>
+	<key>A derived result does not match its source run: %@</key>
+	<string>派生结果与其源运行不匹配：%@</string>
+	<key>A derived result manifest is invalid: %@</key>
+	<string>派生结果清单无效：%@</string>
+	<key>A file this run depends on no longer matches the fingerprint recorded for it, so Maccheroni stopped rather than trust it.</key>
+	<string>本次运行依赖的某个文件已与记录的指纹不符，因此 Maccheroni 选择停止而非信任它。</string>
+	<key>A file this run needs is no longer where Maccheroni left it.</key>
+	<string>本次运行需要的文件已不在 Maccheroni 留下它的位置。</string>
+	<key>A new setup selects Codex only when its CLI is signed in; otherwise it selects Local. Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio never leaves this Mac.</key>
+	<string>新设置仅在 Codex CLI 已登录时选择 Codex；否则选择 Local。Codex 接收受限的转录文本、当前配置文件的完整术语表及其哈希、后处理说明，以及翻译时的目标语言。音频绝不会离开这台 Mac。</string>
+	<key>A new setup selects Codex only when its CLI is signed in; otherwise it selects Local. Codex receives transcript text only. Audio never leaves this Mac.</key>
+	<string>新设置仅在 Codex CLI 已登录时选择 Codex；否则选择 Local。Codex 仅接收转录文本。音频绝不会离开这台 Mac。</string>
+	<key>A proposed speaker layer would come from a derived run. None has been produced.</key>
+	<string>建议说话人图层来自派生运行。目前尚未生成。</string>
 	<key>A recording is already in progress.</key>
 	<string>录音已经在进行中。</string>
 	<key>A run artifact failed its integrity check: %@</key>
 	<string>运行工件未通过完整性检查：%@</string>
 	<key>A run artifact is missing: %@</key>
 	<string>缺少运行工件：%@</string>
+	<key>ASR Model Cache</key>
+	<string>ASR 模型缓存</string>
+	<key>Acoustic candidates: %@</key>
+	<string>声学候选说话人：%@</string>
 	<key>Add</key>
 	<string>添加</string>
 	<key>Add a name, term, or place</key>
 	<string>添加名称、术语或地点</string>
+	<key>Alignment</key>
+	<string>对齐</string>
 	<key>Ambiguous Speaker</key>
 	<string>模棱两可的说话者</string>
 	<key>An identical retry is disabled because it would use the same model, glossary, and chunk policy.</key>
 	<string>由于会使用相同的模型、术语表和分块策略，已禁用完全相同的重试。</string>
+	<key>Another local component this profile needs is not ready.</key>
+	<string>此配置文件所需的另一个本地组件尚未就绪。</string>
 	<key>App Language</key>
 	<string>应用程序语言</string>
 	<key>Applied</key>
 	<string>应用</string>
+	<key>As a decoder vocabulary</key>
+	<string>作为解码器词表</string>
+	<key>As a hotword instruction</key>
+	<string>作为热词指令</string>
+	<key>Audio Enhancement</key>
+	<string>音频增强</string>
+	<key>Audio Preparation</key>
+	<string>音频预处理</string>
 	<key>Audio never leaves this Mac.</key>
 	<string>音频永远不会离开这台 Mac。</string>
+	<key>Audio stays on this Mac. Transcription runs locally; Codex receives transcript text only during post-processing.</key>
+	<string>音频保留在这台 Mac 上。转录在本地运行；Codex 仅在后处理期间接收转录文本。</string>
+	<key>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</key>
+	<string>音频保留在这台 Mac 上。转录在本地运行；后处理期间 Codex 接收受限的转录文本、当前配置文件的完整术语表及其哈希、后处理说明，以及翻译时的目标语言。</string>
 	<key>Automatic</key>
 	<string>自动的</string>
+	<key>Available</key>
+	<string>可用</string>
 	<key>Backchannels</key>
 	<string>附和语</string>
 	<key>Backend</key>
 	<string>后端</string>
+	<key>Batches Planned</key>
+	<string>计划批次</string>
+	<key>Bookmark Unavailable</key>
+	<string>书签不可用</string>
 	<key>Both recording channels were empty; the combined recording was retained but cannot be transcribed.</key>
 	<string>两个录音通道都是空的；合并的录音被保留，但无法转录。</string>
 	<key>Cancel</key>
@@ -94,18 +136,72 @@
 	<string>类别</string>
 	<key>Channels</key>
 	<string>渠道</string>
+	<key>Check Again</key>
+	<string>再次检查</string>
+	<key>Checking availability…</key>
+	<string>正在检查可用性…</string>
 	<key>Chinese, Simplified</key>
 	<string>简体中文</string>
 	<key>Choose Audio File…</key>
 	<string>选择音频文件...</string>
+	<key>Choose Folder…</key>
+	<string>选择文件夹…</string>
+	<key>Choose an M4A, WAV, or MP3 audio file.</key>
+	<string>请选择 M4A、WAV 或 MP3 音频文件。</string>
+	<key>Chooses the language the transcript is translated into.</key>
+	<string>选择转录文本要翻译成的语言。</string>
 	<key>Chunk %lld of %lld</key>
 	<string>第 %lld 个块（共 %lld 个）</string>
+	<key>Chunks</key>
+	<string>分块</string>
+	<key>Clear the search</key>
+	<string>清除搜索</string>
+	<key>Close</key>
+	<string>关闭</string>
 	<key>Codex</key>
 	<string>Codex</string>
+	<key>Codex CLI</key>
+	<string>Codex CLI</string>
+	<key>Codex CLI was not found. Install it and run codex login in Terminal, or select Local meanwhile.</key>
+	<string>未找到 Codex CLI。请安装它并在终端中运行 codex login，或暂时选择 Local。</string>
+	<key>Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile.</key>
+	<string>Codex 已安装但尚未登录。请在终端中运行 codex login，或暂时选择 Local。</string>
+	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
+	<string>Codex 已安装，但无法检查登录状态。请重试或暂时选择 Local。</string>
+	<key>Codex is signed in and ready.</key>
+	<string>Codex 已登录并可使用。</string>
 	<key>Codex post-processing sends transcript text only. The original audio and raw transcript stay unchanged.</key>
 	<string>Codex 后处理仅发送转录文本。原始音频和原始文字记录保持不变。</string>
+	<key>Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio and source artifacts stay on this Mac unchanged.</key>
+	<string>Codex 接收受限的转录文本、当前配置文件的完整术语表及其哈希、后处理说明，以及翻译时的目标语言。音频和源产物保持不变并留在这台 Mac 上。</string>
 	<key>Complete</key>
 	<string>完成</string>
+	<key>Completed</key>
+	<string>已完成</string>
+	<key>Copied the corrected selection.</key>
+	<string>已复制校正层的所选内容。</string>
+	<key>Copied the corrected transcript.</key>
+	<string>已复制校正后的转录文本。</string>
+	<key>Copied the proposed selection.</key>
+	<string>已复制建议的所选内容。</string>
+	<key>Copied the proposed transcript.</key>
+	<string>已复制建议的转录文本。</string>
+	<key>Copied the speaker-labelled selection.</key>
+	<string>已复制标注说话人层的所选内容。</string>
+	<key>Copied the speaker-labelled transcript.</key>
+	<string>已复制标注说话人的转录文本。</string>
+	<key>Copied the translated selection.</key>
+	<string>已复制翻译层的所选内容。</string>
+	<key>Copied the translated transcript.</key>
+	<string>已复制翻译后的转录文本。</string>
+	<key>Copy Selection</key>
+	<string>复制所选内容</string>
+	<key>Copy Transcript</key>
+	<string>复制转录文本</string>
+	<key>Correct</key>
+	<string>校正</string>
+	<key>Corrected</key>
+	<string>已校正</string>
 	<key>Could not access captured audio samples (status %lld).</key>
 	<string>无法访问捕获的音频样本（状态 %lld）。</string>
 	<key>Could not allocate canonical PCM buffer.</key>
@@ -124,20 +220,36 @@
 	<string>无法读取记录工件%@。</string>
 	<key>Coverage</key>
 	<string>覆盖范围</string>
+	<key>Current Derived Post-processing</key>
+	<string>当前派生后处理</string>
+	<key>Current Derived Result</key>
+	<string>当前派生结果</string>
 	<key>Current Model</key>
 	<string>当前模型</string>
 	<key>Default Post-processing</key>
 	<string>默认后处理</string>
+	<key>Derived Glossary SHA-256</key>
+	<string>派生术语表 SHA-256</string>
+	<key>Derived Result ID</key>
+	<string>派生结果 ID</string>
+	<key>Derived Results</key>
+	<string>派生结果</string>
+	<key>Diarization Model Cache</key>
+	<string>说话人分离模型缓存</string>
+	<key>Directory choices apply the next time Maccheroni launches. Existing recordings and run artifacts stay where they are.</key>
+	<string>目录选择会在下次启动 Maccheroni 时生效。现有录音和运行产物会保留在原处。</string>
 	<key>Disk Use</key>
 	<string>磁盘使用</string>
 	<key>Done</key>
 	<string>完成</string>
-	<key>Download Pinned Model…</key>
-	<string>下载固定模型...</string>
 	<key>Download Pinned Model</key>
 	<string>下载固定模型</string>
+	<key>Download Pinned Model…</key>
+	<string>下载固定模型...</string>
 	<key>Drop an audio file here</key>
 	<string>将音频文件拖放到此处</string>
+	<key>Duration</key>
+	<string>耗时</string>
 	<key>Edit Glossary</key>
 	<string>编辑术语表</string>
 	<key>Elapsed</key>
@@ -150,12 +262,16 @@
 	<string>默认为英语。手动选择适用于 Maccheroni，无需更改 Mac 系统语言。</string>
 	<key>Enhancement</key>
 	<string>强化</string>
+	<key>Exact Identities</key>
+	<string>精确标识</string>
 	<key>Export</key>
 	<string>出口</string>
 	<key>Failed</key>
 	<string>失败</string>
 	<key>Failure Details</key>
 	<string>失败详情</string>
+	<key>Free Space</key>
+	<string>可用空间</string>
 	<key>French</key>
 	<string>法语</string>
 	<key>General</key>
@@ -168,22 +284,50 @@
 	<string>词汇表</string>
 	<key>Glossary Could Not Be Saved</key>
 	<string>无法保存术语表</string>
+	<key>Glossary SHA-256</key>
+	<string>术语表 SHA-256</string>
+	<key>Glossary Semantics</key>
+	<string>术语表语义</string>
+	<key>Glossary Terms</key>
+	<string>术语表条目</string>
+	<key>Glossary Used</key>
+	<string>使用的术语表</string>
+	<key>Go to the next segment to review</key>
+	<string>转到下一个待复核片段</string>
+	<key>Go to the previous segment to review</key>
+	<string>转到上一个待复核片段</string>
 	<key>Has Conflicts</key>
 	<string>有冲突</string>
+	<key>How</key>
+	<string>方式</string>
 	<key>Import Audio</key>
 	<string>导入音频</string>
 	<key>Import Audio…</key>
 	<string>导入音频...</string>
 	<key>Import an audio file for transcription.</key>
 	<string>导入音频文件进行转录。</string>
+	<key>In the model's context prompt</key>
+	<string>在模型的上下文提示中</string>
 	<key>Injection Mode</key>
 	<string>注入模式</string>
 	<key>Input Integrity</key>
 	<string>输入完整性</string>
+	<key>Input Mode</key>
+	<string>输入模式</string>
 	<key>Inspect the preserved run. For a new attempt, choose a different profile or transcribe a shorter copy. The original recording stays unchanged.</key>
 	<string>请检查已保留的运行记录。如需重新尝试，请选择其他配置文件或转录更短的副本。原始录音保持不变。</string>
+	<key>Install the missing components by running this in Terminal from the Maccheroni repository, then check again:</key>
+	<string>在 Maccheroni 仓库目录下于“终端”运行以下命令安装缺失的组件，然后再次检查：</string>
 	<key>Installed</key>
 	<string>已安装</string>
+	<key>Installed and signed in</key>
+	<string>已安装且已登录</string>
+	<key>Installed, but sign-in status could not be checked.</key>
+	<string>已安装，但无法检查登录状态。</string>
+	<key>Installed, not signed in. Run codex login in Terminal.</key>
+	<string>已安装但尚未登录。请在终端中运行 codex login。</string>
+	<key>Interrupted</key>
+	<string>已中断</string>
 	<key>Italian</key>
 	<string>意大利语</string>
 	<key>Italian Dialogue</key>
@@ -200,36 +344,76 @@
 	<string>语言</string>
 	<key>Languages</key>
 	<string>语言</string>
+	<key>Largest Accepted Output Bound</key>
+	<string>最大已接受输出上限</string>
+	<key>Largest Batch Estimate</key>
+	<string>最大批次估算</string>
+	<key>Largest Batch Input</key>
+	<string>最大批次输入</string>
+	<key>Largest Raw Response</key>
+	<string>最大原始响应</string>
 	<key>Leave Unresolved</key>
 	<string>留下悬而未决</string>
 	<key>Library</key>
 	<string>图书馆</string>
+	<key>Library Metadata</key>
+	<string>资料库元数据</string>
 	<key>Local</key>
 	<string>本地</string>
 	<key>Local Library</key>
 	<string>本地资料库</string>
+	<key>MACCHERONI_LIBRARY_ROOT controls the recording and run paths for this launch.</key>
+	<string>MACCHERONI_LIBRARY_ROOT 控制本次启动的录音和运行路径。</string>
 	<key>Maccheroni Could Not Start</key>
 	<string>Maccheroni 无法启动</string>
 	<key>Maccheroni Needs Attention</key>
 	<string>Maccheroni 需要注意</string>
+	<key>Maccheroni cannot use the microphone. Turn Maccheroni on in System Settings &gt; Privacy &amp; Security &gt; Microphone.</key>
+	<string>Maccheroni 无法使用麦克风。请在“系统设置 &gt; 隐私与安全性 &gt; 麦克风”中打开 Maccheroni。</string>
+	<key>Maccheroni could not check whether this profile is ready: %@</key>
+	<string>Maccheroni 无法检查此配置文件是否就绪：%@</string>
 	<key>Maccheroni could not find a display whose system audio can be captured.</key>
 	<string>Maccheroni 找不到可以捕获系统音频的显示器。</string>
+	<key>Maccheroni could not join the transcript with the speaker timeline.</key>
+	<string>Maccheroni 无法将转录文本与说话人时间轴合并。</string>
+	<key>Maccheroni could not prepare this audio for transcription.</key>
+	<string>Maccheroni 无法为转录准备这段音频。</string>
+	<key>Maccheroni could not read the readiness report from its command-line engine.</key>
+	<string>Maccheroni 无法读取其命令行引擎返回的就绪报告。</string>
 	<key>Maccheroni is processing the full recording locally.</key>
 	<string>Maccheroni 正在本地处理完整的录音。</string>
-	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Model removal uses the macOS Trash.</key>
-	<string>Maccheroni 绝不会删除或覆盖录音、原始记录或已完成的运行工件。模型删除使用 macOS 垃圾箱。</string>
+	<key>Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Removing a model or a recording uses the macOS Trash.</key>
+	<string>Maccheroni 绝不会删除或覆盖录音、原始记录或已完成的运行工件。删除模型或录音时使用 macOS 垃圾箱。</string>
+	<key>Maccheroni stopped this run and its record does not name a more specific cause.</key>
+	<string>Maccheroni 停止了本次运行，其记录未指出更具体的原因。</string>
+	<key>Maccheroni will not assign a speaker without acoustic evidence, so this stays as it is.</key>
+	<string>没有声学证据时 Maccheroni 不会指派说话人，因此这里保持原样。</string>
 	<key>Maccheroni will not overwrite an existing recording artifact: %@.</key>
 	<string>Maccheroni 不会覆盖现有的录音工件：%@。</string>
+	<key>Mark Reviewed</key>
+	<string>标记为已复核</string>
 	<key>Markdown</key>
 	<string>Markdown</string>
 	<key>Merging</key>
 	<string>合并</string>
 	<key>Microphone</key>
 	<string>麦克风</string>
+	<key>Model</key>
+	<string>模型</string>
+	<key>Model Cache on %@</key>
+	<string>%@ 上的模型缓存</string>
+	<key>Model ID</key>
+	<string>模型 ID</string>
 	<key>Models</key>
 	<string>模型</string>
 	<key>Move Model to Trash</key>
 	<string>将模型移至垃圾箱</string>
+	<key>Move to Trash</key>
+	<string>移到垃圾箱</string>
+	<key>Move to Trash…</key>
+	<string>移到垃圾箱…</string>
+	<key>Move “%@” to the Trash?</key>
+	<string>将“%@”移到垃圾箱？</string>
 	<key>New Recording</key>
 	<string>新录音</string>
 	<key>No</key>
@@ -238,10 +422,28 @@
 	<string>默认不选择任何云服务。音频永远不会离开这台 Mac； Codex 仅在明确选择时才接收转录文本。</string>
 	<key>No local benchmark is available for this profile yet.</key>
 	<string>此配置文件尚无可用的本地基准。</string>
+	<key>No segment matches this search.</key>
+	<string>没有片段与此搜索匹配。</string>
+	<key>No speaker held %@ of this segment's speech, so none was named.</key>
+	<string>没有说话人占到此片段语音的 %@，因此未确定说话人。</string>
+	<key>No speaker held enough of this segment's speech, so none was named.</key>
+	<string>没有说话人占到此片段语音的足够比例，因此未确定说话人。</string>
+	<key>No speaker proposed</key>
+	<string>未提出说话人</string>
+	<key>No speaker was active on the speaker timeline during this segment.</key>
+	<string>在此片段期间，说话人时间轴上没有任何说话人。</string>
 	<key>None</key>
 	<string>无</string>
+	<key>Not Created</key>
+	<string>尚未创建</string>
 	<key>Not Installed</key>
 	<string>未安装</string>
+	<key>Not Transcribed</key>
+	<string>未转录</string>
+	<key>Not passed to the model</key>
+	<string>未传给模型</string>
+	<key>Nothing left to review</key>
+	<string>没有待复核内容</string>
 	<key>OK</key>
 	<string>好的</string>
 	<key>Off</key>
@@ -250,22 +452,58 @@
 	<string>开</string>
 	<key>Open the capture view.</key>
 	<string>打开捕获视图。</string>
+	<key>Operation</key>
+	<string>操作</string>
 	<key>Original File</key>
 	<string>原始文件</string>
+	<key>Other markers</key>
+	<string>其他标记</string>
+	<key>Outcome</key>
+	<string>结果</string>
+	<key>Output Estimate Formula</key>
+	<string>输出估算公式</string>
+	<key>Output Planning Budget</key>
+	<string>输出规划预算</string>
+	<key>Output Token Limit</key>
+	<string>输出令牌限制</string>
 	<key>Overlapping Speech</key>
 	<string>重叠语音</string>
+	<key>Part of this recording was transcribed and the rest produced no text.</key>
+	<string>这段录音只有一部分被转录，其余部分没有产生文本。</string>
+	<key>Partial</key>
+	<string>部分完成</string>
+	<key>Partial Transcript</key>
+	<string>部分转录</string>
+	<key>Pause playback</key>
+	<string>暂停播放</string>
 	<key>Peak Normalization</key>
 	<string>峰值归一化</string>
 	<key>People</key>
 	<string>人们</string>
-	<key>Pipeline</key>
-	<string>处理流程</string>
 	<key>Places</key>
 	<string>地点</string>
+	<key>Planned Model</key>
+	<string>计划模型</string>
+	<key>Play the recording</key>
+	<string>播放录音</string>
+	<key>Play the recording from this segment.</key>
+	<string>从此片段开始播放录音。</string>
+	<key>Play this segment from the source audio.</key>
+	<string>从源音频播放此片段。</string>
+	<key>Playhead</key>
+	<string>播放头</string>
 	<key>Portuguese</key>
 	<string>葡萄牙语</string>
 	<key>Post-processing</key>
 	<string>后处理</string>
+	<key>Post-processing Backend</key>
+	<string>后处理后端</string>
+	<key>Post-processing Model Cache</key>
+	<string>后处理模型缓存</string>
+	<key>Post-processing could not start for this completed run.</key>
+	<string>无法为这个已完成的运行启动后处理。</string>
+	<key>Post-processing did not finish. The speaker-labelled transcript is unaffected.</key>
+	<string>后处理未完成。已标注说话人的转录文本未受影响。</string>
 	<key>Preparing</key>
 	<string>准备中</string>
 	<key>Preparing Maccheroni…</key>
@@ -276,10 +514,18 @@
 	<string>主模型</string>
 	<key>Profile</key>
 	<string>配置文件</string>
+	<key>Prompt Limit</key>
+	<string>提示词限制</string>
+	<key>Proposed</key>
+	<string>建议</string>
+	<key>Proposed, not measured</key>
+	<string>为建议，非测量结果</string>
 	<key>Provided</key>
 	<string>已提供</string>
 	<key>Quantization</key>
 	<string>量化</string>
+	<key>Reached the Model</key>
+	<string>已送达模型</string>
 	<key>Ready to Transcribe</key>
 	<string>准备转录</string>
 	<key>Record microphone and system audio as separate local originals, or import an existing audio file.</key>
@@ -290,8 +536,14 @@
 	<string>录音</string>
 	<key>Recording %@</key>
 	<string>记录 %@</string>
+	<key>Recording Name</key>
+	<string>录音名称</string>
 	<key>Recording Not Found</key>
 	<string>未找到录音</string>
+	<key>Recording SHA-256</key>
+	<string>录音 SHA-256</string>
+	<key>Recording Size</key>
+	<string>录音大小</string>
 	<key>Recording artifact %@ is not canonical 48 kHz mono PCM.</key>
 	<string>录音工件 %@ 不是规范的 48 kHz 单声道 PCM。</string>
 	<key>Recording failed: %@</key>
@@ -302,10 +554,24 @@
 	<string>消除</string>
 	<key>Remove %@</key>
 	<string>消除 %@</string>
+	<key>Remove from Library</key>
+	<string>从资料库中移除</string>
+	<key>Remove this segment from the copy selection.</key>
+	<string>从复制所选内容中移除此片段。</string>
+	<key>Remove “%@” from the library?</key>
+	<string>从资料库中移除“%@”？</string>
 	<key>Rename Speaker</key>
 	<string>重命名发言人</string>
 	<key>Rename this speaker everywhere in the corrected transcript.</key>
 	<string>在更正的记录中的所有位置重命名该说话者。</string>
+	<key>Rename this speaker everywhere in this transcript.</key>
+	<string>在此转录文本中所有位置重命名此发言人。</string>
+	<key>Renames this recording in the library only. The audio file and the run folder keep their names.</key>
+	<string>仅在资料库中重命名此录音。音频文件与运行文件夹的名称保持不变。</string>
+	<key>Rename…</key>
+	<string>重命名…</string>
+	<key>Request Logs</key>
+	<string>请求日志</string>
 	<key>Resolved</key>
 	<string>已解决</string>
 	<key>Reveal</key>
@@ -318,10 +584,18 @@
 	<string>在 Finder 中显示运行</string>
 	<key>Reveal in Finder</key>
 	<string>在 Finder 中显示</string>
+	<key>Review</key>
+	<string>待复核</string>
 	<key>Review Profiles</key>
 	<string>查看配置文件</string>
+	<key>Review This Segment</key>
+	<string>复核此片段</string>
 	<key>Review Uncertain Transcript</key>
 	<string>审阅不确定的转录文本</string>
+	<key>Review what Maccheroni was unsure about here.</key>
+	<string>复核 Maccheroni 在此处不确定的内容。</string>
+	<key>Reviewed</key>
+	<string>已复核</string>
 	<key>Revision</key>
 	<string>修订</string>
 	<key>Run</key>
@@ -334,6 +608,10 @@
 	<string>运行检查器</string>
 	<key>Run Output</key>
 	<string>运行输出</string>
+	<key>Run Record Unreadable</key>
+	<string>无法读取运行记录</string>
+	<key>Run and result identifiers, file fingerprints, model revisions, and the batching numbers behind post-processing.</key>
+	<string>运行与结果标识符、文件指纹、模型修订版，以及后处理的批次数值。</string>
 	<key>Russian</key>
 	<string>俄语</string>
 	<key>SHA-256</key>
@@ -346,22 +624,80 @@
 	<string>采样率</string>
 	<key>Save</key>
 	<string>保存</string>
+	<key>Search this transcript</key>
+	<string>搜索此转录文本</string>
 	<key>Segment %lld does not have a valid SRT time range.</key>
 	<string>段 %lld 没有有效的 SRT 时间范围。</string>
+	<key>Segments</key>
+	<string>片段</string>
 	<key>Segments JSON</key>
 	<string>分段 JSON</string>
+	<key>Segments per Batch</key>
+	<string>每批片段数</string>
+	<key>Select this segment for copying.</key>
+	<string>选择此片段以复制。</string>
+	<key>Sent to the Model</key>
+	<string>发送给模型的内容</string>
+	<key>Service-managed (limit unavailable)</key>
+	<string>由服务管理（限制不可用）</string>
 	<key>Settings Could Not Be Loaded</key>
 	<string>无法加载设置</string>
+	<key>Share</key>
+	<string>占比</string>
 	<key>Show or hide exact run and model details.</key>
 	<string>显示或隐藏确切的运行和模型详细信息。</string>
+	<key>Show or hide how this run was produced.</key>
+	<string>显示或隐藏本次运行的生成方式。</string>
+	<key>Show this layer of the transcript.</key>
+	<string>显示转录文本的此图层。</string>
 	<key>Size</key>
 	<string>尺寸</string>
+	<key>Some segments carry no recorded speaker evidence.</key>
+	<string>部分片段没有记录任何说话人证据。</string>
+	<key>Source Run</key>
+	<string>源运行</string>
+	<key>Source Run Glossary</key>
+	<string>源运行术语表</string>
+	<key>Source Segments SHA-256</key>
+	<string>源片段 SHA-256</string>
 	<key>Spanish</key>
 	<string>西班牙语</string>
+	<key>Speaker</key>
+	<string>说话人</string>
+	<key>Speaker %@</key>
+	<string>说话人 %@</string>
 	<key>Speaker Diarization</key>
+	<string>说话人分离</string>
+	<key>Speaker Proposal</key>
+	<string>说话人建议</string>
+	<key>Speaker Separation</key>
 	<string>说话人分离</string>
 	<key>Speaker name</key>
 	<string>说话人名称</string>
+	<key>Speaker not attributed yet</key>
+	<string>尚未归属说话人</string>
+	<key>Speaker not named</key>
+	<string>未确定说话人</string>
+	<key>Speaker separation returned a speaker timeline Maccheroni cannot trust, so the run stopped before transcription.</key>
+	<string>说话人分离返回了 Maccheroni 无法信任的说话人时间轴，因此运行在转录前停止。</string>
+	<key>Speaker-labelled</key>
+	<string>已标注说话人</string>
+	<key>Speakers</key>
+	<string>说话人</string>
+	<key>Speech Recognition</key>
+	<string>语音识别</string>
+	<key>Speech recognition ran past the time budget for this audio and was stopped.</key>
+	<string>语音识别超出了这段音频的时间预算，已被停止。</string>
+	<key>Speech recognition reached the MOSS output limit even after the failed range had been split into smaller pieces.</key>
+	<string>即使把失败区间拆分为更小的片段，语音识别仍达到 MOSS 的输出上限。</string>
+	<key>Speech recognition reached the output limit for this audio before it finished, and splitting the audio into smaller pieces did not bring it back under the limit.</key>
+	<string>语音识别在完成这段音频前就达到了输出上限，把音频拆分为更小的片段也没有回到上限以内。</string>
+	<key>Speech recognition returned output Maccheroni could not verify, so nothing was promoted into the transcript.</key>
+	<string>语音识别返回了 Maccheroni 无法验证的输出，因此没有任何内容进入转录文本。</string>
+	<key>Speech recognition stopped producing new words and repeated itself to the end of its output budget, so that stretch of audio produced no usable text.</key>
+	<string>语音识别不再产生新词，而是重复同一内容直到用尽输出预算，因此那段音频没有产生可用文本。</string>
+	<key>Stale Bookmark</key>
+	<string>过期的书签</string>
 	<key>Start Recording</key>
 	<string>开始录音</string>
 	<key>Starts separate microphone and system audio capture.</key>
@@ -374,18 +710,30 @@
 	<string>请先停止正在进行的录音，然后再导入音频。</string>
 	<key>Stop the active recording before starting transcription.</key>
 	<string>请先停止正在进行的录音，然后再开始转录。</string>
+	<key>Stopped At</key>
+	<string>停止阶段</string>
 	<key>Stops capture and begins transcription.</key>
 	<string>停止捕获并开始转录。</string>
 	<key>Storage</key>
 	<string>贮存</string>
+	<key>Storage Role</key>
+	<string>存储角色</string>
 	<key>System Audio</key>
 	<string>系统音频</string>
+	<key>System audio is not recordable yet. Turn Maccheroni on in System Settings &gt; Privacy &amp; Security &gt; Screen &amp; System Audio Recording.</key>
+	<string>目前还无法录制系统音频。请在“系统设置 &gt; 隐私与安全性 &gt; 屏幕与系统音频录制”中打开 Maccheroni。</string>
+	<key>Target Language</key>
+	<string>目标语言</string>
+	<key>Temporary Work</key>
+	<string>临时工作数据</string>
 	<key>Term Recall</key>
 	<string>术语召回率</string>
 	<key>Terms</key>
 	<string>术语</string>
-	<key>The Maccheroni command-line engine is missing.</key>
-	<string>Maccheroni 命令行引擎丢失。</string>
+	<key>Text</key>
+	<string>文本</string>
+	<key>Text only</key>
+	<string>仅文本</string>
 	<key>The Hugging Face %@ command failed (exit %lld): %@</key>
 	<string>Hugging Face %@ 命令失败（退出代码 %lld）：%@</string>
 	<key>The Hugging Face command finished, but the pinned model location is missing: %@</key>
@@ -394,6 +742,10 @@
 	<string>未安装 Hugging Face 命令行工具 (hf)。请安装后重试。</string>
 	<key>The Hugging Face command-line tool could not start: %@</key>
 	<string>无法启动 Hugging Face 命令行工具：%@</string>
+	<key>The Maccheroni command-line engine is missing.</key>
+	<string>Maccheroni 命令行引擎丢失。</string>
+	<key>The acoustic evidence is not loaded beside a translation. The source run still has it.</key>
+	<string>声学证据不会与译文一同加载。源运行中仍然保留。</string>
 	<key>The bundled profile registry is missing.</key>
 	<string>捆绑的配置文件注册表丢失。</string>
 	<key>The derived combined recording could not be read after writing: %@.</key>
@@ -402,44 +754,112 @@
 	<string>段 %lld 的导出发言者姓名为空。</string>
 	<key>The exported text is empty for segment %lld.</key>
 	<string>段 %lld 的导出文本为空。</string>
+	<key>The files this recording named are no longer on disk, so this removes its library entry and nothing else.</key>
+	<string>此录音的文件已不在磁盘上，因此仅移除其资料库条目。</string>
+	<key>The folder Maccheroni saves recordings and runs in cannot be reached.</key>
+	<string>无法访问 Maccheroni 保存录音和运行结果的文件夹。</string>
+	<key>The glossary for this profile could not be used for this run.</key>
+	<string>本次运行无法使用此配置文件的术语表。</string>
+	<key>The glossary the source run used</key>
+	<string>源运行使用的术语表</string>
 	<key>The library entry is no longer available.</key>
 	<string>图书馆条目不再可用。</string>
+	<key>The local speech runtime this profile needs is missing or does not match its pinned version.</key>
+	<string>此配置文件所需的本地语音运行时缺失，或与固定版本不一致。</string>
 	<key>The original audio and completed artifacts were preserved. You can inspect the run or try again.</key>
 	<string>原始音频和完成的工件被保留。您可以检查运行情况或重试。</string>
-	<key>The original audio and completed attempt artifacts were preserved. MOSS still reached its output limit after the failed range was split into smaller chunks.</key>
-	<string>原始音频和已完成尝试的产物已保留。即使将失败区间拆分为更小的块，MOSS 仍达到输出上限。</string>
 	<key>The original audio and every completed intermediate artifact were preserved.</key>
 	<string>原始音频和每个完成的中间工件都被保留。</string>
 	<key>The original audio is not available.</key>
 	<string>原始音频不可用。</string>
+	<key>The original recording could not be found.</key>
+	<string>找不到原始录音。</string>
 	<key>The profile registry is invalid: %@</key>
 	<string>配置文件注册表无效：%@</string>
+	<key>The profile's current glossary</key>
+	<string>该配置的当前术语表</string>
 	<key>The raw run remains on disk, but one or more required artifacts failed an integrity check.</key>
 	<string>原始运行仍保留在磁盘上，但一个或多个所需工件未通过完整性检查。</string>
 	<key>The recording artifact name is unsafe: %@.</key>
 	<string>记录工件名称不安全：%@。</string>
 	<key>The recording is preserved and ready for the selected profile.</key>
 	<string>录制内容已保存并可供所选配置文件使用。</string>
+	<key>The recovered transcript, the original audio, and every completed artifact were preserved. This run is recorded as partial, not complete.</key>
+	<string>已恢复的转录文本、原始音频以及所有已完成的产物均被保留。本次运行记录为部分完成，而非完成。</string>
 	<key>The run contains an unsafe artifact path: %@</key>
 	<string>运行包含不安全的工件路径：%@</string>
 	<key>The run did not succeed.</key>
 	<string>此次运行未成功。</string>
+	<key>The run record for this transcription cannot be read, so Maccheroni cannot say what happened.</key>
+	<string>无法读取这次转录的运行记录，因此 Maccheroni 说不出发生了什么。</string>
+	<key>The run was cancelled before it finished.</key>
+	<string>运行在完成前被取消。</string>
 	<key>The selected file has no readable audio duration.</key>
 	<string>所选文件没有可读的音频持续时间。</string>
+	<key>The source-language transcript is not loaded beside a translation. It is unchanged on disk.</key>
+	<string>源语言转录文本不会与译文一同加载。磁盘上的文件保持不变。</string>
+	<key>The speaker separation model this profile needs is not installed on this Mac.</key>
+	<string>此配置文件所需的说话人分离模型尚未安装在这台 Mac 上。</string>
+	<key>The speaker timeline covered %@ of this segment, below the %@ it needs.</key>
+	<string>说话人时间轴仅覆盖此片段的 %@，低于所需的 %@。</string>
+	<key>The speaker timeline covered %@ of this segment, below what this run requires.</key>
+	<string>说话人时间轴仅覆盖此片段的 %@，低于本次运行的要求。</string>
+	<key>The speech model also reported a speaker for this segment. It is kept as evidence and never becomes the speaker.</key>
+	<string>语音模型也为此片段报告了一个说话人。该值仅作为证据保留，绝不会成为说话人。</string>
+	<key>The speech model that answered is not the exact model this profile pins, so its output was refused.</key>
+	<string>作出响应的语音模型并非此配置文件锁定的模型，其输出已被拒绝。</string>
+	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
+	<string>此配置文件所需的语音识别模型尚未安装在这台 Mac 上。</string>
+	<key>The top speakers held the same time in this segment, to within a nanosecond.</key>
+	<string>在此片段中，居前的说话人占据的时长相同，误差不超过一纳秒。</string>
+	<key>The transcript could not be copied.</key>
+	<string>无法复制转录文本。</string>
 	<key>The transcription engine could not start: %@</key>
 	<string>转录引擎无法启动：%@</string>
 	<key>The transcription engine exited with status %lld.</key>
 	<string>转录引擎已退出，状态为 %lld。</string>
 	<key>The transcription engine finished without a run directory.</key>
 	<string>转录引擎在没有运行目录的情况下完成。</string>
+	<key>The voice activity model this profile needs is not installed on this Mac.</key>
+	<string>此配置文件所需的语音活动检测模型尚未安装在这台 Mac 上。</string>
 	<key>There is no active recording.</key>
 	<string>没有活动录音。</string>
+	<key>This Run</key>
+	<string>本次运行</string>
+	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>这会将运行输出移到垃圾箱。不会删除任何内容，在 Finder 中使用“放回原处”即可还原。</string>
+	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>
+	<string>这会将源音频和运行输出一并移到垃圾箱。不会删除任何内容，在 Finder 中使用“放回原处”即可还原。</string>
+	<key>This moves the source audio to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>这会将源音频移到垃圾箱。不会删除任何内容，在 Finder 中使用“放回原处”即可还原。</string>
 	<key>This name applies to every %@ segment in corrected exports.</key>
 	<string>此名称适用于更正导出中的每个 %@ 段。</string>
+	<key>This name applies to every %@ segment in exports.</key>
+	<string>此名称适用于导出内容中的每个 %@ 片段。</string>
+	<key>This profile could not run with the settings it was given.</key>
+	<string>此配置文件无法在给定的设置下运行。</string>
+	<key>This profile is not ready to run.</key>
+	<string>此配置文件尚未准备好运行。</string>
+	<key>This run has not produced this layer.</key>
+	<string>本次运行未生成该图层。</string>
 	<key>This run reached the MOSS output limit after bounded splitting. Choose a different profile or use a shorter copy before retrying.</key>
 	<string>此次运行经过受限拆分后仍达到 MOSS 输出上限。请在重试前选择其他配置文件或使用更短的副本。</string>
-	<key>This segment was marked uncertain by the pipeline.</key>
-	<string>此片段被处理流程标记为不确定。</string>
+	<key>This segment carries no recorded speaker evidence.</key>
+	<string>此片段没有记录任何说话人证据。</string>
+	<key>This speaker held this much of the segment's speech.</key>
+	<string>该说话人在此片段语音中所占的比例。</string>
+	<key>This stage covered only part of the recording.</key>
+	<string>此阶段只覆盖了录音的一部分。</string>
+	<key>This stage stopped the run.</key>
+	<string>运行在此阶段停止。</string>
+	<key>Time</key>
+	<string>时间</string>
+	<key>Timeline coverage %@, and this run named a speaker only above %@.</key>
+	<string>时间轴覆盖率为 %@，本次运行仅在高于 %@ 时才确定说话人。</string>
+	<key>Timeline coverage %@.</key>
+	<string>时间轴覆盖率为 %@。</string>
+	<key>Transcribed</key>
+	<string>已转录</string>
 	<key>Transcribing</key>
 	<string>正在转录</string>
 	<key>Transcript</key>
@@ -448,8 +868,20 @@
 	<string>无法导出转录文本</string>
 	<key>Transcript Disagreement</key>
 	<string>转录文本不一致</string>
+	<key>Transcript layer: Corrected</key>
+	<string>转录层：已校正</string>
+	<key>Transcript layer: Proposed</key>
+	<string>转录图层：建议</string>
+	<key>Transcript layer: Speaker-labelled</key>
+	<string>转录层：已标注说话人</string>
+	<key>Transcript layer: Translated</key>
+	<string>转录层：已翻译</string>
+	<key>Transcript text only. Audio stayed on this Mac.</key>
+	<string>仅转录文本。音频始终留在这台 Mac 上。</string>
 	<key>Transcription</key>
 	<string>转录</string>
+	<key>Transcription Backend</key>
+	<string>转录后端</string>
 	<key>Transcription Cancelled</key>
 	<string>转录已取消</string>
 	<key>Transcription Failed</key>
@@ -458,179 +890,61 @@
 	<string>已达到转录限制</string>
 	<key>Transcription and the selected post-processing path run locally. The original audio and raw transcript stay unchanged.</key>
 	<string>转录和选定的后处理路径在本地运行。原始音频和原始文字记录保持不变。</string>
-	<key>Truncated</key>
-	<string>截断的</string>
-	<key>Try Again</key>
-	<string>再试一次</string>
-	<key>Uncertain</key>
-	<string>不确定</string>
-	<key>Use System Language</key>
-	<string>使用系统语言</string>
-	<key>Verification Model %lld</key>
-	<string>验证模型 %lld</string>
-	<key>Voice Activity Detection</key>
-	<string>语音活动检测</string>
-	<key>Wait for the active transcription to finish.</key>
-	<string>等待活动转录完成。</string>
-	<key>Wall Time</key>
-	<string>实际耗时</string>
-	<key>Yes</key>
-	<string>是的</string>
-	<key>Your selection is stored as a correction beside the immutable raw transcript.</key>
-	<string>您的选择将作为更正存储在不可变的原始记录旁边。</string>
-	<key>•</key>
-	<string>•</string>
-	<key>%lld bytes</key>
-	<string>%lld 字节</string>
-	<key>A new setup selects Codex only when its CLI is signed in; otherwise it selects Local. Codex receives transcript text only. Audio never leaves this Mac.</key>
-	<string>新设置仅在 Codex CLI 已登录时选择 Codex；否则选择 Local。Codex 仅接收转录文本。音频绝不会离开这台 Mac。</string>
-	<key>Audio stays on this Mac. Transcription runs locally; Codex receives transcript text only during post-processing.</key>
-	<string>音频保留在这台 Mac 上。转录在本地运行；Codex 仅在后处理期间接收转录文本。</string>
-	<key>Batches Planned</key>
-	<string>计划批次</string>
-	<key>Check Again</key>
-	<string>再次检查</string>
-	<key>Checking availability…</key>
-	<string>正在检查可用性…</string>
-	<key>Chooses the language the transcript is translated into.</key>
-	<string>选择转录文本要翻译成的语言。</string>
-	<key>Codex CLI</key>
-	<string>Codex CLI</string>
-	<key>Codex CLI was not found. Install it and run codex login in Terminal, or select Local meanwhile.</key>
-	<string>未找到 Codex CLI。请安装它并在终端中运行 codex login，或暂时选择 Local。</string>
-	<key>Codex is installed but not signed in. Run codex login in Terminal, or select Local meanwhile.</key>
-	<string>Codex 已安装但尚未登录。请在终端中运行 codex login，或暂时选择 Local。</string>
-	<key>Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local.</key>
-	<string>Codex 登录已过期或即将过期。请通过 Codex 刷新登录状态或重新登录，然后重试，或选择 Local。</string>
-	<key>Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile.</key>
-	<string>Codex 已安装，但无法检查登录状态。请重试或暂时选择 Local。</string>
-	<key>Codex is signed in and ready.</key>
-	<string>Codex 已登录并可使用。</string>
-	<key>Correct</key>
-	<string>校正</string>
-	<key>Input Mode</key>
-	<string>输入模式</string>
-	<key>Interrupted</key>
-	<string>已中断</string>
-	<key>Installed and signed in</key>
-	<string>已安装且已登录</string>
-	<key>Installed, not signed in. Run codex login in Terminal.</key>
-	<string>已安装但尚未登录。请在终端中运行 codex login。</string>
-	<key>Installed, but sign-in status could not be checked.</key>
-	<string>已安装，但无法检查登录状态。</string>
-	<key>Largest Accepted Output Bound</key>
-	<string>最大已接受输出上限</string>
-	<key>Largest Batch Estimate</key>
-	<string>最大批次估算</string>
-	<key>Largest Batch Input</key>
-	<string>最大批次输入</string>
-	<key>Largest Raw Response</key>
-	<string>最大原始响应</string>
-	<key>Model ID</key>
-	<string>模型 ID</string>
-	<key>Operation</key>
-	<string>操作</string>
-	<key>Output Estimate Formula</key>
-	<string>输出估算公式</string>
-	<key>Output Planning Budget</key>
-	<string>输出规划预算</string>
-	<key>Output Token Limit</key>
-	<string>输出令牌限制</string>
-	<key>Prompt Limit</key>
-	<string>提示词限制</string>
-	<key>Rename this speaker everywhere in this transcript.</key>
-	<string>在此转录文本中所有位置重命名此发言人。</string>
-	<key>Segments per Batch</key>
-	<string>每批片段数</string>
-	<key>Service-managed (limit unavailable)</key>
-	<string>由服务管理（限制不可用）</string>
-	<key>Source Segments SHA-256</key>
-	<string>源片段 SHA-256</string>
-	<key>Target Language</key>
-	<string>目标语言</string>
-	<key>Text only</key>
-	<string>仅文本</string>
 	<key>Translate</key>
 	<string>翻译</string>
 	<key>Translate Into</key>
 	<string>翻译为</string>
-	<key>This name applies to every %@ segment in exports.</key>
-	<string>此名称适用于导出内容中的每个 %@ 片段。</string>
-	<key>Choose Folder…</key>
-	<string>选择文件夹…</string>
-	<key>Use Default</key>
-	<string>使用默认设置</string>
-	<key>Directory choices apply the next time Maccheroni launches. Existing recordings and run artifacts stay where they are.</key>
-	<string>目录选择会在下次启动 Maccheroni 时生效。现有录音和运行产物会保留在原处。</string>
-	<key>MACCHERONI_LIBRARY_ROOT controls the recording and run paths for this launch.</key>
-	<string>MACCHERONI_LIBRARY_ROOT 控制本次启动的录音和运行路径。</string>
-	<key>Planned Model</key>
-	<string>计划模型</string>
-	<key>Play this segment from the source audio.</key>
-	<string>从源音频播放此片段。</string>
-	<key>Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio and source artifacts stay on this Mac unchanged.</key>
-	<string>Codex 接收受限的转录文本、当前配置文件的完整术语表及其哈希、后处理说明，以及翻译时的目标语言。音频和源产物保持不变并留在这台 Mac 上。</string>
-	<key>A new setup selects Codex only when its CLI is signed in; otherwise it selects Local. Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio never leaves this Mac.</key>
-	<string>新设置仅在 Codex CLI 已登录时选择 Codex；否则选择 Local。Codex 接收受限的转录文本、当前配置文件的完整术语表及其哈希、后处理说明，以及翻译时的目标语言。音频绝不会离开这台 Mac。</string>
-	<key>Audio stays on this Mac. Transcription runs locally; during post-processing Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating.</key>
-	<string>音频保留在这台 Mac 上。转录在本地运行；后处理期间 Codex 接收受限的转录文本、当前配置文件的完整术语表及其哈希、后处理说明，以及翻译时的目标语言。</string>
-	<key>Choose an M4A, WAV, or MP3 audio file.</key>
-	<string>请选择 M4A、WAV 或 MP3 音频文件。</string>
-	<key>Post-processing could not start for this completed run.</key>
-	<string>无法为这个已完成的运行启动后处理。</string>
-	<key>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</key>
-	<string>您的确认仅适用于这段完全相同的译文。不可变的源转录和译文保持不变。</string>
-	<key>A derived result manifest is invalid: %@</key>
-	<string>派生结果清单无效：%@</string>
-	<key>A derived result does not match its source run: %@</key>
-	<string>派生结果与其源运行不匹配：%@</string>
-	<key>Source Run</key>
-	<string>源运行</string>
-	<key>Current Derived Result</key>
-	<string>当前派生结果</string>
-	<key>Glossary Semantics</key>
-	<string>术语表语义</string>
-	<key>Source Run Glossary</key>
-	<string>源运行术语表</string>
-	<key>Current Derived Post-processing</key>
-	<string>当前派生后处理</string>
-	<key>Free Space</key>
-	<string>可用空间</string>
+	<key>Translated</key>
+	<string>已翻译</string>
+	<key>Truncated</key>
+	<string>截断的</string>
+	<key>Try Again</key>
+	<string>再试一次</string>
 	<key>Unavailable</key>
 	<string>不可用</string>
-	<key>Stale Bookmark</key>
-	<string>过期的书签</string>
-	<key>Library Metadata</key>
-	<string>资料库元数据</string>
-	<key>Request Logs</key>
-	<string>请求日志</string>
-	<key>ASR Model Cache</key>
-	<string>ASR 模型缓存</string>
-	<key>VAD Model Cache</key>
-	<string>VAD 模型缓存</string>
-	<key>Diarization Model Cache</key>
-	<string>说话人分离模型缓存</string>
-	<key>Post-processing Model Cache</key>
-	<string>后处理模型缓存</string>
-	<key>Temporary Work</key>
-	<string>临时工作数据</string>
-	<key>Available</key>
-	<string>可用</string>
-	<key>Not Created</key>
-	<string>尚未创建</string>
+	<key>Uncertain</key>
+	<string>不确定</string>
 	<key>Unmounted</key>
 	<string>未挂载</string>
 	<key>Unreadable</key>
 	<string>无法读取</string>
-	<key>Bookmark Unavailable</key>
-	<string>书签不可用</string>
+	<key>Use Default</key>
+	<string>使用默认设置</string>
+	<key>Use System Language</key>
+	<string>使用系统语言</string>
+	<key>VAD Model Cache</key>
+	<string>VAD 模型缓存</string>
+	<key>Verification Model %lld</key>
+	<string>验证模型 %lld</string>
+	<key>Voice Activity</key>
+	<string>语音活动</string>
+	<key>Voice Activity Detection</key>
+	<string>语音活动检测</string>
 	<key>Volume Readiness</key>
 	<string>卷状态</string>
-	<key>Storage Role</key>
-	<string>存储角色</string>
-	<key>Model Cache on %@</key>
-	<string>%@ 上的模型缓存</string>
-	<key>A configured storage folder is no longer available. Choose the folder again in Settings.</key>
-	<string>已配置的存储文件夹不再可用。请在设置中重新选择该文件夹。</string>
-	</dict>
+	<key>Wait for the active transcription to finish.</key>
+	<string>等待活动转录完成。</string>
+	<key>Wait for this recording's transcription to finish before moving it to the Trash.</key>
+	<string>请等待此录音的转写完成后再移到垃圾箱。</string>
+	<key>Wall Time</key>
+	<string>实际耗时</string>
+	<key>What Maccheroni Recorded</key>
+	<string>Maccheroni 记录的内容</string>
+	<key>Who Was Speaking</key>
+	<string>谁在说话</string>
+	<key>Wording</key>
+	<string>措辞</string>
+	<key>Yes</key>
+	<string>是的</string>
+	<key>You already reviewed this segment.</key>
+	<string>你已复核此片段。</string>
+	<key>Your Codex sign-in is expired or too close to expiry. Refresh or sign in through Codex, then retry, or select Local.</key>
+	<string>Codex 登录已过期或即将过期。请通过 Codex 刷新登录状态或重新登录，然后重试，或选择 Local。</string>
+	<key>Your acceptance applies only to this exact translated text. The immutable source transcript and translation remain unchanged.</key>
+	<string>您的确认仅适用于这段完全相同的译文。不可变的源转录和译文保持不变。</string>
+	<key>Your selection is stored as a correction beside the immutable raw transcript.</key>
+	<string>您的选择将作为更正存储在不可变的原始记录旁边。</string>
+	<key>•</key>
+	<string>•</string>
+</dict>
 </plist>

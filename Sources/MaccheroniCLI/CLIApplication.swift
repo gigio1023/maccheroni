@@ -20,6 +20,13 @@ public enum CLIError: Error, LocalizedError, Sendable {
     case postprocess(String)
     case glossary(String)
     case mossLimitExhausted(String)
+    /// A limit outcome on a non-MOSS backend that recovery could not clear and
+    /// that left no promotable prefix.  It is deliberately distinct from
+    /// `mossLimitExhausted`, which names the MOSS recovery tree.
+    case asrLimitExhausted(String)
+    /// The decoder collapsed into repetition and neither recovery nor prefix
+    /// promotion produced a usable result for the whole planned range.
+    case asrRepetitionLooping(String)
     case run(String)
     case sourceIntegrity(RunIntegrityError)
 
@@ -30,6 +37,8 @@ public enum CLIError: Error, LocalizedError, Sendable {
         case .postprocess: "POSTPROCESS_ERROR"
         case .glossary: "GLOSSARY_ERROR"
         case .mossLimitExhausted: "MOSS_LIMIT_EXHAUSTED"
+        case .asrLimitExhausted: "ASR_LIMIT_EXHAUSTED"
+        case .asrRepetitionLooping: "ASR_REPETITION_LOOPING"
         case .run: "RUN_ERROR"
         case .sourceIntegrity: "SOURCE_INTEGRITY_ERROR"
         }
@@ -39,6 +48,8 @@ public enum CLIError: Error, LocalizedError, Sendable {
         switch self {
         case let .usage(message), let .profile(message), let .postprocess(message),
              let .glossary(message), let .mossLimitExhausted(message),
+             let .asrLimitExhausted(message),
+             let .asrRepetitionLooping(message),
              let .run(message): message
         case let .sourceIntegrity(error): error.localizedDescription
         }
@@ -73,7 +84,35 @@ public struct CLIASRInferencePolicy: Codable, Equatable, Sendable {
                 audioContextTokensPerSecond: 12.5,
                 observedGeneratedTokensPerSecond: 7.7882
             )
-        case .vibeVoice, .qwen3:
+        case .vibeVoice:
+            // Derived in the VibeVoice section of
+            // docs/engineering-constraint-policy.md.  The binding constraint is
+            // repetition looping, not the token cap: no leaf longer than
+            // 120 s has a clean record on the measured passages, and a 240 s
+            // leaf collapsed on one of the two offsets it was measured at.
+            // Depth 2 is the depth at which a 120 s parent reaches the 30 s
+            // recovery floor.
+            Self(
+                sampleRateHz: 16_000,
+                minimumInitialDurationS: 60,
+                preferredInitialDurationS: 120,
+                maximumInitialDurationS: 120,
+                minimumRecoveryDurationS: 30,
+                maximumRecoveryDepth: 2,
+                maximumTokens: 5_120,
+                contextHardCapTokens: nil,
+                audioContextTokensPerSecond: 7.5,
+                // Falsified at 7.61 by an accepted leaf in the 2026-09-01
+                // full-file run: 22 segments in 31.87 s of rapid backchannel
+                // generated 744 tokens.  Segment density, not audio seconds,
+                // drives this.
+                observedGeneratedTokensPerSecond: 23.34
+            )
+        case .qwen3:
+            // D37 withdrew Qwen as a product fallback: the pinned backend
+            // exposes no enforceable cap, terminal reason, or intra-chunk
+            // timing, so no leaf on this path is promotable and no leaf
+            // measurement exists to re-derive these bounds from.
             Self(
                 sampleRateHz: 16_000,
                 minimumInitialDurationS: 10 * 60,
@@ -247,13 +286,18 @@ public struct CLIASRExecution: Sendable {
 public struct CLIASRLimit: Sendable {
     public var stopReason: ASRAttemptStopReason
     public var evidence: CLIASRAttemptEvidence
+    /// The leading valid transcript this limit outcome still holds, when the
+    /// backend could recover one.  Promotion is the caller's decision.
+    public var partialPrefix: ASRPartialPrefix?
 
     public init(
         stopReason: ASRAttemptStopReason,
-        evidence: CLIASRAttemptEvidence
+        evidence: CLIASRAttemptEvidence,
+        partialPrefix: ASRPartialPrefix? = nil
     ) {
         self.stopReason = stopReason
         self.evidence = evidence
+        self.partialPrefix = partialPrefix
     }
 }
 
@@ -340,10 +384,12 @@ private struct ASRAttemptRequestRecord: Codable, Sendable {
 /// Attempt statuses double as the persisted failure identifier: an attempt
 /// status and the manifest `failure.code` for the same error must be the same
 /// string so evidence can be bucketed from either record alone.
-private enum ASRAttemptStatus: String, Codable, Sendable {
+enum ASRAttemptStatus: String, Codable, Sendable {
     case eosComplete = "eos_complete"
     case limitIsolated = "limit_isolated"
     case limitExhausted = "limit_exhausted"
+    case repetitionLooping = "repetition_looping"
+    case partialPrefixPromoted = "partial_prefix_promoted"
     case invalidEOSOutput = "invalid_eos_output"
     case asrTimeout = "asr_timeout"
     case asrEvidenceUnavailable = "asr_evidence_unavailable"
@@ -352,6 +398,31 @@ private enum ASRAttemptStatus: String, Codable, Sendable {
     case asrModelIdentityMismatch = "asr_model_identity_mismatch"
     case backendFailed = "backend_failed"
     case canceled = "CANCELED"
+
+    /// The value `repetitionLooping` carried before the 2026-09-02
+    /// terminology audit renamed repetition degeneration to repetition
+    /// looping.  Attempt outcomes sealed before that rename still hold it.
+    static let legacyRepetitionLoopingRawValue = "repetition_degeneration"
+
+    /// D52: a renamed wire value keeps its legacy value accepted on read, and
+    /// judgment rule 3 keeps the sealed bytes as they are.  Encoding still
+    /// goes through the raw value, so the legacy string is never written.
+    init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if let value = ASRAttemptStatus(rawValue: raw) {
+            self = value
+        } else if raw == ASRAttemptStatus.legacyRepetitionLoopingRawValue {
+            self = .repetitionLooping
+        } else {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription:
+                        "unknown ASR attempt status \"\(raw)\""
+                )
+            )
+        }
+    }
 }
 
 private struct ASRAttemptOutcomeRecord: Codable, Sendable {
@@ -409,6 +480,155 @@ private struct CompletedASRLeaf: Sendable {
     var leaf: InferenceLeaf
     var execution: CLIASRExecution
     var resultSHA256: String
+    /// The last sample this attempt actually produced transcript for.  It
+    /// equals `leaf.endSample` for an end-of-sequence leaf and is smaller when
+    /// only a recovered prefix was promoted.
+    var coveredEndSample: Int64
+    var stopReason: ASRAttemptStopReason
+
+    /// Whether this leaf was promoted as a prefix rather than as a complete
+    /// end-of-sequence transcript.
+    ///
+    /// A limit outcome is a prefix even when its last accepted segment lands
+    /// on the leaf boundary: the decoder stopped on the token budget or a
+    /// collapse, not because it finished, so nothing says the range was fully
+    /// transcribed.  Deciding this from covered end alone filed such a leaf in
+    /// `eos_leaf_attempt_ids`, which is the done criterion's own definition of
+    /// a fully-EOS run and would have claimed one falsely.
+    var isPartial: Bool {
+        stopReason.isLimitOutcome || coveredEndSample < leaf.endSample
+    }
+}
+
+/// One leaf whose range no attempt could transcribe, after recovery was spent.
+/// It ends the leaf, not the run: the caller records the range and keeps every
+/// other leaf's transcript.
+private struct UnrecoveredASRLeaf: Sendable {
+    var attemptID: String
+    var leaf: InferenceLeaf
+    /// The decoder's terminal reason when the attempt reported one.  A leaf
+    /// lost to something outside the limit taxonomy — a malformed payload, a
+    /// timeout, a rejected adapter document — never reached a terminal
+    /// decoder state and so has none.
+    var stopReason: ASRAttemptStopReason?
+    var failure: UnrecoveredLeafFailure
+}
+
+/// The typed cause of one lost leaf, in a form the run can both record in a
+/// missing range and throw when nothing anywhere was promotable.  It keeps the
+/// code the original error would have produced, so a run that loses every leaf
+/// still fails with that cause instead of a generic run error.
+private struct UnrecoveredLeafFailure: Error, LocalizedError, Sendable {
+    var code: String
+    var message: String
+
+    var errorDescription: String? { message }
+
+    init(code: String, message: String) {
+        self.code = code
+        self.message = message
+    }
+
+    init(_ error: some Error) {
+        self.init(code: failureCode(for: error), message: failureMessage(for: error))
+    }
+}
+
+/// What one leaf and its recovery subtree produced.
+private struct ASRLeafResult: Sendable {
+    var completed: [CompletedASRLeaf] = []
+    var unrecovered: [UnrecoveredASRLeaf] = []
+
+    static func += (lhs: inout ASRLeafResult, rhs: ASRLeafResult) {
+        lhs.completed += rhs.completed
+        lhs.unrecovered += rhs.unrecovered
+    }
+}
+
+/// A half-open source range that no attempt produced transcript for.
+private struct SourceMissingRange: Codable, Sendable, Equatable {
+    var startS: Double
+    var endS: Double
+    var attemptID: String
+    /// The decoder's terminal reason, or nil when the attempt failed before
+    /// reaching one.  `failureCode` names the cause in either case.
+    var stopReason: ASRAttemptStopReason?
+    /// The typed failure this range would have produced had it ended the run.
+    /// Carried so the manifest reports the real cause per backend instead of
+    /// inferring one.
+    var failureCode: String
+
+    /// What `stop_reason` reads when there was no terminal decoder state to
+    /// report.  The field stays present and stays a string: every reader of
+    /// this record, the app's failure screen included, decodes it as one.
+    static let unavailableStopReason = "unavailable"
+
+    enum CodingKeys: String, CodingKey {
+        case attemptID = "attempt_id"
+        case startS = "start_s"
+        case endS = "end_s"
+        case stopReason = "stop_reason"
+        case failureCode = "failure_code"
+    }
+
+    init(
+        startS: Double,
+        endS: Double,
+        attemptID: String,
+        stopReason: ASRAttemptStopReason?,
+        failureCode: String
+    ) {
+        self.startS = startS
+        self.endS = endS
+        self.attemptID = attemptID
+        self.stopReason = stopReason
+        self.failureCode = failureCode
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startS = try container.decode(Double.self, forKey: .startS)
+        endS = try container.decode(Double.self, forKey: .endS)
+        attemptID = try container.decode(String.self, forKey: .attemptID)
+        failureCode = try container.decode(String.self, forKey: .failureCode)
+        let raw = try container.decode(String.self, forKey: .stopReason)
+        stopReason = raw == Self.unavailableStopReason
+            ? nil
+            : try container.decode(ASRAttemptStopReason.self, forKey: .stopReason)
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(startS, forKey: .startS)
+        try container.encode(endS, forKey: .endS)
+        try container.encode(attemptID, forKey: .attemptID)
+        try container.encode(
+            stopReason?.rawValue ?? Self.unavailableStopReason,
+            forKey: .stopReason
+        )
+        try container.encode(failureCode, forKey: .failureCode)
+    }
+}
+
+/// The explicit record of what a run promoted and what it did not, written
+/// whenever any leaf promoted only a recovered prefix.  Judgment rule 2: the
+/// missing ranges are named rather than folded into a single duration.
+private struct PartialCoverageRecord: Codable, Sendable {
+    var schemaVersion = "1.0.0"
+    var inputDurationS: Double
+    var promotedDurationS: Double
+    var missingDurationS: Double
+    var missing: [SourceMissingRange]
+    var partialAttemptIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case missing
+        case schemaVersion = "schema_version"
+        case inputDurationS = "input_duration_s"
+        case promotedDurationS = "promoted_duration_s"
+        case missingDurationS = "missing_duration_s"
+        case partialAttemptIDs = "partial_attempt_ids"
+    }
 }
 
 private struct ASRRootIndexRecord: Codable, Sendable {
@@ -417,6 +637,10 @@ private struct ASRRootIndexRecord: Codable, Sendable {
     var rootAttemptID: String
     var eosLeafAttemptIDs: [String]
     var eosLeafResultSHA256: [String]
+    /// Attempts whose recovered prefix was promoted.  They are listed apart
+    /// from the end-of-sequence leaves because they do not cover their range.
+    var partialPrefixAttemptIDs: [String] = []
+    var partialPrefixResultSHA256: [String] = []
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -424,6 +648,8 @@ private struct ASRRootIndexRecord: Codable, Sendable {
         case rootAttemptID = "root_attempt_id"
         case eosLeafAttemptIDs = "eos_leaf_attempt_ids"
         case eosLeafResultSHA256 = "eos_leaf_result_sha256"
+        case partialPrefixAttemptIDs = "partial_prefix_attempt_ids"
+        case partialPrefixResultSHA256 = "partial_prefix_result_sha256"
     }
 }
 
@@ -433,6 +659,7 @@ private struct CanonicalPromotionRecord: Codable, Sendable {
     var inputSHA256AtPromotion: String
     var eosLeafAttemptIDs: [String]
     var eosLeafResultSHA256: [String]
+    var partialPrefixAttemptIDs: [String] = []
     var canonicalArtifactSHA256: [String: String]
 
     enum CodingKeys: String, CodingKey {
@@ -441,6 +668,7 @@ private struct CanonicalPromotionRecord: Codable, Sendable {
         case inputSHA256AtPromotion = "input_sha256_at_promotion"
         case eosLeafAttemptIDs = "eos_leaf_attempt_ids"
         case eosLeafResultSHA256 = "eos_leaf_result_sha256"
+        case partialPrefixAttemptIDs = "partial_prefix_attempt_ids"
         case canonicalArtifactSHA256 = "canonical_artifact_sha256"
     }
 }
@@ -485,6 +713,10 @@ public struct CLIDependencies: Sendable {
         PostprocessBackendID,
         TranslationRequest
     ) async throws -> TranslationResult
+    public var proposeSpeakers: @Sendable (
+        PostprocessBackendID,
+        SpeakerProposalRequest
+    ) async throws -> SpeakerProposalResult
     public var glossaryRevisionStoreRoot: @Sendable () -> URL
     public var postprocessDoctor: @Sendable (PostprocessBackendID) async -> [String]
     public var doctor: @Sendable (SelectedASRBackend, CLIProfile) async -> [String]
@@ -566,12 +798,14 @@ public struct CLIDependencies: Sendable {
                         helperFingerprint: record.helperFingerprint,
                         inputSHA256: record.inputSHA256,
                         command: record.command
-                    )
+                    ),
+                    partialPrefix: record.partialPrefix
                 ))
             }
         },
         postprocess: productionPostprocess,
         translate: productionTranslation,
+        proposeSpeakers: productionSpeakerProposal,
         glossaryRevisionStoreRoot: CLIApplication.defaultGlossaryRevisionStoreRoot,
         postprocessDoctor: productionPostprocessDoctorChecks,
         doctor: productionDoctorChecks
@@ -693,9 +927,27 @@ public struct CLIApplication: Sendable {
                 glossaryURL: glossary,
                 glossarySemantics: glossarySemantics
             )
+        case let .proposeSpeakers(run, profile, profiles):
+            return try await proposeSpeakersForRun(
+                runURL: run,
+                profileName: profile,
+                profilesURL: profiles
+            )
         case let .doctor(profile, profiles):
             return try await doctor(profileName: profile, profilesURL: profiles)
         }
+    }
+
+    func executeProposeSpeakers(
+        runPath: String,
+        profileName: String,
+        profilesPath: String? = nil
+    ) async throws -> String {
+        try await proposeSpeakersForRun(
+            runURL: URL(fileURLWithPath: runPath, isDirectory: true),
+            profileName: profileName,
+            profilesURL: profilesPath.map(URL.init(fileURLWithPath:))
+        )
     }
 
     func executePostprocess(
@@ -804,7 +1056,8 @@ public struct CLIApplication: Sendable {
             targetLanguage: mode == .translation ? profile.targetLanguage : nil,
             glossarySemantics: glossarySemantics,
             glossarySHA256: glossary?.sha256,
-            glossaryItemCount: glossary?.entries.count ?? 0
+            glossaryItemCount: glossary?.entries.count ?? 0,
+            sourceCoverage: source.coverage
         )
 
         func manifest(
@@ -971,6 +1224,435 @@ public struct CLIApplication: Sendable {
         }
     }
 
+    /// Create a derived run carrying a marked, non-acoustic speaker proposal
+    /// for the segments the source run left unattributed.
+    ///
+    /// The source run is opened read-only, verified before and after, and never
+    /// written to; the proposal lands in a fresh `derived/<id>/` set beside the
+    /// correction and translation sets, under the same lineage contract.
+    /// Judgment rule 4 permits this only as a marked proposal that carries the
+    /// acoustic candidates beside it, so the acoustic evidence is read out of
+    /// `merged/conflicts.json` and travels into the artifact with every record.
+    private func proposeSpeakersForRun(
+        runURL: URL,
+        profileName: String,
+        profilesURL: URL?
+    ) async throws -> String {
+        let resolution = try resolveProfile(
+            name: profileName,
+            profilesURL: profilesURL
+        )
+        let profile = resolution.profile
+        guard let backend = PostprocessBackendID(rawValue: profile.postprocess) else {
+            throw CLIError.profile(
+                "a speaker proposal requires a codex or local backend"
+            )
+        }
+        let source: VerifiedRunSource
+        do {
+            source = try RunIntegrityVerifier.verifyMergedRun(at: runURL)
+        } catch let error as RunIntegrityError {
+            throw CLIError.sourceIntegrity(error)
+        }
+        let evidence = try speakerEvidence(for: source)
+
+        let started = now()
+        let writer = try RunWriter(
+            root: source.runURL.appendingPathComponent(
+                "derived",
+                isDirectory: true
+            ),
+            id: runID(started)
+        )
+        var artifacts: [Artifact] = []
+        var provenance: ManifestPostprocess?
+        let operation = DerivedOperation(
+            profileName: profile.name,
+            // `mode` describes a text operation and this one touches no text.
+            // `kind` is the field that says what this derived run produced;
+            // `ManifestPostprocess.mode` is non-optional, so a value has to be
+            // written here either way.
+            mode: .correction,
+            targetLanguage: nil,
+            glossarySemantics: .currentProfile,
+            glossarySHA256: nil,
+            glossaryItemCount: 0,
+            kind: .speakerProposal,
+            sourceCoverage: source.coverage
+        )
+
+        func manifest(status: RunStatus, failure: Failure?) -> DerivedManifest {
+            let finished = now()
+            return DerivedManifest(
+                derivedID: writer.id,
+                status: status,
+                source: source.lineage,
+                operation: operation,
+                timing: RunTiming(
+                    startedAt: ISO8601DateFormatter().string(from: started),
+                    finishedAt: ISO8601DateFormatter().string(from: finished),
+                    wallTimeS: max(0, finished.timeIntervalSince(started))
+                ),
+                artifacts: artifacts,
+                failure: failure,
+                postprocess: provenance
+            )
+        }
+
+        try writer.write(
+            manifest(
+                status: .failed,
+                failure: Failure(
+                    code: "RUN_INCOMPLETE",
+                    message: "derived speaker proposal initialized"
+                )
+            ),
+            at: "manifest.json",
+            replace: true
+        )
+
+        do {
+            let result: SpeakerProposalResult
+            do {
+                result = try await dependencies.proposeSpeakers(
+                    backend,
+                    SpeakerProposalRequest(
+                        document: source.document,
+                        evidence: evidence,
+                        sourceSegmentsSHA256: source.lineage.segmentsSHA256,
+                        sourceCoverage: source.coverage
+                    )
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw CLIError.postprocess(failureMessage(for: error))
+            }
+            try validate(
+                speakerProposal: result,
+                against: source.document,
+                evidence: evidence,
+                sourceSegmentsSHA256: source.lineage.segmentsSHA256,
+                sourceCoverage: source.coverage,
+                backend: backend
+            )
+            try writer.write(result.document, at: speakerProposalArtifactPath)
+            try writer.addArtifact(
+                &artifacts,
+                kind: speakerProposalArtifactKind,
+                relative: speakerProposalArtifactPath
+            )
+            provenance = result.manifestPostprocess
+
+            try writer.verify(artifacts: artifacts)
+            let sourceAfter: VerifiedRunSource
+            do {
+                sourceAfter = try RunIntegrityVerifier.verifyMergedRun(
+                    at: source.runURL
+                )
+            } catch let error as RunIntegrityError {
+                throw CLIError.sourceIntegrity(error)
+            }
+            guard sourceAfter.lineage == source.lineage else {
+                throw CLIError.sourceIntegrity(.sourceChangedDuringOperation)
+            }
+            try writer.write(
+                manifest(status: .succeeded, failure: nil),
+                at: "manifest.json",
+                replace: true
+            )
+            return """
+            \(writer.directory.path)
+            unattributed=\(evidence.count) \
+            proposed=\(result.document.proposals.count) \
+            declined=\(result.document.declined.count)
+            source_coverage=\(source.coverage.complete ? "complete" : "partial") \
+            processed_s=\(source.coverage.processedDurationS) \
+            missing_s=\(source.coverage.missingDurationS)
+            """
+        } catch {
+            try? writer.addAllUntrackedArtifacts(
+                &artifacts,
+                kind: "preserved_partial_artifact"
+            )
+            artifacts = writer.rebuiltArtifacts(preservingKindsFrom: artifacts)
+            let code: String
+            if error is CancellationError {
+                code = "CANCELED"
+            } else if let cliError = error as? CLIError {
+                code = cliError.code
+            } else {
+                code = "RUN_ERROR"
+            }
+            let message = error is CancellationError
+                ? "derived speaker proposal was canceled"
+                : failureMessage(for: error)
+            try? writer.write(
+                manifest(
+                    status: error is CancellationError ? .canceled : .failed,
+                    failure: Failure(code: code, message: message)
+                ),
+                at: "manifest.json",
+                replace: true
+            )
+            throw error
+        }
+    }
+
+    /// Read the acoustic evidence P1 discloses on `merged/conflicts.json` and
+    /// return exactly one record per unattributed segment.
+    ///
+    /// A segment that the merger left `UNASSIGNED` because no diarization
+    /// timeline covered it raises no conflict at all, so it legitimately has no
+    /// record. That case gets an explicit empty record rather than being
+    /// dropped: a proposal must never appear beside silence about what the
+    /// acoustics said.
+    private func speakerEvidence(
+        for source: VerifiedRunSource
+    ) throws -> [SegmentSpeakerEvidence] {
+        let unattributed = source.document.segments.indices.filter {
+            UnattributedSpeaker.isUnattributed(
+                source.document.segments[$0].speaker
+            )
+        }
+        guard !unattributed.isEmpty else {
+            throw CLIError.postprocess(
+                "the source run left no segment unattributed, so there is nothing to propose a speaker for"
+            )
+        }
+        guard let artifact = source.verifiedArtifacts.first(where: {
+            $0.kind == "merged_conflicts"
+        }) else {
+            throw CLIError.sourceIntegrity(
+                .requiredArtifactMissing(
+                    kind: "merged_conflicts",
+                    path: "merged/conflicts.json"
+                )
+            )
+        }
+        let url = source.runURL.appendingPathComponent(artifact.path)
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw CLIError.sourceIntegrity(.artifactMissing(artifact.path))
+        }
+        guard try RunIntegrityVerifier.sha256(of: url) == artifact.sha256 else {
+            throw CLIError.sourceIntegrity(
+                .artifactHashMismatch(artifact.path)
+            )
+        }
+        let conflicts: [MergeConflict]
+        do {
+            conflicts = try JSONDecoder().decode([MergeConflict].self, from: data)
+        } catch {
+            throw CLIError.sourceIntegrity(.manifestInvalid)
+        }
+
+        // A segment can raise both an ambiguous-speaker and an
+        // overlapping-speech record and both carry the same attribution. The
+        // ambiguous-speaker record is the one that explains why no speaker was
+        // named, so it wins.
+        var attributionByIndex: [Int: SpeakerAttribution] = [:]
+        for conflict in conflicts {
+            guard let attribution = conflict.speakerAttribution else { continue }
+            if conflict.kind == .ambiguousSpeaker
+                || attributionByIndex[conflict.segmentIndex] == nil
+            {
+                attributionByIndex[conflict.segmentIndex] = attribution
+            }
+        }
+        return unattributed.map { index in
+            guard let attribution = attributionByIndex[index] else {
+                return SegmentSpeakerEvidence(
+                    segmentIndex: index,
+                    outcome: "no_acoustic_record",
+                    candidates: [],
+                    timelineCoverage: 0
+                )
+            }
+            return SegmentSpeakerEvidence(
+                segmentIndex: index,
+                outcome: attribution.outcome.rawValue,
+                candidates: attribution.candidates.map {
+                    SpeakerCandidateEvidence(
+                        speaker: $0.speaker,
+                        overlapS: $0.overlapS,
+                        share: $0.share
+                    )
+                },
+                timelineCoverage: attribution.timelineCoverage
+            )
+        }
+    }
+
+    private func validate(
+        speakerProposal result: SpeakerProposalResult,
+        against original: SegmentsDocument,
+        evidence: [SegmentSpeakerEvidence],
+        sourceSegmentsSHA256: String,
+        sourceCoverage: DerivedSourceCoverage,
+        backend: PostprocessBackendID
+    ) throws {
+        let provenance = result.manifestPostprocess
+        guard provenance.inputMode == .textOnly,
+              provenance.glossarySHA256 == nil,
+              provenance.targetLanguage == nil,
+              provenance.sourceSegmentsSHA256 == sourceSegmentsSHA256,
+              !provenance.modelID.isEmpty,
+              let batching = provenance.batching,
+              batching.batchesPlanned > 0
+        else {
+            throw CLIError.postprocess(
+                "speaker proposal provenance does not match its text-only source"
+            )
+        }
+        switch backend {
+        case .codex:
+            guard provenance.backend.name == "codex-app-server",
+                  !provenance.backend.version.isEmpty,
+                  provenance.modelID == CodexPostprocessBackend.modelName,
+                  provenance.modelRevision == nil,
+                  provenance.quantization == nil,
+                  validates(
+                    batching: batching,
+                    against: CodexPostprocessBackend.defaultBatchPolicy
+                  )
+            else {
+                throw CLIError.postprocess(
+                    "Codex speaker proposal provenance is incomplete or fabricated"
+                )
+            }
+        case .local:
+            let pinned = LocalPostprocessBackend.pinnedModel
+            guard provenance.backend == LocalPostprocessBackend.descriptor,
+                  provenance.modelID == pinned.hfModelID,
+                  provenance.modelRevision == pinned.revision,
+                  provenance.quantization == pinned.quantization,
+                  validates(
+                    batching: batching,
+                    against: LocalPostprocessBackend.defaultBatchPolicy
+                  )
+            else {
+                throw CLIError.postprocess(
+                    "local speaker proposal provenance does not match the pinned model"
+                )
+            }
+        }
+
+        let document = result.document
+        guard document.schemaVersion == MaccheroniSchema.version,
+              document.layer == SpeakerProposalDocument.layer,
+              document.sourceSegmentsSHA256 == sourceSegmentsSHA256,
+              document.sourceCoverage == sourceCoverage,
+              document.unattributedSpeakers == UnattributedSpeaker.labels,
+              document.batches.count == batching.batchesPlanned
+        else {
+            throw CLIError.postprocess(
+                "speaker proposal artifact does not match its canonical source"
+            )
+        }
+        // D50, enforced here and not only in the proposer.  The proposer is an
+        // injected dependency, so a set that omitted the constraint or named a
+        // lower-ranked candidate would otherwise seal successfully.  The
+        // boundary re-derives the top-ranked candidate from the acoustic
+        // evidence in the artifact itself.
+        guard document.constraint == .confirmOrDecline else {
+            throw CLIError.postprocess(
+                "speaker proposal artifact does not declare the confirm-or-decline constraint"
+            )
+        }
+
+        let evidenceByIndex = Dictionary(
+            uniqueKeysWithValues: evidence.map { ($0.segmentIndex, $0) }
+        )
+        let expected = Set(evidenceByIndex.keys)
+        var seen = Set<Int>()
+        let knownSpeakers = Set(original.segments.map(\.speaker))
+            .subtracting(UnattributedSpeaker.labels)
+
+        func check(
+            segmentIndex: Int,
+            reason: String,
+            outcome: String,
+            coverage: Double,
+            candidates: [SpeakerCandidateEvidence]
+        ) throws {
+            guard expected.contains(segmentIndex),
+                  seen.insert(segmentIndex).inserted,
+                  !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  let record = evidenceByIndex[segmentIndex],
+                  record.outcome == outcome,
+                  record.candidates == candidates,
+                  record.timelineCoverage == coverage
+            else {
+                throw CLIError.postprocess(
+                    "speaker proposal artifact has invalid segment coverage"
+                )
+            }
+        }
+
+        for proposal in document.proposals {
+            try check(
+                segmentIndex: proposal.segmentIndex,
+                reason: proposal.reason,
+                outcome: proposal.acousticOutcome,
+                coverage: proposal.acousticTimelineCoverage,
+                candidates: proposal.acousticCandidates
+            )
+            // The layering, restated against the artifact rather than trusted
+            // from the proposer: a proposal never lands on a segment the
+            // acoustics assigned, and never names a speaker the acoustics did
+            // not put in play.
+            guard UnattributedSpeaker.isUnattributed(
+                original.segments[proposal.segmentIndex].speaker
+            ) else {
+                throw CLIError.postprocess(
+                    "speaker proposal targets segment \(proposal.segmentIndex), which the acoustics already assigned"
+                )
+            }
+            let allowed = proposal.acousticCandidates.isEmpty
+                ? knownSpeakers
+                : Set(proposal.acousticCandidates.map(\.speaker))
+            guard allowed.contains(proposal.proposedSpeaker) else {
+                throw CLIError.postprocess(
+                    "speaker proposal for segment \(proposal.segmentIndex) names a speaker the acoustics did not offer"
+                )
+            }
+            // Confirm-or-decline: the only proposal the first iteration may
+            // seal is the unique top-ranked candidate.  A tie has no
+            // top-ranked candidate, so a proposal on a tied segment is a
+            // tie-break resting on no acoustic evidence, which is exactly what
+            // judgment rule 4 was written against.
+            guard let topRanked = SpeakerProposalConstraint.topRankedCandidate(
+                among: proposal.acousticCandidates
+            ) else {
+                throw CLIError.postprocess(
+                    "speaker proposal for segment \(proposal.segmentIndex) has no top-ranked candidate to confirm"
+                )
+            }
+            guard proposal.proposedSpeaker == topRanked else {
+                throw CLIError.postprocess(
+                    "speaker proposal for segment \(proposal.segmentIndex) does not confirm the top-ranked candidate"
+                )
+            }
+        }
+        for decline in document.declined {
+            try check(
+                segmentIndex: decline.segmentIndex,
+                reason: decline.reason,
+                outcome: decline.acousticOutcome,
+                coverage: decline.acousticTimelineCoverage,
+                candidates: decline.acousticCandidates
+            )
+        }
+        guard seen == expected else {
+            throw CLIError.postprocess(
+                "speaker proposal artifact does not account for every unattributed segment"
+            )
+        }
+    }
+
     private func run(
         audio: URL,
         profileName: String,
@@ -1031,6 +1713,11 @@ public struct CLIApplication: Sendable {
         var currentChunkIndex: Int?
         var glossaryApplied = glossary != nil
         var fullTranscriptReady = false
+        var coverageStrategyOverride: CoverageStrategy?
+        /// Set only once the canonical transcript artifacts exist on disk.
+        /// `partial` is a claim that some transcript was produced, so it may
+        /// not be written from chunk bookkeeping alone.
+        var canonicalArtifactsWritten = false
         var manifestPostprocess: ManifestPostprocess?
 
         func manifest(
@@ -1042,7 +1729,9 @@ public struct CLIApplication: Sendable {
         ) -> Manifest {
             let finished = now()
             let strategy: CoverageStrategy
-            if chunks.isEmpty {
+            if let coverageStrategyOverride {
+                strategy = coverageStrategyOverride
+            } else if chunks.isEmpty {
                 strategy = status == .succeeded ? .full : .rejected
             } else {
                 strategy = chunks.count == 1 ? .full : .chunked
@@ -1087,10 +1776,12 @@ public struct CLIApplication: Sendable {
         }
 
         func writeIncompleteManifest(_ message: String) throws {
-            let completed = chunks.contains { $0.status == .succeeded }
+            // Mid-run state index.  It carries the same rule as the final
+            // manifest: `partial` claims a transcript exists, so a run killed
+            // before promotion must not leave that claim behind.
             try writer.write(
                 manifest(
-                    status: completed ? .partial : .failed,
+                    status: canonicalArtifactsWritten ? .partial : .failed,
                     failure: Failure(code: "RUN_INCOMPLETE", message: message),
                     truncated: !fullTranscriptReady,
                     message: message
@@ -1166,15 +1857,12 @@ public struct CLIApplication: Sendable {
                     "MOSS release helper fingerprint is missing"
                 )
             }
-            let nodesPerRoot = selected == .moss
-                ? (1 << (policy.maximumRecoveryDepth + 1)) - 1
-                : 1
+            // Recovery is now available to any backend whose policy declares
+            // a depth, so the worst-case attempt tree and retained audio come
+            // from the depth rather than from the backend identity.
+            let nodesPerRoot = (1 << (policy.maximumRecoveryDepth + 1)) - 1
             let maximumAttemptCount = plannedLeaves.count * nodesPerRoot
-            let retainedLayers = Int64(
-                selected == .moss
-                    ? policy.maximumRecoveryDepth + 2
-                    : 2
-            )
+            let retainedLayers = Int64(policy.maximumRecoveryDepth + 2)
             let retainedPCMBytesUpperBound = totalSamples
                 * retainedLayers * 2
             let maximumRootSamples = plannedLeaves.map(\.sampleCount).max()
@@ -1246,10 +1934,19 @@ public struct CLIApplication: Sendable {
 
             let timeline: Timeline
             if profile.diarization.enabled {
-                let execution = try await dependencies.diarize(
-                    profile.diarization.backend,
-                    DiarizationRequest(audioURL: preprocessed.artifactURL)
-                )
+                let execution: DiarizationTimelineResult
+                do {
+                    execution = try await dependencies.diarize(
+                        profile.diarization.backend,
+                        DiarizationRequest(audioURL: preprocessed.artifactURL)
+                    )
+                } catch {
+                    throw preservedRejectedTimeline(
+                        error,
+                        writer: writer,
+                        artifacts: &artifacts
+                    )
+                }
                 guard !execution.rawJSON.isEmpty else {
                     throw CLIError.run("diarization backend raw evidence is empty")
                 }
@@ -1264,6 +1961,12 @@ public struct CLIApplication: Sendable {
                     ),
                     at: "diarization/normalization-warnings.json"
                 )
+                try writer.write(
+                    execution.orderNormalizations.map(
+                        DiarizationOrderRecord.init
+                    ),
+                    at: "diarization/order-normalizations.json"
+                )
                 try writer.addArtifact(
                     &artifacts,
                     kind: "diarization_backend_raw",
@@ -1273,6 +1976,11 @@ public struct CLIApplication: Sendable {
                     &artifacts,
                     kind: "diarization_normalization_warnings",
                     relative: "diarization/normalization-warnings.json"
+                )
+                try writer.addArtifact(
+                    &artifacts,
+                    kind: "diarization_order_normalizations",
+                    relative: "diarization/order-normalizations.json"
                 )
             } else {
                 timeline = Timeline(segments: [])
@@ -1288,6 +1996,9 @@ public struct CLIApplication: Sendable {
             var transcripts: [ChunkTranscript] = []
             var rawText: [String] = []
             var allEOSLeaves: [CompletedASRLeaf] = []
+            var missingRanges: [SourceMissingRange] = []
+            var partialAttemptIDs: [String] = []
+            var unrecoveredLeaves: [UnrecoveredASRLeaf] = []
             for (rootIndex, rootLeaf) in plannedLeaves.enumerated() {
                 let chunk = planned[rootIndex]
                 currentChunkIndex = chunk.index
@@ -1307,7 +2018,9 @@ public struct CLIApplication: Sendable {
                     format: "chunk-%04d-root",
                     rootIndex
                 )
-                let completedLeaves = try await processASRLeaf(
+                let leafResult: ASRLeafResult
+                do {
+                    leafResult = try await processASRLeaf(
                     rootLeaf,
                     attemptID: rootAttemptID,
                     parentID: nil,
@@ -1321,26 +2034,96 @@ public struct CLIApplication: Sendable {
                     expectedHelperFingerprint: expectedHelperFingerprint,
                     mossContextPlan: mossContextPlan,
                     writer: writer
-                )
+                    )
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    // D51 again, at the root: this chunk's whole range is lost
+                    // and every earlier chunk keeps its transcript.  Before
+                    // this, a direct error from a later root leaf left the
+                    // loop and discarded everything already promoted.
+                    leafResult = ASRLeafResult(unrecovered: [UnrecoveredASRLeaf(
+                        attemptID: rootAttemptID,
+                        leaf: rootLeaf,
+                        stopReason: nil,
+                        failure: UnrecoveredLeafFailure(error)
+                    )])
+                }
                 try writer.addArtifactsRecursively(
                     &artifacts,
                     under: "primary/attempts",
                     kind: "asr_attempt_evidence"
                 )
                 let rawPath = "primary/chunks/\(chunk.index)/backend.raw"
-                let orderedLeaves = completedLeaves.sorted {
+                unrecoveredLeaves += leafResult.unrecovered
+                let orderedLeaves = leafResult.completed.sorted {
                     $0.leaf.startSample < $1.leaf.startSample
                 }
-                try validate(
+                guard !orderedLeaves.isEmpty else {
+                    // Nothing in this chunk was transcribable.  Name every
+                    // range it lost and keep going: later chunks are
+                    // independent work.
+                    missingRanges += leafResult.unrecovered.map {
+                        SourceMissingRange(
+                            startS: Double($0.leaf.startSample)
+                                / Double(policy.sampleRateHz),
+                            endS: Double($0.leaf.endSample)
+                                / Double(policy.sampleRateHz),
+                            attemptID: $0.attemptID,
+                            stopReason: $0.stopReason,
+                            failureCode: $0.failure.code
+                        )
+                    }
+                    chunks[chunk.index].status = .failed
+                    // The chunk still occupies its place in the timeline, with
+                    // no segments.  Dropping it entirely would renumber the
+                    // chunks after it and break their correspondence with the
+                    // manifest boundaries.
+                    transcripts.append(ChunkTranscript(
+                        index: chunk.index,
+                        startS: chunk.startS,
+                        endS: chunk.endS,
+                        primary: ASRHypothesis(
+                            source: selected.rawValue,
+                            result: ASRResult(
+                                rawText: "",
+                                segments: [],
+                                glossaryApplied: false
+                            )
+                        )
+                    ))
+                    currentChunkIndex = nil
+                    try writeIncompleteManifest(
+                        "ASR chunk \(chunk.index) produced no promotable transcript"
+                    )
+                    continue
+                }
+                let leafCoverage = try validate(
                     completedLeaves: orderedLeaves,
-                    covering: rootLeaf
+                    unrecovered: leafResult.unrecovered,
+                    covering: rootLeaf,
+                    sampleRateHz: policy.sampleRateHz
                 )
+                missingRanges += leafCoverage.missing
+                partialAttemptIDs += orderedLeaves
+                    .filter(\.isPartial)
+                    .map(\.attemptID)
                 try writer.write(
                     ASRRootIndexRecord(
                         rootChunkIndex: rootIndex,
                         rootAttemptID: rootAttemptID,
-                        eosLeafAttemptIDs: orderedLeaves.map(\.attemptID),
-                        eosLeafResultSHA256: orderedLeaves.map(\.resultSHA256)
+                        eosLeafAttemptIDs: orderedLeaves
+                            .filter { !$0.isPartial }
+                            .map(\.attemptID),
+                        eosLeafResultSHA256: orderedLeaves
+                            .filter { !$0.isPartial }
+                            .map(\.resultSHA256),
+                        partialPrefixAttemptIDs: orderedLeaves
+                            .filter(\.isPartial)
+                            .map(\.attemptID),
+                        partialPrefixResultSHA256: orderedLeaves
+                            .filter(\.isPartial)
+                            .map(\.resultSHA256)
                     ),
                     at: rawPath
                 )
@@ -1383,11 +2166,19 @@ public struct CLIApplication: Sendable {
                 }
                 allEOSLeaves += orderedLeaves
                 chunks[chunk.index].status = .succeeded
-                processedDuration += chunk.endS - chunk.startS
+                processedDuration += Double(leafCoverage.coveredSamples)
+                    / Double(policy.sampleRateHz)
                 currentChunkIndex = nil
                 try writeIncompleteManifest("ASR chunk \(chunk.index) completed")
             }
 
+            // A run that transcribed nothing has nothing to promote, so it
+            // fails with the cause of its first lost range rather than
+            // producing an empty canonical transcript.
+            if allEOSLeaves.isEmpty {
+                if let first = unrecoveredLeaves.first { throw first.failure }
+                throw CLIError.run("ASR produced no promotable transcript")
+            }
             guard try dependencies.inputSHA256(audio) == inputHash else {
                 throw CLIError.run("original input hash changed before promotion")
             }
@@ -1415,6 +2206,7 @@ public struct CLIApplication: Sendable {
             )
             try writer.write(merged.segmentsDocument, at: "merged/segments.json")
             try writer.write(merged.conflicts, at: "merged/conflicts.json")
+            canonicalArtifactsWritten = true
             let canonicalPaths = [
                 "primary/raw.txt",
                 "primary/segments.json",
@@ -1435,8 +2227,13 @@ public struct CLIApplication: Sendable {
                 CanonicalPromotionRecord(
                     inputSHA256Before: inputHash,
                     inputSHA256AtPromotion: inputHashAtPromotion,
-                    eosLeafAttemptIDs: allEOSLeaves.map(\.attemptID),
-                    eosLeafResultSHA256: allEOSLeaves.map(\.resultSHA256),
+                    eosLeafAttemptIDs: allEOSLeaves
+                        .filter { !$0.isPartial }
+                        .map(\.attemptID),
+                    eosLeafResultSHA256: allEOSLeaves
+                        .filter { !$0.isPartial }
+                        .map(\.resultSHA256),
+                    partialPrefixAttemptIDs: partialAttemptIDs,
                     canonicalArtifactSHA256: canonicalHashes
                 ),
                 at: "primary/promotion.json"
@@ -1451,8 +2248,32 @@ public struct CLIApplication: Sendable {
                 try writer.addArtifact(&artifacts, kind: kind, relative: path)
             }
 
-            processedDuration = duration
-            fullTranscriptReady = true
+            if missingRanges.isEmpty {
+                processedDuration = duration
+                fullTranscriptReady = true
+            } else {
+                // Some planned audio produced no transcript.  The strategy
+                // says so in the coverage record instead of leaving a short
+                // processed duration to be noticed.
+                coverageStrategyOverride = .backendTruncated
+                try writer.write(
+                    PartialCoverageRecord(
+                        inputDurationS: duration,
+                        promotedDurationS: processedDuration,
+                        missingDurationS: missingRanges.reduce(0) {
+                            $0 + ($1.endS - $1.startS)
+                        },
+                        missing: missingRanges,
+                        partialAttemptIDs: partialAttemptIDs
+                    ),
+                    at: "primary/partial-coverage.json"
+                )
+                try writer.addArtifact(
+                    &artifacts,
+                    kind: "partial_coverage",
+                    relative: "primary/partial-coverage.json"
+                )
+            }
             if let postprocessBackend {
                 try writeIncompleteManifest("postprocess started")
                 switch postprocessMode {
@@ -1572,12 +2393,17 @@ public struct CLIApplication: Sendable {
             guard glossary == nil || glossaryApplied else {
                 throw CLIError.glossary("one or more ASR chunks did not apply the glossary")
             }
+            let partialCoverage = partialCoverageFailure(
+                missing: missingRanges,
+                inputDurationS: duration,
+                promotedDurationS: processedDuration
+            )
             try writer.write(
                 manifest(
-                    status: .succeeded,
-                    failure: nil,
-                    truncated: false,
-                    message: nil,
+                    status: partialCoverage == nil ? .succeeded : .partial,
+                    failure: partialCoverage,
+                    truncated: partialCoverage != nil,
+                    message: partialCoverage?.message,
                     glossaryOverride: finalGlossary
                 ),
                 at: "manifest.json",
@@ -1605,10 +2431,24 @@ public struct CLIApplication: Sendable {
             }
             if fullTranscriptReady {
                 processedDuration = duration
-            } else {
-                processedDuration = chunks
-                    .filter { $0.status == .succeeded }
-                    .reduce(0) { $0 + ($1.endS - $1.startS) }
+            } else if canonicalArtifactsWritten {
+                // A chunk that promoted only a recovered prefix is marked
+                // succeeded but did not cover its whole range, so the chunk
+                // boundaries are an upper bound on the processed duration
+                // rather than the value itself.
+                processedDuration = min(
+                    processedDuration,
+                    chunks
+                        .filter { $0.status == .succeeded }
+                        .reduce(0) { $0 + ($1.endS - $1.startS) }
+                )
+            } else if !(error is CancellationError) {
+                // The run aborted before promotion, so no transcript exists
+                // anywhere.  Reporting the audio it happened to reach as
+                // processed would be a false claim, not a partial result.
+                // A cancel is different: the policy requires completed outputs
+                // to be preserved, and `canceled` already says the run stopped.
+                processedDuration = 0
             }
             var code = failureCode(for: error)
             var message = failureMessage(for: error)
@@ -1623,9 +2463,9 @@ public struct CLIApplication: Sendable {
             case "CANCELED":
                 status = .canceled
             default:
-                status = chunks.contains { $0.status == .succeeded }
-                    ? .partial
-                    : .failed
+                // `partial` means some transcript was promoted, never that
+                // some chunk bookkeeping succeeded before the abort.
+                status = canonicalArtifactsWritten ? .partial : .failed
             }
             let failedManifest = manifest(
                 status: status,
@@ -1640,12 +2480,20 @@ public struct CLIApplication: Sendable {
                     "\(message) [run: \(writer.directory.path); failure manifest: \(manifestError.localizedDescription)]"
                 )
             }
-            if code == "MOSS_LIMIT_EXHAUSTED" {
-                throw CLIError.mossLimitExhausted(
-                    "\(message) [run: \(writer.directory.path)]"
-                )
+            // Keep the typed cause on the way out: the manifest already
+            // records it, and a caller that only sees the thrown error must
+            // be able to tell a spent limit from a collapsed decoder.
+            let annotated = "\(message) [run: \(writer.directory.path)]"
+            switch code {
+            case "MOSS_LIMIT_EXHAUSTED":
+                throw CLIError.mossLimitExhausted(annotated)
+            case "ASR_LIMIT_EXHAUSTED":
+                throw CLIError.asrLimitExhausted(annotated)
+            case "ASR_REPETITION_LOOPING":
+                throw CLIError.asrRepetitionLooping(annotated)
+            default:
+                throw CLIError.run(annotated)
             }
-            throw CLIError.run("\(message) [run: \(writer.directory.path)]")
         }
     }
 
@@ -1663,7 +2511,7 @@ public struct CLIApplication: Sendable {
         expectedHelperFingerprint: ASRHelperFingerprint?,
         mossContextPlan: MOSSContextPlan?,
         writer: RunWriter
-    ) async throws -> [CompletedASRLeaf] {
+    ) async throws -> ASRLeafResult {
         do {
             return try await processPreparedASRLeaf(
                 leaf,
@@ -1743,7 +2591,7 @@ public struct CLIApplication: Sendable {
         expectedHelperFingerprint: ASRHelperFingerprint?,
         mossContextPlan: MOSSContextPlan?,
         writer: RunWriter
-    ) async throws -> [CompletedASRLeaf] {
+    ) async throws -> ASRLeafResult {
         let base = "primary/attempts/\(attemptID)"
         let audioPath = "\(base)/audio.wav"
         let audioURL = try extractChunk(
@@ -1873,12 +2721,14 @@ public struct CLIApplication: Sendable {
                 ),
                 at: "\(base)/outcome.json"
             )
-            return [CompletedASRLeaf(
+            return ASRLeafResult(completed: [CompletedASRLeaf(
                 attemptID: attemptID,
                 leaf: leaf,
                 execution: execution,
-                resultSHA256: resultSHA256
-            )]
+                resultSHA256: resultSHA256,
+                coveredEndSample: leaf.endSample,
+                stopReason: .endOfSequence
+            )])
 
             case let .limit(limit):
             try validate(
@@ -1898,10 +2748,7 @@ public struct CLIApplication: Sendable {
                 base: base,
                 writer: writer
             )
-            guard selected == .moss,
-                  limit.stopReason == .maximumTokens
-                    || limit.stopReason == .contextLimit
-            else {
+            guard limit.stopReason.isLimitOutcome else {
                 try writer.write(
                     limitOutcomeRecord(
                         attemptID: attemptID,
@@ -1912,6 +2759,7 @@ public struct CLIApplication: Sendable {
                         evidence: limit.evidence,
                         evidencePaths: evidence,
                         attemptTokenPlan: attemptTokenPlan,
+                        errorCode: "RUN_ERROR",
                         errorMessage: "backend emitted an unsupported limit outcome"
                     ),
                     at: "\(base)/outcome.json"
@@ -1929,22 +2777,58 @@ public struct CLIApplication: Sendable {
                     configuration: policy.planningConfiguration
                 )
             } catch {
-                let message = "MOSS \(limit.stopReason.rawValue) persisted at depth \(leaf.depth) for samples [\(leaf.startSample), \(leaf.endSample))"
+                // Recovery is spent for this range.  Before failing the run,
+                // promote whatever leading transcript the backend recovered:
+                // a collapsed leaf commonly holds a correct prefix covering
+                // most of its audio, and discarding it is total loss.
+                if let promoted = try promotePartialPrefix(
+                    limit,
+                    leaf: leaf,
+                    attemptID: attemptID,
+                    requestSHA256: requestSHA256,
+                    base: base,
+                    request: request,
+                    policy: policy,
+                    glossary: glossary,
+                    selected: selected,
+                    evidencePaths: evidence,
+                    attemptTokenPlan: attemptTokenPlan,
+                    writer: writer
+                ) {
+                    return ASRLeafResult(completed: [promoted])
+                }
+                let exhausted = limitExhaustionFailure(
+                    backend: selected,
+                    stopReason: limit.stopReason,
+                    leaf: leaf
+                )
                 try writer.write(
                     limitOutcomeRecord(
                         attemptID: attemptID,
                         requestSHA256: requestSHA256,
-                        status: .limitExhausted,
+                        status: limit.stopReason == .repetitionLooping
+                            ? .repetitionLooping
+                            : .limitExhausted,
                         stopReason: limit.stopReason,
                         childAttemptIDs: [],
                         evidence: limit.evidence,
                         evidencePaths: evidence,
                         attemptTokenPlan: attemptTokenPlan,
-                        errorMessage: message
+                        errorCode: exhausted.code,
+                        errorMessage: failureMessage(for: exhausted)
                     ),
                     at: "\(base)/outcome.json"
                 )
-                throw CLIError.mossLimitExhausted(message)
+                // This range is lost, and only this range.  Returning it as
+                // unrecovered instead of throwing is what keeps every sibling
+                // leaf and every other chunk: a run that loses one leaf must
+                // not discard the transcript it already has.
+                return ASRLeafResult(unrecovered: [UnrecoveredASRLeaf(
+                    attemptID: attemptID,
+                    leaf: leaf,
+                    stopReason: limit.stopReason,
+                    failure: UnrecoveredLeafFailure(exhausted)
+                )])
             }
             let childIDs = ["\(attemptID)-l", "\(attemptID)-r"]
             try writer.write(
@@ -1957,15 +2841,15 @@ public struct CLIApplication: Sendable {
                     evidence: limit.evidence,
                     evidencePaths: evidence,
                     attemptTokenPlan: attemptTokenPlan,
+                    errorCode: nil,
                     errorMessage: nil
                 ),
                 at: "\(base)/outcome.json"
             )
-            var completed: [CompletedASRLeaf] = []
-            var firstChildError: Error?
+            var childResults = ASRLeafResult()
             for index in children.indices {
                 do {
-                    completed += try await processASRLeaf(
+                    childResults += try await processASRLeaf(
                         children[index],
                         attemptID: childIDs[index],
                         parentID: attemptID,
@@ -1980,27 +2864,38 @@ public struct CLIApplication: Sendable {
                         mossContextPlan: mossContextPlan,
                         writer: writer
                     )
-                } catch {
-                    if firstChildError == nil { firstChildError = error }
-                    if error is CancellationError {
-                        for remainingIndex in children.indices
-                            where remainingIndex > index
-                        {
-                            try writeUnstartedCanceledAttempt(
-                                attemptID: childIDs[remainingIndex],
-                                selected: selected,
-                                glossary: glossary,
-                                expectedHelperFingerprint:
-                                    expectedHelperFingerprint,
-                                writer: writer
-                            )
-                        }
-                        break
+                } catch let cancellation as CancellationError {
+                    for remainingIndex in children.indices
+                        where remainingIndex > index
+                    {
+                        try writeUnstartedCanceledAttempt(
+                            attemptID: childIDs[remainingIndex],
+                            selected: selected,
+                            glossary: glossary,
+                            expectedHelperFingerprint:
+                                expectedHelperFingerprint,
+                            writer: writer
+                        )
                     }
+                    // A cancel is the operator ending the whole run, not this
+                    // child losing its range, so it still propagates.
+                    throw cancellation
+                } catch {
+                    // D51 applies to every leaf failure, not only to spent
+                    // limits: this child loses its own range and nothing else.
+                    // Rethrowing here discarded the sibling that had already
+                    // succeeded, and with it every chunk before this one.  The
+                    // child's own `outcome.json` already records the typed
+                    // cause; the range now travels with it.
+                    childResults.unrecovered.append(UnrecoveredASRLeaf(
+                        attemptID: childIDs[index],
+                        leaf: children[index],
+                        stopReason: nil,
+                        failure: UnrecoveredLeafFailure(error)
+                    ))
                 }
             }
-            if let firstChildError { throw firstChildError }
-            return completed
+            return childResults
             }
         } catch {
             let outcomePath = "\(base)/outcome.json"
@@ -2038,6 +2933,190 @@ public struct CLIApplication: Sendable {
             }
             throw error
         }
+    }
+
+    /// Name the failure a spent limit outcome becomes.  MOSS keeps its own
+    /// code and message so its recovery tree reads exactly as before; every
+    /// other backend gets a code that says which cause it was, because the
+    /// failure screen cannot tell causes apart from `RUN_ERROR`.
+    /// State partial coverage as a failure object on an otherwise finished
+    /// run.  A run that promoted every recovered prefix it could still did
+    /// not transcribe every planned second, and the manifest says which
+    /// seconds and why rather than reporting the run as complete.
+    private func partialCoverageFailure(
+        missing: [SourceMissingRange],
+        inputDurationS: Double,
+        promotedDurationS: Double
+    ) -> Failure? {
+        guard !missing.isEmpty else { return nil }
+        let looping = missing.contains { $0.stopReason == .repetitionLooping }
+        // Prefer a looping cause when one is present, otherwise keep the
+        // first recorded code so a MOSS run still reports MOSS_LIMIT_EXHAUSTED.
+        let code = missing.first {
+            $0.stopReason == .repetitionLooping
+        }?.failureCode ?? missing[0].failureCode
+        let ranges = missing
+            .map { "[\(format(seconds: $0.startS)), \(format(seconds: $0.endS))) s" }
+            .joined(separator: ", ")
+        // Not every lost range is a spent limit any more: a leaf can also fail
+        // outright, and saying it exhausted recovery would misdescribe what
+        // the run observed.
+        let cause = if looping {
+            " after repetition looping exhausted recovery"
+        } else if missing.contains(where: { $0.stopReason != nil }) {
+            " after a limit outcome exhausted recovery"
+        } else {
+            " after the leaf failed"
+        }
+        let message = """
+        promoted \(format(seconds: promotedDurationS)) s of \
+        \(format(seconds: inputDurationS)) s; \(missing.count) range(s) produced no \
+        transcript\(cause): \(ranges)
+        """
+        return Failure(code: code, message: message)
+    }
+
+    private func limitExhaustionFailure(
+        backend: SelectedASRBackend,
+        stopReason: ASRAttemptStopReason,
+        leaf: InferenceLeaf
+    ) -> CLIError {
+        let range = "at depth \(leaf.depth) for samples [\(leaf.startSample), \(leaf.endSample))"
+        if backend == .moss {
+            return .mossLimitExhausted(
+                "MOSS \(stopReason.rawValue) persisted \(range)"
+            )
+        }
+        if stopReason == .repetitionLooping {
+            return .asrRepetitionLooping(
+                "\(backend.rawValue) repetition looping persisted \(range) with no promotable prefix"
+            )
+        }
+        return .asrLimitExhausted(
+            "\(backend.rawValue) \(stopReason.rawValue) persisted \(range)"
+        )
+    }
+
+    /// Promote the leading valid transcript a spent limit outcome still holds.
+    /// The promoted range is smaller than the leaf, so the caller records the
+    /// remainder as missing rather than as processed.
+    private func promotePartialPrefix(
+        _ limit: CLIASRLimit,
+        leaf: InferenceLeaf,
+        attemptID: String,
+        requestSHA256: String,
+        base: String,
+        request: ASRRequest,
+        policy: CLIASRInferencePolicy,
+        glossary: Glossary?,
+        selected: SelectedASRBackend,
+        evidencePaths: (
+            runnerPath: String,
+            runnerSHA256: String,
+            rawPath: String,
+            rawSHA256: String
+        ),
+        attemptTokenPlan: MOSSAttemptTokenPlan?,
+        writer: RunWriter
+    ) throws -> CompletedASRLeaf? {
+        guard let prefix = limit.partialPrefix,
+              prefix.promotedObjectCount > 0,
+              !prefix.segments.isEmpty,
+              !prefix.rawText.isEmpty,
+              prefix.coverageS > 0
+        else { return nil }
+        let coveredEndSample = min(
+            leaf.endSample,
+            leaf.startSample
+                + Int64((prefix.coverageS * Double(policy.sampleRateHz)).rounded(.down))
+        )
+        guard coveredEndSample > leaf.startSample else { return nil }
+        let execution = CLIASRExecution(
+            result: ASRResult(
+                rawText: prefix.rawText,
+                segments: prefix.segments,
+                glossaryApplied: glossary != nil
+            ),
+            evidence: limit.evidence
+        )
+        try validate(
+            execution: execution,
+            request: request,
+            glossary: glossary,
+            selected: selected
+        )
+        let resultPath = "\(base)/result.json"
+        try writer.write(execution.result, at: resultPath)
+        let resultSHA256 = try AudioPreprocessor.sha256(
+            of: writer.directory.appendingPathComponent(resultPath)
+        )
+        try writer.write(
+            ASRAttemptOutcomeRecord(
+                attemptID: attemptID,
+                requestSHA256: requestSHA256,
+                status: .partialPrefixPromoted,
+                stopReason: limit.stopReason,
+                canonicalPromoted: false,
+                childAttemptIDs: [],
+                runnerRecordPath: evidencePaths.runnerPath,
+                runnerRecordSHA256: evidencePaths.runnerSHA256,
+                backendRawPath: evidencePaths.rawPath,
+                backendRawSHA256: evidencePaths.rawSHA256,
+                resultPath: resultPath,
+                resultSHA256: resultSHA256,
+                glossary: limit.evidence.glossary,
+                glossaryPayloadSHA256: limit.evidence.glossaryPayloadSHA256,
+                glossaryPayloadEntryCount: limit.evidence
+                    .glossaryPayloadEntryCount,
+                metrics: limit.evidence.metrics,
+                audioTokens: attemptTokenPlan?.audioTokens,
+                contextTokens: limit.evidence.metrics.map {
+                    $0.promptTokens + $0.generatedTokens
+                },
+                language: limit.evidence.language,
+                helperFingerprint: limit.evidence.helperFingerprint,
+                command: limit.evidence.command,
+                errorCode: limit.stopReason == .repetitionLooping
+                    ? CLIError.asrRepetitionLooping("").code
+                    : CLIError.asrLimitExhausted("").code,
+                errorMessage: partialPrefixMessage(
+                    prefix,
+                    stopReason: limit.stopReason,
+                    leaf: leaf,
+                    sampleRateHz: policy.sampleRateHz
+                )
+            ),
+            at: "\(base)/outcome.json"
+        )
+        return CompletedASRLeaf(
+            attemptID: attemptID,
+            leaf: leaf,
+            execution: execution,
+            resultSHA256: resultSHA256,
+            coveredEndSample: coveredEndSample,
+            stopReason: limit.stopReason
+        )
+    }
+
+    private func partialPrefixMessage(
+        _ prefix: ASRPartialPrefix,
+        stopReason: ASRAttemptStopReason,
+        leaf: InferenceLeaf,
+        sampleRateHz: Int
+    ) -> String {
+        let leafDuration = Double(leaf.sampleCount) / Double(sampleRateHz)
+        return """
+        promoted the valid transcript prefix after \(stopReason.rawValue): \
+        \(format(seconds: prefix.coverageS)) s of \(format(seconds: leafDuration)) s, \
+        \(prefix.promotedObjectCount) of \(prefix.completeObjectCount) recovered segments, \
+        \(prefix.degenerateObjectCount) of them marked repetition_looping; \
+        longest repeated run \(prefix.repetitionRunMaximum) inside the prefix and \
+        \(prefix.tailRepetitionRun) in the discarded tail
+        """
+    }
+
+    private func format(seconds: Double) -> String {
+        String(format: "%.3f", seconds)
     }
 
     private func writeUnstartedCanceledAttempt(
@@ -2130,6 +3209,7 @@ public struct CLIApplication: Sendable {
             rawSHA256: String
         ),
         attemptTokenPlan: MOSSAttemptTokenPlan?,
+        errorCode: String?,
         errorMessage: String?
     ) -> ASRAttemptOutcomeRecord {
         ASRAttemptOutcomeRecord(
@@ -2156,7 +3236,7 @@ public struct CLIApplication: Sendable {
             language: evidence.language,
             helperFingerprint: evidence.helperFingerprint,
             command: evidence.command,
-            errorCode: errorMessage == nil ? nil : "MOSS_LIMIT_EXHAUSTED",
+            errorCode: errorMessage == nil ? nil : errorCode,
             errorMessage: errorMessage
         )
     }
@@ -2514,31 +3594,91 @@ public struct CLIApplication: Sendable {
         }
     }
 
+    /// Check that the promoted attempts tile their root exactly and report
+    /// what they actually covered.  Leaf planning still has to cover every
+    /// sample; a leaf that promoted only a recovered prefix contributes its
+    /// covered range and names the remainder as missing.
+    /// Check that every planned leaf of this root is accounted for, and report
+    /// what was actually covered.  Planning still has to tile the root exactly;
+    /// a leaf may now account for its range by promoting a prefix or by being
+    /// recorded as unrecovered, and either way the gap is named rather than
+    /// dropped.
     private func validate(
         completedLeaves: [CompletedASRLeaf],
-        covering root: InferenceLeaf
-    ) throws {
+        unrecovered: [UnrecoveredASRLeaf],
+        covering root: InferenceLeaf,
+        sampleRateHz: Int
+    ) throws -> (coveredSamples: Int64, missing: [SourceMissingRange]) {
         guard !completedLeaves.isEmpty else {
-            throw CLIError.run("ASR root produced no EOS leaves")
+            throw CLIError.run("ASR root produced no promotable leaves")
         }
+        enum Accounted {
+            case promoted(CompletedASRLeaf)
+            case unrecovered(UnrecoveredASRLeaf)
+
+            var leaf: InferenceLeaf {
+                switch self {
+                case let .promoted(value): value.leaf
+                case let .unrecovered(value): value.leaf
+                }
+            }
+        }
+        let accounted = (completedLeaves.map(Accounted.promoted)
+            + unrecovered.map(Accounted.unrecovered))
+            .sorted { $0.leaf.startSample < $1.leaf.startSample }
         var cursor = root.startSample
-        for completed in completedLeaves {
-            guard completed.leaf.startSample == cursor,
-                  completed.leaf.endSample > completed.leaf.startSample,
-                  completed.leaf.endSample <= root.endSample,
-                  !completed.resultSHA256.isEmpty
+        var coveredSamples: Int64 = 0
+        var missing: [SourceMissingRange] = []
+        for entry in accounted {
+            let leaf = entry.leaf
+            guard leaf.startSample == cursor,
+                  leaf.endSample > leaf.startSample,
+                  leaf.endSample <= root.endSample
             else {
                 throw CLIError.run(
-                    "EOS attempt leaves do not exactly cover their root"
+                    "attempt leaves do not exactly cover their root"
                 )
             }
-            cursor = completed.leaf.endSample
+            switch entry {
+            case let .promoted(completed):
+                guard completed.coveredEndSample > leaf.startSample,
+                      completed.coveredEndSample <= leaf.endSample,
+                      !completed.resultSHA256.isEmpty
+                else {
+                    throw CLIError.run(
+                        "attempt leaves do not exactly cover their root"
+                    )
+                }
+                coveredSamples += completed.coveredEndSample - leaf.startSample
+                if completed.coveredEndSample < leaf.endSample {
+                    missing.append(SourceMissingRange(
+                        startS: Double(completed.coveredEndSample)
+                            / Double(sampleRateHz),
+                        endS: Double(leaf.endSample) / Double(sampleRateHz),
+                        attemptID: completed.attemptID,
+                        stopReason: completed.stopReason,
+                        failureCode: completed.stopReason == .repetitionLooping
+                            ? CLIError.asrRepetitionLooping("").code
+                            : CLIError.asrLimitExhausted("").code
+                    ))
+                }
+            case let .unrecovered(entry):
+                missing.append(SourceMissingRange(
+                    startS: Double(leaf.startSample) / Double(sampleRateHz),
+                    endS: Double(leaf.endSample) / Double(sampleRateHz),
+                    attemptID: entry.attemptID,
+                    stopReason: entry.stopReason,
+                    failureCode: entry.failure.code
+                ))
+            }
+            cursor = leaf.endSample
         }
         guard cursor == root.endSample else {
             throw CLIError.run(
-                "EOS attempt leaves do not exactly cover their root"
+                "attempt leaves do not exactly cover their root"
             )
         }
+        return (coveredSamples, missing)
     }
 
     private func validate(
@@ -3032,6 +4172,109 @@ private struct DiarizationWarningRecord: Codable {
     }
 }
 
+private struct DiarizationOrderRecord: Codable {
+    var emittedIndex: Int
+    var normalizedIndex: Int
+    var speaker: String
+    var startS: Double
+    var endS: Double
+
+    init(_ normalization: DiarizationOrderNormalization) {
+        emittedIndex = normalization.emittedIndex
+        normalizedIndex = normalization.normalizedIndex
+        speaker = normalization.speaker
+        startS = normalization.startS
+        endS = normalization.endS
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case emittedIndex = "emitted_index"
+        case normalizedIndex = "normalized_index"
+        case speaker
+        case startS = "start_s"
+        case endS = "end_s"
+    }
+}
+
+/// Where a derived run keeps its marked speaker proposal. It sits under its own
+/// prefix rather than under `postprocess/`, because nothing here is a text
+/// operation and a reader listing the set should be able to tell that from the
+/// path alone.
+private let speakerProposalArtifactPath = "speaker/proposals.json"
+private let speakerProposalArtifactKind = "speaker_proposals"
+
+/// Where a rejected backend timeline is kept inside the run directory, beside
+/// the `diarization/backend.raw.json` an accepted one produces.
+private let rejectedDiarizationArtifactPath =
+    "diarization/rejected-backend.raw.json"
+private let rejectedDiarizationArtifactKind =
+    "diarization_rejected_backend_raw"
+
+/// Copy a rejected diarization timeline into the run directory and rename the
+/// failure after that copy.
+///
+/// `DiarizationError.rejectedOutput` already carries the exact bytes the
+/// backend emitted, but it names them at a path the run does not own: either
+/// `$TMPDIR/Maccheroni/diarization/rejected/`, which the OS sweeps on its own
+/// schedule, or the FluidAudio harness's own output file. Either way a
+/// rejection was diagnosable only for as long as something outside the run
+/// directory happened to survive. The payload holds no transcript text — across
+/// the 18 samples captured on 2026-09-01 its complete key set is `segments`,
+/// `num_speakers`, `speaker`, `start`, `end` and `duration`, numeric apart from
+/// the cluster label — so the run may keep it, though nothing here may be
+/// committed.
+///
+/// Anything that is not a rejection passes through unchanged, and a rejection
+/// whose bytes are already gone or cannot be written keeps its diagnosis: a
+/// diagnosis must not be replaced by a filesystem complaint.
+private func preservedRejectedTimeline(
+    _ error: Error,
+    writer: RunWriter,
+    artifacts: inout [Artifact]
+) -> Error {
+    guard let rejection = error as? DiarizationError,
+          case let .rejectedOutput(reason, rawOutputPath) = rejection
+    else { return error }
+    guard let rawJSON = try? Data(
+        contentsOf: URL(fileURLWithPath: rawOutputPath)
+    ) else { return UnpreservedRejectedTimeline(reason: reason) }
+    do {
+        try writer.write(rawJSON, at: rejectedDiarizationArtifactPath)
+        try writer.addArtifact(
+            &artifacts,
+            kind: rejectedDiarizationArtifactKind,
+            relative: rejectedDiarizationArtifactPath
+        )
+    } catch {
+        return UnpreservedRejectedTimeline(reason: reason)
+    }
+    return DiarizationError.rejectedOutput(
+        reason: reason,
+        rawOutputPath: rejectedDiarizationArtifactPath
+    )
+}
+
+/// A rejected diarization timeline whose bytes could not be kept inside the
+/// run, either because the sweep had already taken them or because the
+/// run-local copy failed.
+///
+/// `DiarizationError.rejectedOutput` describes itself as kept at its
+/// `rawOutputPath`, which in this state is an absolute path outside the run
+/// that no longer holds the payload.  Sealing that sentence made the run claim
+/// evidence it does not have and wrote a machine-local path into a manifest
+/// that is read elsewhere.  This keeps the diagnosis, says the payload was not
+/// preserved, and names no path at all.
+private struct UnpreservedRejectedTimeline: Error, LocalizedError {
+    var reason: DiarizationError
+
+    var errorDescription: String? {
+        let diagnosis = reason.errorDescription
+            ?? "diarization output was rejected"
+        return "\(diagnosis); the rejected backend timeline could not be "
+            + "preserved in the run and is no longer available"
+    }
+}
+
 private enum CLICommand {
     case run(URL, String, URL?, URL?, URL?)
     case postprocess(
@@ -3041,12 +4284,13 @@ private enum CLICommand {
         URL?,
         DerivedGlossarySemantics
     )
+    case proposeSpeakers(URL, String, URL?)
     case doctor(String?, URL?)
 
     static func parse(_ arguments: [String]) throws -> CLICommand {
         guard let command = arguments.first else {
             throw CLIError.usage(
-                "usage: maccheroni run <audio> --profile <name> | postprocess <run> --profile <name> | doctor [--profile <name>]"
+                "usage: maccheroni run <audio> --profile <name> | postprocess <run> --profile <name> | propose-speakers <run> --profile <name> | doctor [--profile <name>]"
             )
         }
         var values: [String: String] = [:]
@@ -3080,6 +4324,10 @@ private enum CLICommand {
                 "--glossary",
                 "--glossary-semantics",
             ]
+        case "propose-speakers":
+            // No glossary options: a glossary is decode-time context for words,
+            // and this operation proposes speakers rather than text.
+            allowed = ["--profile", "--profiles"]
         case "doctor":
             allowed = ["--profile", "--profiles"]
         default:
@@ -3128,6 +4376,18 @@ private enum CLICommand {
                 glossarySemantics
             )
         }
+        if command == "propose-speakers" {
+            guard positional.count == 1, let profile = values["--profile"] else {
+                throw CLIError.usage(
+                    "usage: maccheroni propose-speakers <run> --profile <name>"
+                )
+            }
+            return .proposeSpeakers(
+                URL(fileURLWithPath: positional[0], isDirectory: true),
+                profile,
+                values["--profiles"].map(URL.init(fileURLWithPath:))
+            )
+        }
         guard positional.isEmpty else {
             throw CLIError.usage(
                 "usage: maccheroni doctor [--profile <name>]"
@@ -3143,6 +4403,7 @@ private enum CLICommand {
 private final class RunWriter: @unchecked Sendable {
     let directory: URL
     let id: String
+    private let containmentRoot: String
 
     init(root: URL, id: String) throws {
         guard id.range(
@@ -3164,15 +4425,15 @@ private final class RunWriter: @unchecked Sendable {
             at: directory,
             withIntermediateDirectories: false
         )
+        containmentRoot = RunWriter.containmentPath(of: directory) + "/"
     }
 
     func relative(_ url: URL) throws -> String {
-        let base = directory.standardizedFileURL.path + "/"
-        let path = url.standardizedFileURL.path
-        guard path.hasPrefix(base) else {
+        let path = RunWriter.containmentPath(of: url)
+        guard path.hasPrefix(containmentRoot) else {
             throw CLIError.run("artifact is outside the run directory")
         }
-        return String(path.dropFirst(base.count))
+        return String(path.dropFirst(containmentRoot.count))
     }
 
     func write<T: Encodable>(
@@ -3322,11 +4583,33 @@ private final class RunWriter: @unchecked Sendable {
         else {
             throw CLIError.run("invalid run-relative path: \(relative)")
         }
-        let target = directory.appendingPathComponent(relative).standardizedFileURL
-        guard target.path.hasPrefix(directory.standardizedFileURL.path + "/") else {
+        let target = directory.appendingPathComponent(relative).standardized
+        guard RunWriter.containmentPath(of: target).hasPrefix(containmentRoot) else {
             throw CLIError.run("run-relative path escaped the run directory")
         }
         return target
+    }
+
+    /// Normalizes a path so both sides of a containment check land in the same
+    /// namespace.  `standardizedFileURL` folds `/private/tmp` to `/tmp` only for
+    /// paths that already exist, so an existing run directory and a target file
+    /// that has not been written yet normalize to different roots and a
+    /// contained path is reported as an escape.  Resolving the deepest existing
+    /// ancestor and re-appending the rest does not depend on what exists.
+    private static func containmentPath(of url: URL) -> String {
+        var existing = URL(fileURLWithPath: url.path).standardized
+        var pending: [String] = []
+        while !FileManager.default.fileExists(atPath: existing.path) {
+            let parent = existing.deletingLastPathComponent()
+            guard parent.path != existing.path else { break }
+            pending.append(existing.lastPathComponent)
+            existing = parent
+        }
+        var normalized = existing.resolvingSymlinksInPath()
+        for component in pending.reversed() {
+            normalized.appendPathComponent(component)
+        }
+        return normalized.path
     }
 
     private func regularFiles(under root: URL) throws -> [URL] {
@@ -3418,6 +4701,9 @@ private func typedASRAttemptStatus(
 
 private func failureCode(for error: Error) -> String {
     if let error = error as? CLIError { return error.code }
+    // A lost leaf already resolved its cause; rethrowing it must not flatten
+    // that back into a generic run error.
+    if let error = error as? UnrecoveredLeafFailure { return error.code }
     if error is CancellationError { return "CANCELED" }
     if let error = error as? ASRAdapterError,
        let status = typedASRAttemptStatus(for: error)
@@ -3429,7 +4715,10 @@ private func failureCode(for error: Error) -> String {
     case is VoiceActivityError: "VAD_ERROR"
     case is ChunkPlanningError, is InferenceLeafPlanningError:
         "CHUNK_PLAN_ERROR"
-    case is DiarizationError: "DIARIZATION_ERROR"
+    // A rejection whose bytes could not be preserved is still a diarization
+    // rejection, and keeps that code.
+    case is DiarizationError, is UnpreservedRejectedTimeline:
+        "DIARIZATION_ERROR"
     case is ASRAdapterError: "ASR_ERROR"
     case is TimelineMergeError: "MERGE_ERROR"
     case is GlossaryError: "GLOSSARY_ERROR"
@@ -3941,6 +5230,22 @@ private func productionTranslation(
         return try await TranscriptTranslator(
             backend: LocalPostprocessBackend()
         ).translate(request)
+    }
+}
+
+private func productionSpeakerProposal(
+    _ backend: PostprocessBackendID,
+    _ request: SpeakerProposalRequest
+) async throws -> SpeakerProposalResult {
+    switch backend {
+    case .codex:
+        return try await SpeakerProposer(
+            backend: CodexPostprocessBackend()
+        ).propose(request)
+    case .local:
+        return try await SpeakerProposer(
+            backend: LocalPostprocessBackend()
+        ).propose(request)
     }
 }
 

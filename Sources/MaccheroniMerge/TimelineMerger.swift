@@ -49,27 +49,134 @@ public enum MergeConflictKind: String, Codable, Equatable, Sendable {
     case asrDisagreement = "asr_disagreement"
 }
 
+/// Why speaker attribution reached the speaker it reached, one case per return
+/// site of `TimelineMerger.speakerAssignment(for:timeline:)`.
+public enum SpeakerAttributionOutcome: String, Codable, Equatable, Sendable {
+    /// One speaker held a dominant share of the segment's clipped overlap.
+    case attributed
+    /// No diarization turn overlapped the ASR interval at all.
+    case noOverlappingTurn = "no_overlapping_turn"
+    /// Turns overlapped, but they covered less of the interval than
+    /// `minimumTimelineCoverage` requires.
+    case coverageBelowThreshold = "coverage_below_threshold"
+    /// Coverage was sufficient, but no speaker reached
+    /// `dominantSpeakerShare` with a margin over the runner-up.
+    case noDominantSpeaker = "no_dominant_speaker"
+}
+
+/// One global speaker that overlapped an ASR segment, with how much of the
+/// segment it held. `share` is that speaker's fraction of the segment's total
+/// clipped speaker-overlap time, the quantity compared against
+/// `dominantSpeakerShare`; shares over all candidates sum to 1.
+public struct SpeakerCandidate: Codable, Equatable, Sendable {
+    public var speaker: String
+    public var overlapS: Double
+    public var share: Double
+
+    public init(speaker: String, overlapS: Double, share: Double) {
+        self.speaker = speaker
+        self.overlapS = overlapS
+        self.share = share
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case speaker, share
+        case overlapS = "overlap_s"
+    }
+}
+
+/// The thresholds that were applied to this segment, recorded per conflict
+/// because no other run artifact carries the merge configuration.
+public struct SpeakerAttributionThresholds: Codable, Equatable, Sendable {
+    public var dominantSpeakerShare: Double
+    public var minimumTimelineCoverage: Double
+    /// The smallest overlap the merger counts, and the smallest winner margin
+    /// it accepts. It is a threshold, not a rounding constant: with overlaps of
+    /// 6 s and 5 s, which clear a 0.50 dominant share either way, a tiny value
+    /// names the leader while a value above the one-second margin returns
+    /// `no_dominant_speaker`. Recorded so a sealed conflict file reproduces the
+    /// assignment rather than only two of the three numbers that decided it.
+    /// Optional because conflict files written before 2026-09-02 do not carry
+    /// it, and a reader must be able to tell an unrecorded value from a
+    /// recorded one.
+    public var overlapEpsilonS: Double?
+
+    public init(
+        dominantSpeakerShare: Double,
+        minimumTimelineCoverage: Double,
+        overlapEpsilonS: Double? = nil
+    ) {
+        self.dominantSpeakerShare = dominantSpeakerShare
+        self.minimumTimelineCoverage = minimumTimelineCoverage
+        self.overlapEpsilonS = overlapEpsilonS
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case dominantSpeakerShare = "dominant_speaker_share"
+        case minimumTimelineCoverage = "minimum_timeline_coverage"
+        case overlapEpsilonS = "overlap_epsilon_s"
+    }
+}
+
+/// The acoustic evidence speaker attribution read for one ASR segment: which
+/// speakers were candidates, for how long each, how much of the interval the
+/// timeline covered, what bar was applied, and how it came out. It discloses
+/// numbers the merger already computes; it adds no inference.
+public struct SpeakerAttribution: Codable, Equatable, Sendable {
+    public var outcome: SpeakerAttributionOutcome
+    /// Ordered by descending overlap, ties broken by ascending speaker ID. The
+    /// same order, and the same speakers, as `MergeConflict.candidates`.
+    public var candidates: [SpeakerCandidate]
+    /// Union of every clipped turn over the segment's duration, in `0...1`.
+    public var timelineCoverage: Double
+    public var thresholds: SpeakerAttributionThresholds
+
+    public init(
+        outcome: SpeakerAttributionOutcome,
+        candidates: [SpeakerCandidate],
+        timelineCoverage: Double,
+        thresholds: SpeakerAttributionThresholds
+    ) {
+        self.outcome = outcome
+        self.candidates = candidates
+        self.timelineCoverage = timelineCoverage
+        self.thresholds = thresholds
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case outcome, candidates, thresholds
+        case timelineCoverage = "timeline_coverage"
+    }
+}
+
 public struct MergeConflict: Codable, Equatable, Sendable {
     public var segmentIndex: Int
     public var kind: MergeConflictKind
     public var candidates: [String]
     public var reason: String
+    /// Present on `ambiguousSpeaker` and `overlappingSpeech` conflicts, absent
+    /// on `asrDisagreement`, whose candidates are texts rather than speakers.
+    /// Optional so conflict files written before this field decode unchanged.
+    public var speakerAttribution: SpeakerAttribution?
 
     public init(
         segmentIndex: Int,
         kind: MergeConflictKind,
         candidates: [String],
-        reason: String
+        reason: String,
+        speakerAttribution: SpeakerAttribution? = nil
     ) {
         self.segmentIndex = segmentIndex
         self.kind = kind
         self.candidates = candidates
         self.reason = reason
+        self.speakerAttribution = speakerAttribution
     }
 
     enum CodingKeys: String, CodingKey {
         case kind, candidates, reason
         case segmentIndex = "segment_index"
+        case speakerAttribution = "speaker_attribution"
     }
 }
 
@@ -83,6 +190,15 @@ public struct TimelineMergeResult: Equatable, Sendable {
     }
 }
 
+/// How much acoustic agreement speaker attribution demands before it names a
+/// speaker. `dominantSpeakerShare` 0.60 and `minimumTimelineCoverage` 0.50 are
+/// examined values, not incidental defaults: they were measured against a
+/// 43.4 % overlap recording on 2026-09-02 and kept. The measurement, the error
+/// estimate that decided it, the part of it that stayed unmeasurable, and what
+/// would falsify it are in `docs/engineering-constraint-policy.md`, section
+/// "2026-09-02 Merge Speaker-Assignment Thresholds". Changing either value
+/// changes what the product will and will not claim about a speaker, so it goes
+/// through that section rather than through this initializer.
 public struct TimelineMergeConfiguration: Equatable, Sendable {
     public var dominantSpeakerShare: Double
     public var minimumTimelineCoverage: Double
@@ -156,7 +272,8 @@ public struct TimelineMerger: Sendable {
                     segmentIndex: outputIndex,
                     kind: .ambiguousSpeaker,
                     candidates: assignment.candidates,
-                    reason: reason
+                    reason: reason,
+                    speakerAttribution: assignment.attribution
                 ))
             }
             if assignment.hasOverlappingSpeech {
@@ -166,7 +283,8 @@ public struct TimelineMerger: Sendable {
                     segmentIndex: outputIndex,
                     kind: .overlappingSpeech,
                     candidates: assignment.candidates,
-                    reason: "Distinct diarization speakers overlap this ASR interval."
+                    reason: "Distinct diarization speakers overlap this ASR interval.",
+                    speakerAttribution: assignment.attribution
                 ))
             }
             if let disagreement = asrDisagreement(for: item) {
@@ -222,9 +340,16 @@ private extension TimelineMerger {
 
     struct SpeakerAssignment: Sendable {
         var speaker: String
-        var candidates: [String]
+        /// `nil` only when diarization produced no timeline at all, where the
+        /// segment stays `UNASSIGNED` and raises no conflict.
+        var attribution: SpeakerAttribution?
         var ambiguousReason: String?
         var hasOverlappingSpeech: Bool
+
+        /// Kept as the speaker-name projection of `attribution` so the two can
+        /// never disagree; existing readers of `MergeConflict.candidates` see
+        /// the same names in the same order as before.
+        var candidates: [String] { attribution?.candidates.map(\.speaker) ?? [] }
     }
 
     struct Disagreement: Sendable {
@@ -396,7 +521,7 @@ private extension TimelineMerger {
         guard !timeline.segments.isEmpty else {
             return SpeakerAssignment(
                 speaker: "UNASSIGNED",
-                candidates: [],
+                attribution: nil,
                 ambiguousReason: nil,
                 hasOverlappingSpeech: false
             )
@@ -418,27 +543,46 @@ private extension TimelineMerger {
             if left.value != right.value { return left.value > right.value }
             return left.key < right.key
         }
-        let candidates = ranked.map { $0.key }
-        let overlappingSpeech = hasConcurrentDistinctSpeakers(clipped)
-        guard let best = ranked.first else {
-            return SpeakerAssignment(
-                speaker: "UNKNOWN",
-                candidates: [],
-                ambiguousReason: "No diarization speaker overlaps this ASR interval.",
-                hasOverlappingSpeech: false
+        let totalSpeakerOverlap = ranked.reduce(0) { $0 + $1.value }
+        let candidates = ranked.map { entry in
+            SpeakerCandidate(
+                speaker: entry.key,
+                overlapS: entry.value,
+                share: totalSpeakerOverlap > 0 ? entry.value / totalSpeakerOverlap : 0
             )
         }
         let intervalDuration = segment.endS - segment.startS
         let coverage = unionDuration(clipped.map { ($0.startS, $0.endS) }) / intervalDuration
+        let thresholds = SpeakerAttributionThresholds(
+            dominantSpeakerShare: configuration.dominantSpeakerShare,
+            minimumTimelineCoverage: configuration.minimumTimelineCoverage,
+            overlapEpsilonS: configuration.overlapEpsilonS
+        )
+        func attribution(_ outcome: SpeakerAttributionOutcome) -> SpeakerAttribution {
+            SpeakerAttribution(
+                outcome: outcome,
+                candidates: candidates,
+                timelineCoverage: coverage,
+                thresholds: thresholds
+            )
+        }
+        let overlappingSpeech = hasConcurrentDistinctSpeakers(clipped)
+        guard let best = ranked.first else {
+            return SpeakerAssignment(
+                speaker: "UNKNOWN",
+                attribution: attribution(.noOverlappingTurn),
+                ambiguousReason: "No diarization speaker overlaps this ASR interval.",
+                hasOverlappingSpeech: false
+            )
+        }
         guard coverage + Double.ulpOfOne >= configuration.minimumTimelineCoverage else {
             return SpeakerAssignment(
                 speaker: "UNKNOWN",
-                candidates: candidates,
+                attribution: attribution(.coverageBelowThreshold),
                 ambiguousReason: "Diarization coverage is below the configured assignment threshold.",
                 hasOverlappingSpeech: overlappingSpeech
             )
         }
-        let totalSpeakerOverlap = ranked.reduce(0) { $0 + $1.value }
         let share = best.value / totalSpeakerOverlap
         let runnerUp = ranked.dropFirst().first?.value ?? 0
         guard share + Double.ulpOfOne >= configuration.dominantSpeakerShare,
@@ -446,14 +590,14 @@ private extension TimelineMerger {
         else {
             return SpeakerAssignment(
                 speaker: "UNKNOWN",
-                candidates: candidates,
+                attribution: attribution(.noDominantSpeaker),
                 ambiguousReason: "No diarization speaker has a dominant overlap with this ASR interval.",
                 hasOverlappingSpeech: overlappingSpeech
             )
         }
         return SpeakerAssignment(
             speaker: best.key,
-            candidates: candidates,
+            attribution: attribution(.attributed),
             ambiguousReason: nil,
             hasOverlappingSpeech: overlappingSpeech
         )

@@ -8,12 +8,18 @@ struct CaptureView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.screen) {
                 CaptureHeader(isRecording: model.isRecording)
                 if model.isRecording {
                     RecordingProfileSummary(profile: model.selectedProfile)
                 } else {
                     CaptureControls(model: model, glossaryProfile: $glossaryProfile)
+                    if model.profileReadiness.showsNotice {
+                        ProfileReadinessNotice(
+                            readiness: model.profileReadiness,
+                            recheck: model.evaluateProfileReadiness
+                        )
+                    }
                 }
                 RecordingControl(model: model)
                 if !model.isRecording {
@@ -30,6 +36,7 @@ struct CaptureView: View {
             .frame(maxWidth: .infinity)
         }
         .navigationTitle(appLocalized("New Recording"))
+        .task { model.evaluateProfileReadiness() }
         .dropDestination(for: URL.self) { urls, _ in
             guard model.canImportAudio else { return false }
             model.importAudio(urls)
@@ -47,11 +54,11 @@ private struct CaptureHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(isRecording ? appLocalized("Recording") : appLocalized("Capture a Conversation"))
-                .font(.largeTitle)
+                .font(AppTheme.Typography.screenTitle)
             if !isRecording {
                 Text(appLocalized("Record microphone and system audio as separate local originals, or import an existing audio file."))
-                    .font(.body)
-                    .foregroundStyle(.secondary)
+                    .font(AppTheme.Typography.body)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -64,7 +71,7 @@ private struct RecordingProfileSummary: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(profile.id.title)
-                .font(.headline)
+                .font(AppTheme.Typography.sectionTitle)
             ProfileBenchmarkSummary(profile: profile)
         }
         .padding(18)
@@ -79,7 +86,7 @@ private struct CaptureControls: View {
     @Binding var glossaryProfile: AppProfileID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.large) {
             Picker(appLocalized("Profile"), selection: $model.selectedProfileID) {
                 ForEach(model.profiles) { profile in
                     Text(profile.id.title).tag(profile.id)
@@ -90,7 +97,7 @@ private struct CaptureControls: View {
 
             ProfileBenchmarkSummary(profile: model.selectedProfile)
 
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.medium) {
                 Picker(appLocalized("Post-processing"), selection: $model.selectedPostprocess) {
                     ForEach(PostprocessChoice.allCases) { choice in
                         Text(choice.title).tag(choice)
@@ -129,7 +136,7 @@ private struct PostprocessOperationControls: View {
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) { controls }
+            HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.medium) { controls }
             VStack(alignment: .leading, spacing: 10) { controls }
         }
     }
@@ -164,20 +171,22 @@ private struct CodexReadinessNotice: View {
     let refresh: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.small) {
             Image(
                 systemName: availability.isAuthenticated
                     ? "checkmark.seal.fill"
                     : "exclamationmark.triangle.fill"
             )
-            .foregroundStyle(availability.isAuthenticated ? Color.green : Color.orange)
+            .foregroundStyle(availability.isAuthenticated
+                ? AppTheme.Palette.inkSecondary
+                : AppTheme.Palette.open)
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 if availability.isAuthenticated {
                     HStack(spacing: 6) {
                         Text(appLocalized("Codex is signed in and ready."))
                         Text(verbatim: availability.version)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppTheme.Palette.inkSecondary)
                     }
                 } else if availability.authenticationCheckFailed {
                     Text(appLocalized("Codex is installed, but its sign-in status could not be checked. Try again or select Local meanwhile."))
@@ -187,15 +196,66 @@ private struct CodexReadinessNotice: View {
                     Text(appLocalized("Codex CLI was not found. Install it and run codex login in Terminal, or select Local meanwhile."))
                 }
                 Text(appLocalized("Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio and source artifacts stay on this Mac unchanged."))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
                 if !availability.isAuthenticated {
                     Button(appLocalized("Check Again"), action: refresh)
                         .buttonStyle(.link)
                 }
             }
-            .font(.caption)
+            .font(AppTheme.Typography.meta)
             .fixedSize(horizontal: false, vertical: true)
         }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// States whether the selected profile can run before the user starts one.
+/// Absent from a ready profile, so a working setup carries no extra chrome.
+private struct ProfileReadinessNotice: View {
+    let readiness: ProfileReadiness
+    let recheck: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.small) {
+            Image(systemName: readiness.isObstructed
+                ? "exclamationmark.triangle.fill"
+                : "questionmark.circle.fill")
+                .foregroundStyle(readiness.isObstructed
+                    ? AppTheme.Palette.open
+                    : AppTheme.Palette.inkSecondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                if readiness.isObstructed {
+                    Text(appLocalized("This profile is not ready to run."))
+                        .font(AppTheme.Typography.sectionTitle)
+                }
+                ForEach(readiness.blockingGroups) { group in
+                    Text(group.reason)
+                }
+                if let issue = readiness.probeIssue {
+                    Text(issue.message)
+                }
+                if readiness.needsProvisioning {
+                    Text(appLocalized("Install the missing components by running this in Terminal from the Maccheroni repository, then check again:"))
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
+                    Text(verbatim: ProfileReadiness.provisioningCommand)
+                        .font(AppTheme.Typography.meta.monospaced())
+                        .textSelection(.enabled)
+                }
+                if readiness.isEvaluating {
+                    Text(appLocalized("Checking availability…"))
+                        .foregroundStyle(AppTheme.Palette.inkSecondary)
+                } else {
+                    Button(appLocalized("Check Again"), action: recheck)
+                        .buttonStyle(.link)
+                }
+            }
+            .font(AppTheme.Typography.meta)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(.background.secondary, in: .rect(cornerRadius: 12))
         .accessibilityElement(children: .combine)
     }
 }
@@ -211,13 +271,13 @@ private struct ProfileBenchmarkSummary: View {
                     .accessibilityHidden(true)
                 Label(profile.diarizationBackend, systemImage: "person.2.wave.2")
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .font(AppTheme.Typography.meta)
+            .foregroundStyle(AppTheme.Palette.inkSecondary)
 
             if profile.metrics.isEmpty {
                 Text(appLocalized("No local benchmark is available for this profile yet."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(AppTheme.Typography.meta)
+                    .foregroundStyle(AppTheme.Palette.inkSecondary)
             } else {
                 ViewThatFits {
                     HStack(spacing: 6) {
@@ -252,7 +312,7 @@ struct BenchmarkChip: View {
                 Text(verbatim: metric.display)
             }
         }
-            .font(.caption2.monospacedDigit())
+            .font(AppTheme.Typography.meta.monospacedDigit())
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(.quaternary, in: Capsule())
@@ -307,15 +367,28 @@ private struct RecordingControl: View {
                 .padding(.vertical, 7)
             }
             .buttonStyle(.borderedProminent)
+            // Deliberately the system tints, not the tokens. `.borderedProminent`
+            // paints a white label over its tint, and the accent token is a
+            // *foreground* colour chosen against the page: as a fill under white
+            // text its dark value measured 2.08:1 on the render. The system tint
+            // is the one thing here that adapts its own label.
             .tint(model.isRecording ? .red : .accentColor)
             .disabled(!model.isRecording && !model.canStartRecording)
             .keyboardShortcut(.space, modifiers: [])
-            .accessibilityHint(model.isRecording
-                ? appLocalized("Stops capture and begins transcription.")
-                : appLocalized("Starts separate microphone and system audio capture."))
+            .accessibilityHint(recordingHint)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
+    }
+
+    private var recordingHint: LocalizedStringResource {
+        if model.isRecording {
+            return appLocalized("Stops capture and begins transcription.")
+        }
+        if model.profileReadiness.blocksRecording {
+            return appLocalized("This profile is not ready to run.")
+        }
+        return appLocalized("Starts separate microphone and system audio capture.")
     }
 }
 
@@ -327,7 +400,7 @@ private struct LevelMeter: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(label, systemImage: systemImage)
-                .font(.caption)
+                .font(AppTheme.Typography.meta)
             ProgressView(value: Double(max(0, min(1, level))))
                 .progressViewStyle(.linear)
                 .frame(minWidth: 180)
@@ -346,20 +419,20 @@ private struct FileDropZone: View {
         VStack(spacing: 10) {
             Image(systemName: "arrow.down.doc")
                 .font(.title2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
                 .accessibilityHidden(true)
             Text(appLocalized("Drop an audio file here"))
-                .font(.headline)
+                .font(AppTheme.Typography.sectionTitle)
             Button(appLocalized("Choose Audio File…"), action: chooseFile)
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(!isEnabled)
         }
         .frame(maxWidth: .infinity, minHeight: 126)
-        .background(isTargeted ? Color.accentColor.opacity(0.08) : .clear)
+        .background(isTargeted ? AppTheme.Palette.accent.opacity(0.08) : .clear)
         .overlay {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
-                    isTargeted ? Color.accentColor : Color.secondary.opacity(0.45),
+                    isTargeted ? AppTheme.Palette.accent : AppTheme.Palette.controlBorder,
                     style: StrokeStyle(lineWidth: 1.5, dash: [7, 5])
                 )
         }
@@ -381,19 +454,19 @@ private struct PrivacyNotice: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "lock.shield")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.Palette.inkSecondary)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(appLocalized("Audio never leaves this Mac."))
-                    .font(.headline)
+                    .font(AppTheme.Typography.sectionTitle)
                 if postprocess == .codex {
                     Text(appLocalized("Codex receives bounded transcript text, the active profile's full glossary and its hash, post-processing instructions, and the target language when translating. Audio and source artifacts stay on this Mac unchanged."))
                 } else {
                     Text(appLocalized("Transcription and the selected post-processing path run locally. The original audio and raw transcript stay unchanged."))
                 }
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .font(AppTheme.Typography.meta)
+            .foregroundStyle(AppTheme.Palette.inkSecondary)
         }
     }
 }

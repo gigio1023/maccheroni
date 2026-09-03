@@ -168,10 +168,88 @@ public enum ASRAttemptStopReason: String, Codable, Equatable, Sendable {
     case endOfSequence
     case maximumTokens
     case contextLimit
+    /// The decoder stopped producing new content and repeated one token or
+    /// short phrase to the end of generation.  It is a limit outcome like the
+    /// other two, but it is not the same event as a transcript that
+    /// legitimately reached the output cap with real content, and the
+    /// recovered prefix travels with it in `ASRLimitRecord.partialPrefix`.
+    case repetitionLooping
+
+    /// The value `repetitionLooping` carried before the 2026-09-02
+    /// terminology audit renamed repetition degeneration to repetition
+    /// looping.  Attempt artifacts sealed before that rename still hold it.
+    static let legacyRepetitionLoopingRawValue = "repetitionDegeneration"
+
+    /// D52: a renamed wire value keeps its legacy value accepted on read.  An
+    /// attempt outcome sealed before the rename decodes to the current case,
+    /// and judgment rule 3 keeps its bytes untouched: nothing here writes the
+    /// legacy value back, because encoding still uses the raw value.
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if let value = ASRAttemptStopReason(rawValue: raw) {
+            self = value
+        } else if raw == ASRAttemptStopReason.legacyRepetitionLoopingRawValue {
+            self = .repetitionLooping
+        } else {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription:
+                        "unknown ASR attempt stop reason \"\(raw)\""
+                )
+            )
+        }
+    }
+
+    /// Whether this reason closes an attempt without a complete transcript.
+    public var isLimitOutcome: Bool { self != .endOfSequence }
+}
+
+/// The leading valid transcript a limit outcome still holds.  A collapsed
+/// VibeVoice generation leaves the transcript array in the raw payload
+/// unclosed, so the backend reports no segments even when most of the leaf
+/// decoded correctly.  The prefix is never complete coverage: promoting it is
+/// the caller's decision and is recorded as partial.
+public struct ASRPartialPrefix: Equatable, Sendable {
+    public var coverageS: Double
+    public var rawText: String
+    public var segments: [Segment]
+    public var completeObjectCount: Int
+    public var promotedObjectCount: Int
+    public var degenerateObjectCount: Int
+    public var repetitionRunThreshold: Int
+    public var repetitionRunMaximum: Int
+    public var tailRepetitionRun: Int
+    public var terminalCollapse: Bool
+
+    public init(
+        coverageS: Double,
+        rawText: String,
+        segments: [Segment],
+        completeObjectCount: Int,
+        promotedObjectCount: Int,
+        degenerateObjectCount: Int,
+        repetitionRunThreshold: Int,
+        repetitionRunMaximum: Int,
+        tailRepetitionRun: Int,
+        terminalCollapse: Bool
+    ) {
+        self.coverageS = coverageS
+        self.rawText = rawText
+        self.segments = segments
+        self.completeObjectCount = completeObjectCount
+        self.promotedObjectCount = promotedObjectCount
+        self.degenerateObjectCount = degenerateObjectCount
+        self.repetitionRunThreshold = repetitionRunThreshold
+        self.repetitionRunMaximum = repetitionRunMaximum
+        self.tailRepetitionRun = tailRepetitionRun
+        self.terminalCollapse = terminalCollapse
+    }
 }
 
 public struct ASRLimitRecord: Equatable, Sendable {
     public var stopReason: ASRAttemptStopReason
+    public var partialPrefix: ASRPartialPrefix?
     public var glossary: ManifestGlossary
     public var glossaryPayloadSHA256: String?
     public var glossaryPayloadEntryCount: Int
@@ -186,6 +264,7 @@ public struct ASRLimitRecord: Equatable, Sendable {
 
     public init(
         stopReason: ASRAttemptStopReason,
+        partialPrefix: ASRPartialPrefix? = nil,
         glossary: ManifestGlossary,
         glossaryPayloadSHA256: String?,
         glossaryPayloadEntryCount: Int,
@@ -199,6 +278,7 @@ public struct ASRLimitRecord: Equatable, Sendable {
         helperFingerprint: ASRHelperFingerprint?
     ) {
         self.stopReason = stopReason
+        self.partialPrefix = partialPrefix
         self.glossary = glossary
         self.glossaryPayloadSHA256 = glossaryPayloadSHA256
         self.glossaryPayloadEntryCount = glossaryPayloadEntryCount
@@ -755,6 +835,115 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
         )
     }
 
+    /// Normalize backend segments onto the run timeline.  The backend's own
+    /// speaker label never becomes the segment speaker, and a segment the
+    /// runner measured as repetition looping is marked rather than
+    /// silently kept or silently dropped.
+    private func normalized(
+        segments: [RunnerDocument.RunnerSegment],
+        request: ASRRequest
+    ) throws -> [Segment] {
+        let requestedLanguage: String?
+        switch request.language {
+        case .automatic: requestedLanguage = nil
+        case let .fixed(value): requestedLanguage = value
+        }
+        return try segments.enumerated().map { index, segment in
+            guard segment.startS >= request.startS - 0.01,
+                  segment.endS <= request.endS + 0.01,
+                  segment.endS > segment.startS,
+                  !segment.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { throw ASRAdapterError.coverageShortfall("invalid normalized segment \(index)") }
+            var flags: [String] = []
+            if !segment.speaker.isEmpty { flags.append("backend_speaker_evidence") }
+            if segment.degenerate == true { flags.append("repetition_looping") }
+            return Segment(
+                speaker: "UNASSIGNED",
+                startS: segment.startS,
+                endS: segment.endS,
+                text: segment.text,
+                language: requestedLanguage,
+                flags: flags.isEmpty ? nil : flags
+            )
+        }
+    }
+
+    /// Validate the recovered prefix a limit outcome carries.  The prefix is
+    /// evidence, not a result: it must stay inside the requested range, stay
+    /// ordered, and state a covered duration that its own segments support.
+    private func validate(
+        partialPrefix: RunnerDocument.RunnerPartialPrefix?,
+        request: ASRRequest,
+        expectedDuration: Double,
+        stopReason: ASRAttemptStopReason
+    ) throws -> ASRPartialPrefix? {
+        guard let partialPrefix else {
+            guard stopReason != .repetitionLooping else {
+                throw ASRAdapterError.malformedOutput(
+                    "ASR repetition-looping outcome carries no recovery evidence"
+                )
+            }
+            return nil
+        }
+        guard partialPrefix.terminalCollapse
+                == (stopReason == .repetitionLooping),
+              partialPrefix.repetitionRunThreshold > 1,
+              partialPrefix.promotedObjectCount >= 0,
+              partialPrefix.promotedObjectCount <= partialPrefix.validatedObjectCount,
+              partialPrefix.validatedObjectCount <= partialPrefix.completeObjectCount,
+              partialPrefix.promotedObjectCount == partialPrefix.segments.count,
+              partialPrefix.coverageS.isFinite,
+              partialPrefix.coverageS >= 0,
+              partialPrefix.coverageS <= expectedDuration + 0.01,
+              partialPrefix.repetitionRunMaximum >= 0,
+              partialPrefix.tailRepetitionRun >= 0
+        else {
+            throw ASRAdapterError.malformedOutput(
+                "ASR partial prefix evidence is inconsistent"
+            )
+        }
+        let segments = try normalized(
+            segments: partialPrefix.segments,
+            request: request
+        )
+        var previousEnd = request.startS - 0.01
+        for segment in segments {
+            guard segment.startS >= previousEnd - 0.01 else {
+                throw ASRAdapterError.malformedOutput(
+                    "ASR partial prefix segments are not ordered"
+                )
+            }
+            previousEnd = segment.endS
+        }
+        if let last = segments.last {
+            guard abs((last.endS - request.startS) - partialPrefix.coverageS) <= 0.01,
+                  !partialPrefix.rawText.isEmpty
+            else {
+                throw ASRAdapterError.malformedOutput(
+                    "ASR partial prefix coverage does not match its segments"
+                )
+            }
+        } else {
+            guard partialPrefix.coverageS == 0, partialPrefix.rawText.isEmpty else {
+                throw ASRAdapterError.malformedOutput(
+                    "ASR partial prefix coverage does not match its segments"
+                )
+            }
+        }
+        return ASRPartialPrefix(
+            coverageS: partialPrefix.coverageS,
+            rawText: partialPrefix.rawText,
+            segments: segments,
+            completeObjectCount: partialPrefix.completeObjectCount,
+            promotedObjectCount: partialPrefix.promotedObjectCount,
+            degenerateObjectCount: partialPrefix.degenerateObjectCount,
+            repetitionRunThreshold: partialPrefix.repetitionRunThreshold,
+            repetitionRunMaximum: partialPrefix.repetitionRunMaximum,
+            tailRepetitionRun: partialPrefix.tailRepetitionRun,
+            terminalCollapse: partialPrefix.terminalCollapse
+        )
+    }
+
     private func validate(
         document: RunnerDocument,
         request: ASRRequest,
@@ -896,7 +1085,7 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
         }
         if document.outcome == .limit {
             guard let stop = document.stopReason,
-                  stop != .endOfSequence,
+                  stop.isLimitOutcome,
                   document.coverage.truncated,
                   abs(document.coverage.inputDurationS - expectedDuration) <= 0.01,
                   document.coverage.processedDurationS == 0,
@@ -904,8 +1093,20 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
                   document.segments.isEmpty,
                   selected != .moss || fingerprint != nil
             else { throw ASRAdapterError.malformedOutput("ASR limit output contains promotable partial content") }
+            guard stop != .repetitionLooping || selected == .vibeVoice else {
+                throw ASRAdapterError.malformedOutput(
+                    "only the VibeVoice path detects repetition looping"
+                )
+            }
+            let partialPrefix = try validate(
+                partialPrefix: document.partialPrefix,
+                request: request,
+                expectedDuration: expectedDuration,
+                stopReason: stop
+            )
             return .limit(ASRLimitRecord(
                 stopReason: stop,
+                partialPrefix: partialPrefix,
                 glossary: manifestGlossary,
                 glossaryPayloadSHA256: document.glossary.payloadSHA256,
                 glossaryPayloadEntryCount: document.glossary.payloadEntryCount,
@@ -927,26 +1128,10 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
         guard !document.rawText.isEmpty, !document.segments.isEmpty else {
             throw ASRAdapterError.malformedOutput("ASR output has no raw transcript or segments")
         }
-        let requestedLanguage: String?
-        switch request.language {
-        case .automatic: requestedLanguage = nil
-        case let .fixed(value): requestedLanguage = value
-        }
-        let segments = try document.segments.enumerated().map { index, segment in
-            guard segment.startS >= request.startS - 0.01,
-                  segment.endS <= request.endS + 0.01,
-                  segment.endS > segment.startS,
-                  !segment.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            else { throw ASRAdapterError.coverageShortfall("invalid normalized segment \(index)") }
-            return Segment(
-                speaker: "UNASSIGNED",
-                startS: segment.startS,
-                endS: segment.endS,
-                text: segment.text,
-                language: requestedLanguage,
-                flags: segment.speaker.isEmpty ? nil : ["backend_speaker_evidence"]
-            )
-        }
+        let segments = try normalized(
+            segments: document.segments,
+            request: request
+        )
         let coverage = Coverage(
             inputDurationS: document.coverage.inputDurationS,
             processedDurationS: document.coverage.processedDurationS,
@@ -1436,11 +1621,40 @@ private struct RunnerDocument: Decodable {
         var endS: Double
         var text: String
         var speaker: String
+        var degenerate: Bool?
 
         enum CodingKeys: String, CodingKey {
             case startS = "start_s"
             case endS = "end_s"
-            case text, speaker
+            case text, speaker, degenerate
+        }
+    }
+
+    struct RunnerPartialPrefix: Decodable {
+        var completeObjectCount: Int
+        var validatedObjectCount: Int
+        var promotedObjectCount: Int
+        var degenerateObjectCount: Int
+        var coverageS: Double
+        var repetitionRunThreshold: Int
+        var repetitionRunMaximum: Int
+        var tailRepetitionRun: Int
+        var terminalCollapse: Bool
+        var rawText: String
+        var segments: [RunnerSegment]
+
+        enum CodingKeys: String, CodingKey {
+            case segments
+            case completeObjectCount = "complete_object_count"
+            case validatedObjectCount = "validated_object_count"
+            case promotedObjectCount = "promoted_object_count"
+            case degenerateObjectCount = "degenerate_object_count"
+            case coverageS = "coverage_s"
+            case repetitionRunThreshold = "repetition_run_threshold"
+            case repetitionRunMaximum = "repetition_run_maximum"
+            case tailRepetitionRun = "tail_repetition_run"
+            case terminalCollapse = "terminal_collapse"
+            case rawText = "raw_text"
         }
     }
 
@@ -1668,6 +1882,7 @@ private struct RunnerDocument: Decodable {
     var helperFingerprint: RunnerFingerprint?
     var runnerWallTimeS: Double
     var failure: RunnerFailure?
+    var partialPrefix: RunnerPartialPrefix?
 
     enum Outcome: String, Decodable {
         case complete, limit, unverified
@@ -1684,6 +1899,7 @@ private struct RunnerDocument: Decodable {
         case helperFingerprint = "helper_fingerprint"
         case runnerWallTimeS = "runner_wall_time_s"
         case metricsUnavailable = "metrics_unavailable"
+        case partialPrefix = "partial_prefix"
     }
 }
 

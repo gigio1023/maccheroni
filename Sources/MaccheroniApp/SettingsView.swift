@@ -211,7 +211,7 @@ struct SettingsView: View {
                 Text(appLocalized("Directory choices apply the next time Maccheroni launches. Existing recordings and run artifacts stay where they are."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(appLocalized("Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Model removal uses the macOS Trash."))
+                Text(appLocalized("Maccheroni never deletes or overwrites recordings, raw transcripts, or completed run artifacts. Removing a model or a recording uses the macOS Trash."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

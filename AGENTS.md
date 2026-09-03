@@ -25,6 +25,9 @@ and speaker diarization.
   asks. Never force push.
 - The underlying research notes live outside this repository;
   `docs/research-digest.md` is the summary of record.
+- `docs/terminology.md` fixes the meaning of the run, termination, failure-mode,
+  diarization, glossary, and measurement terms this project collides on. Use its
+  wording, and move a `path:line` anchor when a definition site moves.
 - Never commit real recordings or model caches. Test fixtures must use public
   or synthetic audio.
 - The platform is fixed to macOS arm64.
