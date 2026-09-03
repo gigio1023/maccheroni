@@ -585,13 +585,25 @@ import Testing
             ("merged_conflicts", "merged/conflicts.json", Data("[]".utf8)),
         ]
         if partialCoverageArtifact {
+            // The field names and wire values are the ones the CLI's
+            // `PartialCoverageRecord` and `SourceMissingRange` actually seal:
+            // the record carries `schema_version`, and every missing range
+            // carries `attempt_id`, `stop_reason`, and `failure_code` beside
+            // its bounds. `stop_reason` is the camel-cased raw value of
+            // `ASRAttemptStopReason`, never a snake-cased spelling, and it is
+            // never absent — the app's `RunMissingRange` decodes it as a
+            // required string. A fixture missing those fields would pass this
+            // suite while standing in for a document no run writes and the
+            // app cannot read.
             files.append((
                 "partial_coverage",
                 "primary/partial-coverage.json",
                 Data(#"""
-                {"input_duration_s":2,"promoted_duration_s":1.5,
-                 "missing_duration_s":0.5,
-                 "missing":[{"start_s":1.5,"end_s":2}],
+                {"schema_version":"1.0.0","input_duration_s":2,
+                 "promoted_duration_s":1.5,"missing_duration_s":0.5,
+                 "missing":[{"attempt_id":"fixture-leaf-1","start_s":1.5,
+                 "end_s":2,"stop_reason":"repetitionLooping",
+                 "failure_code":"ASR_REPETITION_LOOPING"}],
                  "partial_attempt_ids":[]}
                 """#.utf8)
             ))
