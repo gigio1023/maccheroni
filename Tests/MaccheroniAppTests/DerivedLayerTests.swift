@@ -760,7 +760,10 @@ private func expectRejectedProposal(
 
 // MARK: - Fixtures
 
-private struct DerivedLayerRunFixture {
+/// Shared with the offscreen render suite, which renders the shipped
+/// transcript view over this run: it is the one synthetic run that carries
+/// two available layers, so it needs no private recording.
+struct DerivedLayerRunFixture {
     var runURL: URL
     var segmentsURL: URL
     var conflictsURL: URL
@@ -790,7 +793,7 @@ private func derivedLayerRecord() -> LibraryRecord {
     )
 }
 
-private func derivedLayerTemporaryDirectory() throws -> URL {
+func derivedLayerTemporaryDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(
         "MaccheroniDerivedLayerTests-\(UUID().uuidString)",
         isDirectory: true
@@ -813,7 +816,7 @@ private let derivedLayerThresholds = SpeakerAttributionThresholds(
 /// A four-segment run with two segments the acoustics declined to name: one
 /// with a clear sub-threshold top-ranked candidate, one an exact tie with no top-ranked candidate at all.
 /// Those are the two shapes the proposer and D50 behave differently on.
-private func derivedLayerRunFixture(
+func derivedLayerRunFixture(
     in root: URL,
     runID: String = "derived-layer-run",
     complete: Bool = true
@@ -1087,7 +1090,7 @@ private func derivedLayerTranslationBatch(
 
 /// Writes a sealed speaker-proposal derived set exactly as the CLI does, with
 /// named holes for the ways one can lie about its source.
-private func derivedLayerWriteSpeakerProposal(
+func derivedLayerWriteSpeakerProposal(
     fixture: DerivedLayerRunFixture,
     id: String,
     finishedAt: String,

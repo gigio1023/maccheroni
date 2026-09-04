@@ -37,6 +37,25 @@ struct TranscriptView: View {
     @State private var focusedSegmentIndex: Int?
     @State private var playback = TranscriptPlaybackController()
 
+    /// `initialLayer` seeds the reader's layer choice, exactly as if the tab
+    /// had been clicked before the first draw: an unavailable layer falls back
+    /// to the default the same way a stale choice does, and `nil`, the app's
+    /// own value, changes nothing. It exists so the offscreen harness can
+    /// render the shipped view on each layer; the app never passes it.
+    init(
+        model: MaccheroniAppModel,
+        record: LibraryRecord,
+        run: LoadedRun,
+        proposal: SpeakerProposalDocument? = nil,
+        initialLayer: TranscriptDisplayLayer? = nil
+    ) {
+        self.model = model
+        self.record = record
+        self.run = run
+        self.proposal = proposal
+        _selectedLayer = State(initialValue: initialLayer)
+    }
+
     private var isTranslation: Bool {
         run.isTranslation
     }

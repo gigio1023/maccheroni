@@ -503,7 +503,15 @@ The shipped `TranscriptView` renders as itself, but its own `ScrollView`
 settles at a non-zero offset offscreen and its `.navigationTitle` wrapper lays
 the screen out taller than the frame, so that image starts part-way down the
 list and carries no header. The images this section measures are composed from
-the same shipped header and segment-column views the screen builds. SwiftUI's
+the same shipped header and segment-column views the screen builds. Amended
+2026-09-04: hosted bare, the view reports a fitting height of zero, and opened
+on the proposed layer it drew nothing at all; hosted inside the
+`NavigationSplitView` that `RootView` composes it in, with a stub sidebar, the
+same shipped view lays out inside the frame with its title, counts, tabs,
+notice, rule and rows. That is how the layer switch was rendered for the first
+time, on the synthetic four-segment run with a speaker-proposal set, and read
+back by OCR and by the position of the accent underline. The sidebar column
+itself still does not draw. SwiftUI's
 own `ImageRenderer`, the path D48 first recorded, returns nothing at all for a
 scroll container, a `List` or a grouped form and draws `TextField`, `Slider`
 and AppKit-backed button styles as placeholder blocks; this surface's `.plain`

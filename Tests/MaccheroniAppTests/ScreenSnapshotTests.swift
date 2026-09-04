@@ -28,6 +28,7 @@ import MaccheroniMerge
 import MaccheroniPostprocess
 import SwiftUI
 import Testing
+import Vision
 @testable import MaccheroniApp
 
 @Suite(.serialized)
@@ -263,7 +264,8 @@ struct ScreenSnapshotTests {
         state: LibraryItemState,
         id: UUID = UUID(uuidString: "00000000-0000-0000-0000-0000000000f2")!,
         postprocess: PostprocessChoice = .none,
-        failureMessage: String? = nil
+        failureMessage: String? = nil,
+        speakerNames: [String: String] = ["0": "Jina"]
     ) -> LibraryRecord {
         LibraryRecord(
             id: id,
@@ -279,10 +281,82 @@ struct ScreenSnapshotTests {
             postprocess: postprocess,
             durationS: durationS,
             state: state,
-            speakerNames: ["0": "Jina"],
+            speakerNames: speakerNames,
             conflictResolutions: [:],
             failureMessage: failureMessage
         )
+    }
+
+    // MARK: - Reading an image back
+
+    /// Every line of text Vision recognises in the image, top to bottom and
+    /// left to right, so an assertion can say what the screen printed rather
+    /// than what the view model held.
+    static func recognisedText(in url: URL) throws -> [String] {
+        guard let image = NSImage(contentsOf: url),
+              let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else { throw RenderError.noImage(url.lastPathComponent) }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        request.recognitionLanguages = ["en-US"]
+        try VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+        let sorted = (request.results ?? []).sorted { left, right in
+            if abs(left.boundingBox.midY - right.boundingBox.midY) > 0.006 {
+                return left.boundingBox.midY > right.boundingBox.midY
+            }
+            return left.boundingBox.minX < right.boundingBox.minX
+        }
+        return sorted.compactMap { $0.topCandidates(1).first?.string }
+    }
+
+    /// Letters and digits only, lowercased, so a comparison survives the
+    /// hyphens, commas and spacing OCR is loose about.
+    static func compact(_ text: String) -> String {
+        text.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    /// The horizontal extent, in pixels, of the longest run of accent-coloured
+    /// pixels in the top half of the image: the 2-point underline beneath the
+    /// displayed layer tab. The playhead knob is accent too, but round and a
+    /// dozen pixels wide, so a run has to be at least `minimumRun` long to
+    /// count. `nil` when no such run exists.
+    static func accentUnderline(
+        in url: URL,
+        hex: String,
+        tolerance: Int = 28,
+        minimumRun: Int = 60
+    ) throws -> ClosedRange<Int>? {
+        guard let rep = NSBitmapImageRep(data: try Data(contentsOf: url)),
+              rep.bitsPerSample == 8,
+              let data = rep.bitmapData
+        else { throw RenderError.noImage(url.lastPathComponent) }
+        let digits = hex.dropFirst()
+        let target = (0 ..< 3).map { index -> Int in
+            let start = digits.index(digits.startIndex, offsetBy: index * 2)
+            return Int(digits[start ..< digits.index(start, offsetBy: 2)], radix: 16) ?? 0
+        }
+        let samples = rep.samplesPerPixel
+        let bytesPerRow = rep.bytesPerRow
+        let channel = rep.bitmapFormat.contains(.alphaFirst) ? 1 : 0
+        func isAccent(_ x: Int, _ y: Int) -> Bool {
+            let pixel = data + y * bytesPerRow + x * samples
+            return (0 ..< 3).allSatisfy { abs(Int(pixel[channel + $0]) - target[$0]) <= tolerance }
+        }
+        var best: ClosedRange<Int>?
+        for y in 0 ..< rep.pixelsHigh / 2 {
+            var start: Int?
+            for x in 0 ... rep.pixelsWide {
+                if x < rep.pixelsWide, isAccent(x, y) {
+                    if start == nil { start = x }
+                } else if let runStart = start {
+                    let run = runStart ... (x - 1)
+                    if run.count >= minimumRun, run.count > (best?.count ?? 0) { best = run }
+                    start = nil
+                }
+            }
+        }
+        return best
     }
 
     @MainActor
@@ -724,6 +798,112 @@ struct ScreenSnapshotTests {
                 review: { _ in }
             )
             Spacer(minLength: 0)
+        }
+    }
+
+    /// The shipped screen inside the container the app gives it. On its own,
+    /// `TranscriptView` reports a fitting height of zero and its
+    /// `.navigationTitle` wrapper lays the screen out taller than the frame,
+    /// so a bare render starts part-way down the list with no header, and one
+    /// opened on the proposed layer drew nothing at all. Inside the
+    /// `NavigationSplitView` that `RootView` composes it in, with a stub
+    /// sidebar, the same view lays out inside the frame: title, counts, tabs,
+    /// notice, rule and rows. This is the path for rendering the shipped
+    /// composition; the sidebar column itself still does not draw.
+    static func shippedScreen(_ screen: some View) -> some View {
+        NavigationSplitView {
+            Text(verbatim: "Library")
+        } detail: {
+            screen
+        }
+    }
+
+    // MARK: - Screens: the layer switch in the shipped view
+
+    /// The shipped `TranscriptView` opened on each of its two available layers
+    /// through the initial-selection seam, over the synthetic four-segment run
+    /// that carries a D50 speaker-proposal set, so no private recording is
+    /// needed. The app end-to-end pass ran with post-processing off and the
+    /// switch had never been rendered. Each image is read back twice: by OCR,
+    /// for what the rows say, and by pixel, for where the accent underline
+    /// under the displayed tab sits.
+    @Test @MainActor
+    func layerSwitchRendersEachAvailableLayerInTheShippedView() throws {
+        guard Self.enabled else { return }
+        let root = try derivedLayerTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try derivedLayerRunFixture(in: root, complete: false)
+        try derivedLayerWriteSpeakerProposal(
+            fixture: fixture,
+            id: "proposal-a",
+            finishedAt: "2026-09-01T23:13:07Z"
+        )
+        let run = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+        let proposal = try #require(run.speakerProposal)
+        let record = Self.record(
+            named: "Layer switch fixture",
+            runURL: fixture.runURL,
+            durationS: 8,
+            state: .hasConflicts,
+            speakerNames: ["SPEAKER_00": "Jina", "SPEAKER_01": "Minsu"]
+        )
+        let model = try Self.model()
+        let layers: [TranscriptDisplayLayer] = [.speakerLabelled, .proposed]
+        var readings: [TranscriptDisplayLayer: String] = [:]
+        var underlines: [TranscriptDisplayLayer: [String: ClosedRange<Int>]] = [:]
+        for layer in layers {
+            for (schemeLabel, scheme) in Self.schemes {
+                let name = "\(Self.tag)-layerswitch-\(layer.rawValue)-\(schemeLabel)"
+                let size = try Self.host(
+                    Self.shippedScreen(
+                        TranscriptView(
+                            model: model,
+                            record: record,
+                            run: run,
+                            proposal: proposal,
+                            initialLayer: layer
+                        )
+                    ),
+                    width: 1_400, height: 700, scheme: scheme, name: name
+                )
+                let url = Self.outRoot.appendingPathComponent("\(name).png")
+                let swatch = AppTheme.Palette.accentSwatch
+                let underline = try Self.accentUnderline(
+                    in: url, hex: scheme == .dark ? swatch.dark : swatch.light
+                )
+                underlines[layer, default: [:]][schemeLabel] = underline
+                print("layerswitch \(layer.rawValue) \(schemeLabel) \(size) underline \(String(describing: underline))")
+                if scheme == .light {
+                    let lines = try Self.recognisedText(in: url)
+                    print("layerswitch \(layer.rawValue) OCR lines: \(lines.count)")
+                    readings[layer] = Self.compact(lines.joined(separator: "\n"))
+                }
+            }
+        }
+        let source = try #require(readings[.speakerLabelled])
+        let proposed = try #require(readings[.proposed])
+        // Both images carry the header, the tabs and the unnamed rows.
+        for text in [source, proposed] {
+            #expect(text.contains(Self.compact("Layer switch fixture")))
+            #expect(text.contains(Self.compact("Speaker-labelled")))
+            #expect(text.contains(Self.compact("Proposed")))
+            #expect(text.contains(Self.compact("Speaker not named")))
+        }
+        // The proposal speaks on the two unnamed rows and in the notice only
+        // when its layer is displayed.
+        #expect(!source.contains(Self.compact("Proposed, not measured")))
+        #expect(!source.contains(Self.compact("No speaker proposed")))
+        #expect(!source.contains(Self.compact("1 proposed, 1 declined")))
+        #expect(proposed.contains(Self.compact("Proposed, not measured")))
+        #expect(proposed.contains(Self.compact("No speaker proposed")))
+        #expect(proposed.contains(Self.compact("1 proposed, 1 declined")))
+        // The accent underline sits under a different tab in each image, and
+        // Proposed is the rightmost of the four, in both appearances.
+        for (schemeLabel, _) in Self.schemes {
+            let sourceUnderline = try #require(underlines[.speakerLabelled]?[schemeLabel])
+            let proposedUnderline = try #require(underlines[.proposed]?[schemeLabel])
+            #expect(sourceUnderline != proposedUnderline)
+            #expect(proposedUnderline.lowerBound > sourceUnderline.upperBound)
         }
     }
 
