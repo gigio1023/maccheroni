@@ -285,8 +285,46 @@ a resolved chip differ in both.
 
 Raw flag tokens never appear in the reading surface. `conflict` and
 `uncertain` are represented by the chip; `backend_speaker_evidence` is
-provenance on 245 of 248 segments and belongs in the segment's detail; any flag
-the app has no word for is shown only there, under *Other markers*.
+provenance on 245 of 248 segments and belongs in the segment's detail;
+`non_speech_event` is represented by the row itself (below); any flag the app
+has no word for is shown only in the detail, under *Other markers*.
+
+#### A segment that holds no speech
+
+The speech model marks audio that carried no words with a bracketed label in
+the text field: `[Silence]`, `[Human Sounds]`, `[Environmental Sounds]`,
+`[Music]`, `[Noise]`, `[Speech]`. On the measured run three of the 248
+segments are nothing but such a marker, and the text column printed them as
+speech, in the primary ink beside a speaker cell. The field's term is a
+**non-speech event** (`docs/terminology.md`), and the row treats it as one.
+
+- **What decides it.** A segment whose whole text is one marker is an event.
+  Since 2026-09-04 the ASR adapter types it with the `non_speech_event` flag
+  beside the verbatim text; a run sealed before that carries no flag and is
+  read through its text, which judgment rule 3 leaves exactly as written. A
+  marker inside speech, `we heard a [Buzzer] just then`, is speech: the words
+  are the record and the marker reads inline as the engine placed it.
+- **The event treatment.** The text column prints the event in the reader's
+  language, *Silence*, *Human sounds*, *Environmental sounds*, *Music*,
+  *Noise*, *Speech without words*, at the body size, italic, in the secondary
+  ink. The italic is the mark that survives a reader who cannot tell the two
+  inks apart, and it is what a script uses for a stage direction, which is
+  what the row is. No glyph, no chip, no brackets, no fill. A label outside the
+  known vocabulary prints its own marker, because the marker is the only
+  record of what it was. The accessibility label reads *Non-speech event*
+  before the word, and the tooltip says the model marked it, not a person.
+- **The gutter is unchanged.** The speaker cell, the figures and the band keep
+  saying what the acoustics said about the interval. A *Silence* row under
+  *Speaker not named* with two candidates and a band is a disagreement between
+  diarization and the speech model, and it is worth seeing; the row does not
+  resolve it, and the review chip stays.
+- **Copy and export.** The clipboard, Markdown and SRT carry the engine's
+  marker verbatim in the text position, with the speaker the acoustics gave
+  the interval, exactly as the row would copy if it were speech. Brackets are
+  the caption convention for a non-speech event in plain text, and the copy
+  is the data surface where the reading surface's word would be a second
+  vocabulary. Every row, speech or event, is therefore byte-exact against the
+  run. The segments-JSON export is the document itself and keeps the flag.
 
 #### The proposal layer on a row
 
@@ -425,7 +463,8 @@ heading stops competing with the body it heads); transcript body 15 with 3 pt
 line spacing; speaker name 13 semibold; meta and figures 12; label 11 heavy,
 used only for chips and column headers. Numbers that align down a column are
 set in tabular figures. Nothing a reader reads is smaller than 11, and 11 is
-reserved for the heavy-weight label face.
+reserved for the heavy-weight label face. A non-speech event is the body face
+in italic and the secondary ink, the one italic on the surface.
 
 **Spacing.** 4 / 8 / 12 / 16 / 24. Row vertical padding 12, column gap 8, gap
 before the text 12, no inter-row spacing (the hairline is the separation).

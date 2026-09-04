@@ -37,9 +37,14 @@ struct ScreenSnapshotTests {
     static let home = NSHomeDirectory()
     static let usage = URL(fileURLWithPath: "\(home)/maccheroni-usage-20260901", isDirectory: true)
     /// `screens/<tag>`, so a later pass writes its own images beside the ones
-    /// it is being compared against rather than over them.
+    /// it is being compared against rather than over them. `P6_OUT` names a
+    /// directory to write to instead, for a pass that must keep its images
+    /// outside the usage directory.
     static var outRoot: URL {
-        usage.appendingPathComponent("screens/\(tag)", isDirectory: true)
+        if let out = ProcessInfo.processInfo.environment["P6_OUT"], !out.isEmpty {
+            return URL(fileURLWithPath: out, isDirectory: true)
+        }
+        return usage.appendingPathComponent("screens/\(tag)", isDirectory: true)
     }
     /// The real 20.7-minute run, `status: partial`, 248 merged segments.
     static let realRunURL = usage.appendingPathComponent(
@@ -719,6 +724,75 @@ struct ScreenSnapshotTests {
                 review: { _ in }
             )
             Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - Screens: non-speech events
+
+    /// Rows that hold no speech, between rows that do. The synthetic fixture
+    /// runs on any machine; the real run's three event rows (indexes 25, 135
+    /// and 247, each `UNKNOWN` and flagged for review) are rendered beside
+    /// their neighbours when the private recording is present.
+    @Test @MainActor
+    func nonSpeechEventRows() throws {
+        guard Self.enabled else { return }
+        var fixture = TranscriptFixtures.meetingShaped()
+        // Row 2 is attributed with a contested share; row 3 is unnamed with
+        // two candidates and a band. Both become event rows, as the real run's
+        // are, and rows 1 and 4 stay speech around them, one carrying a marker
+        // inside its words.
+        fixture.run.segments[2].segment.text = "[Human Sounds]"
+        fixture.run.segments[3].segment.text = "[Silence]"
+        fixture.run.segments[4].segment.text = "Then we heard a [Buzzer] just then, and went on."
+        fixture.run.segments[5].segment.text = "[Speech]"
+        for index in [2, 3, 5] {
+            fixture.run.segments[index].segment.flags?.append("non_speech_event")
+        }
+        let synthetic = RealRun(run: fixture.run, record: fixture.record)
+        for (widthLabel, width) in Self.widths {
+            for (schemeLabel, scheme) in Self.schemes {
+                try Self.host(
+                    Self.composedRows(real: synthetic, proposal: nil, indices: [1, 2, 3, 4, 5, 6], focused: nil),
+                    width: width, height: 520, scheme: scheme,
+                    name: "\(Self.tag)-nonspeech-synthetic-\(widthLabel)-\(schemeLabel)"
+                )
+            }
+        }
+        // The event row focused, so the reason sentence and the event share a
+        // text column.
+        try Self.host(
+            Self.composedRows(real: synthetic, proposal: nil, indices: [2, 3, 4], focused: 3),
+            width: 1_400, height: 320, scheme: .light,
+            name: "\(Self.tag)-nonspeech-synthetic-focused-light"
+        )
+        guard Self.exists(Self.proposalRunURL) else {
+            print("SKIP nonspeech real rows: real run absent")
+            return
+        }
+        let real = try Self.realRun(
+            at: Self.proposalRunURL, name: "Weekly product sync", state: .hasConflicts
+        )
+        let events = real.run.segments.filter {
+            NonSpeechEvent.of(text: $0.segment.text, flags: $0.segment.flags) != nil
+        }.map(\.index)
+        print("nonspeech real rows: \(events)")
+        let neighbours = Array(Set(events.flatMap { [$0 - 1, $0, $0 + 1] })).sorted()
+            .filter { real.run.segments.indices.contains($0) }
+        for (schemeLabel, scheme) in Self.schemes {
+            try Self.host(
+                Self.composedRows(real: real, proposal: nil, indices: neighbours, focused: nil),
+                width: 1_400, height: 900, scheme: scheme,
+                name: "\(Self.tag)-nonspeech-real-\(schemeLabel)"
+            )
+        }
+        // The same rows under the proposal layer, where the derived set also
+        // spoke about them.
+        if let document = real.run.speakerProposal {
+            try Self.host(
+                Self.composedRows(real: real, proposal: document, indices: neighbours, focused: nil),
+                width: 1_400, height: 1_100, scheme: .light,
+                name: "\(Self.tag)-nonspeech-real-proposed-light"
+            )
         }
     }
 

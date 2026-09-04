@@ -716,6 +716,113 @@ import Testing
         }
     }
 
+    /// A complete VibeVoice document, in the runner's own shape, whose segments
+    /// are given by the test. The prefix fixture's base64 convention is reused
+    /// so no escaping has to agree between the Swift literal and the Python.
+    private func fakeVibeVoiceCompleteRuntime(
+        segmentsJSON: String
+    ) throws -> (ASRRuntime, URL) {
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "maccheroni-asr-fake-vibe-complete-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: scratch,
+            withIntermediateDirectories: true
+        )
+        let runner = scratch.appendingPathComponent("vibe-complete.py")
+        let source = #"""
+        import argparse, base64, hashlib, json, pathlib
+        parser = argparse.ArgumentParser()
+        parser.add_argument("operation"); parser.add_argument("--backend")
+        parser.add_argument("--audio"); parser.add_argument("--start-s", type=float); parser.add_argument("--end-s", type=float)
+        parser.add_argument("--language"); parser.add_argument("--glossary"); parser.add_argument("--glossary-sha256")
+        parser.add_argument("--injection-mode"); parser.add_argument("--cache-root"); parser.add_argument("--output")
+        parser.add_argument("--timeout-seconds"); parser.add_argument("--max-tokens", type=int)
+        args = parser.parse_args()
+        output = pathlib.Path(args.output); raw = output.with_suffix(".backend.json")
+        segments = json.loads(base64.b64decode(SEGMENTS))
+        raw.write_text(json.dumps({"text": json.dumps(segments), "segments": segments}) + "\n", encoding="utf-8")
+        h = lambda value: hashlib.sha256(value.encode()).hexdigest()
+        audio_hash = hashlib.sha256(pathlib.Path(args.audio).read_bytes()).hexdigest()
+        duration = args.end_s - args.start_s
+        unavailable = {
+          "preprocessing_s":"mlx-audio exposes aggregate time only", "audio_encoder_s":"mlx-audio exposes aggregate time only",
+          "decoder_prefill_s":"mlx-audio exposes aggregate time only", "token_decode_s":"mlx-audio exposes aggregate time only",
+          "model_load_s":"mlx-audio exposes aggregate time only", "context_hard_cap_tokens":"mlx-audio does not expose this cap",
+          "peak_rss_bytes":"mlx-audio does not expose peak RSS"
+        }
+        document = {
+          "backend":"vibevoice", "model":{"hf_model_id":"mlx-community/VibeVoice-ASR-8bit", "revision":"725c72e54d6ef875472c27fbc50fab470a960940", "quantization":"int8"},
+          "outcome":"complete", "stop_reason":"endOfSequence", "terminal_evidence":"observed", "timing_granularity":"segment",
+          "raw_text":json.dumps(segments), "segments":segments, "failure":None,
+          "language":{"requested":args.language,"instruction_sha256":h("vibevoice-no-prompt"),"prompt_guidance_applied":False},
+          "glossary":{"provided":False,"sha256":None,"item_count":0,"injection_mode":"none","applied":False,"payload_sha256":None,"payload_entry_count":0,"instruction_sha256":h("vibevoice-no-prompt")},
+          "coverage":{"input_duration_s":duration,"processed_duration_s":duration,"truncated":False},
+          "input":{"sha256_before":audio_hash,"sha256_after":audio_hash}, "command":["mlx_audio.stt.generate"],
+          "backend_raw_artifact":{"path":str(raw),"sha256":hashlib.sha256(raw.read_bytes()).hexdigest()},
+          "helper_fingerprint":None, "runner_wall_time_s":0.2,
+          "metrics":{"preprocessing_s":None,"audio_encoder_s":None,"decoder_prefill_s":None,"token_decode_s":None,"total_s":0.1,"model_load_s":None,"audio_duration_s":duration,"prompt_tokens":4,"generated_tokens":5,"requested_max_tokens":args.max_tokens,"max_tokens":args.max_tokens,"context_hard_cap_tokens":None,"peak_rss_bytes":None},
+          "metrics_unavailable":unavailable
+        }
+        with output.open("x", encoding="utf-8") as stream: json.dump(document, stream)
+        """#
+        let prelude = """
+        SEGMENTS = "\(Data(segmentsJSON.utf8).base64EncodedString())"
+
+        """
+        try Data((prelude + source).utf8).write(
+            to: runner,
+            options: .withoutOverwriting
+        )
+        return (
+            ASRRuntime(
+                pythonExecutable: systemPython,
+                runnerURL: runner,
+                cacheRoot: scratch.appendingPathComponent("cache", isDirectory: true),
+                outputRoot: scratch.appendingPathComponent("output", isDirectory: true),
+                timeout: 10
+            ),
+            scratch
+        )
+    }
+
+    /// The engine's non-speech markers reach the adapter as ordinary segment
+    /// text. A segment that is nothing but one marker is typed with the
+    /// `non_speech_event` flag beside its verbatim text; a marker inside
+    /// speech leaves the segment as speech; the text is never rewritten.
+    @Test func vibeVoiceNonSpeechMarkerIsFlaggedBesideItsVerbatimText() async throws {
+        let (runtime, scratch) = try fakeVibeVoiceCompleteRuntime(segmentsJSON: """
+        [{"start_s":0.0,"end_s":1.0,"text":"[Silence]","speaker":"0"},\
+        {"start_s":1.0,"end_s":2.5,"text":"we heard a [Buzzer] just then","speaker":"0"},\
+        {"start_s":2.5,"end_s":3.2,"text":"[Environmental Sounds]","speaker":""},\
+        {"start_s":3.2,"end_s":4.08,"text":"plain words","speaker":"1"}]
+        """)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let audio = try syntheticAudio(in: scratch)
+        let adapter = PinnedASRAdapter(.vibeVoice, runtime: runtime)
+
+        let record = try await adapter.transcribeDetailed(ASRRequest(
+            audioURL: audio,
+            startS: 0,
+            endS: 4.08,
+            language: .fixed("ko")
+        ))
+        let segments = record.result.segments
+
+        #expect(segments.map(\.text) == [
+            "[Silence]", "we heard a [Buzzer] just then", "[Environmental Sounds]", "plain words",
+        ])
+        #expect(segments.allSatisfy { $0.speaker == "UNASSIGNED" })
+        #expect(segments[0].flags == ["backend_speaker_evidence", NonSpeechEvent.flag])
+        #expect(segments[1].flags == ["backend_speaker_evidence"])
+        #expect(segments[2].flags == [NonSpeechEvent.flag])
+        #expect(segments[3].flags == ["backend_speaker_evidence"])
+        #expect(segments.map { NonSpeechEvent.of(text: $0.text, flags: $0.flags)?.kind }
+            == [.silence, nil, .environmentalSounds, nil])
+    }
+
     @Test func timeoutKillsAChildAndRemovesCaptureFiles() async throws {
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("maccheroni-asr-timeout-test-\(UUID().uuidString)", isDirectory: true)

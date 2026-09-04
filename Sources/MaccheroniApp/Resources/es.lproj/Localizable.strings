@@ -262,6 +262,8 @@
 	<string>El inglés es el predeterminado. Se aplica una elección manual a Maccheroni sin cambiar el idioma del sistema Mac.</string>
 	<key>Enhancement</key>
 	<string>Realce</string>
+	<key>Environmental sounds</key>
+	<string>Sonidos ambientales</string>
 	<key>Exact Identities</key>
 	<string>Identidades exactas</string>
 	<key>Export</key>
@@ -300,6 +302,8 @@
 	<string>Tiene conflictos</string>
 	<key>How</key>
 	<string>Cómo</string>
+	<key>Human sounds</key>
+	<string>Sonidos humanos</string>
 	<key>Import Audio</key>
 	<string>Importar Audio</string>
 	<key>Import Audio…</key>
@@ -414,6 +418,8 @@
 	<string>Mover a la papelera…</string>
 	<key>Move “%@” to the Trash?</key>
 	<string>¿Mover «%@» a la papelera?</string>
+	<key>Music</key>
+	<string>Música</string>
 	<key>New Recording</key>
 	<string>Nueva grabación</string>
 	<key>No</key>
@@ -432,6 +438,10 @@
 	<string>Sin hablante propuesto</string>
 	<key>No speaker was active on the speaker timeline during this segment.</key>
 	<string>Ningún hablante estaba activo en la línea de tiempo durante este segmento.</string>
+	<key>Noise</key>
+	<string>Ruido</string>
+	<key>Non-speech event: %@</key>
+	<string>Evento no verbal: %@</string>
 	<key>None</key>
 	<string>Ninguno</string>
 	<key>Not Created</key>
@@ -650,6 +660,8 @@
 	<string>Muestra u oculta cómo se produjo esta ejecución.</string>
 	<key>Show this layer of the transcript.</key>
 	<string>Muestra esta capa de la transcripción.</string>
+	<key>Silence</key>
+	<string>Silencio</string>
 	<key>Size</key>
 	<string>Tamaño</string>
 	<key>Some segments carry no recorded speaker evidence.</key>
@@ -696,6 +708,8 @@
 	<string>El reconocimiento de voz devolvió una salida que Maccheroni no pudo verificar, así que no se promovió nada a la transcripción.</string>
 	<key>Speech recognition stopped producing new words and repeated itself to the end of its output budget, so that stretch of audio produced no usable text.</key>
 	<string>El reconocimiento de voz dejó de producir palabras nuevas y se repitió hasta agotar su presupuesto de salida, por lo que ese tramo de audio no dio texto utilizable.</string>
+	<key>Speech without words</key>
+	<string>Habla sin palabras</string>
 	<key>Stale Bookmark</key>
 	<string>Marcador obsoleto</string>
 	<key>Start Recording</key>
@@ -806,6 +820,8 @@
 	<string>La línea de tiempo cubrió %@ de este segmento, por debajo de lo que esta ejecución exige.</string>
 	<key>The speech model also reported a speaker for this segment. It is kept as evidence and never becomes the speaker.</key>
 	<string>El modelo de voz también informó de un hablante para este segmento. Se conserva como evidencia y nunca se convierte en el hablante.</string>
+	<key>The speech model marked this segment as a non-speech event, not as words.</key>
+	<string>El modelo de voz marcó este segmento como un evento no verbal, no como palabras.</string>
 	<key>The speech model that answered is not the exact model this profile pins, so its output was refused.</key>
 	<string>El modelo de voz que respondió no es exactamente el que fija este perfil, así que se rechazó su salida.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>

@@ -293,6 +293,73 @@ struct TranscriptExportTests {
         #expect(fixture.record == originalRecord)
     }
 
+    /// The copy rule for a segment that holds no speech: the engine's marker,
+    /// verbatim, in the text position, with the speaker the acoustics gave the
+    /// interval. Brackets are the caption convention for a non-speech event
+    /// in plain text, and the clipboard is the data surface, so it carries
+    /// what the run recorded rather than the reader's-language label the row
+    /// prints. Every row, speech or event, is byte-exact.
+    @Test
+    func aNonSpeechEventRowCopiesTheEnginesMarkerVerbatimAndSpeechRowsStayByteExact() throws {
+        var fixture = exportFixture()
+        fixture.run.transcript.segments.insert(
+            Segment(
+                speaker: "UNKNOWN",
+                startS: 2,
+                endS: 3.5,
+                text: "[Silence]",
+                flags: ["non_speech_event", "conflict", "uncertain"]
+            ),
+            at: 1
+        )
+        fixture.run.transcript.segments.insert(
+            Segment(
+                speaker: "SPEAKER_00",
+                startS: 3.5,
+                endS: 5,
+                text: "we heard a [Buzzer] just then"
+            ),
+            at: 2
+        )
+        fixture.run.segments = fixture.run.transcript.segments.enumerated().map { index, segment in
+            TranscriptSegment(
+                id: TranscriptSegmentID(runID: "run-001", index: index),
+                index: index,
+                segment: segment,
+                conflict: nil
+            )
+        }
+        fixture.run.conflicts = []
+        fixture.record.conflictResolutions = [:]
+
+        let payload = try TranscriptExporter.copyText(
+            run: fixture.run,
+            record: fixture.record,
+            selectedSegmentIndices: [],
+            locale: Locale(identifier: "en"),
+            layer: .speakerLabelled
+        )
+
+        #expect(payload == """
+        Transcript layer: Speaker-labelled
+
+        [00:00:00.000 – 00:00:01.235] **Jina:** Original text [UNCERTAIN]
+
+        [00:00:02.000 – 00:00:03.500] **UNKNOWN:** [Silence] [UNCERTAIN]
+
+        [00:00:03.500 – 00:00:05.000] **Jina:** we heard a [Buzzer] just then
+
+        [01:01:01.006 – 01:01:03.500] **Speaker 2:** Unresolved wording
+
+        """)
+        let srt = try TranscriptExporter.srt(run: fixture.run, record: fixture.record)
+        #expect(srt.contains("00:00:02,000 --> 00:00:03,500\nUNKNOWN: [Silence] [UNCERTAIN]\n"))
+        let json = try TranscriptExporter.data(format: .segmentsJSON, run: fixture.run, record: fixture.record)
+        let exported = try JSONDecoder().decode(SegmentsDocument.self, from: json)
+        #expect(exported.segments[1].text == "[Silence]")
+        #expect(exported.segments[1].flags == ["non_speech_event", "conflict", "uncertain"])
+    }
+
     @Test @MainActor
     func copyCommandWritesOnceAndReportsLayerAndScope() throws {
         let fixture = exportFixture()

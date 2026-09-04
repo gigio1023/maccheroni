@@ -582,6 +582,91 @@ struct TranscriptReadingTests {
         #expect(TranscriptFlagVocabulary.otherMarkers(flags) == ["clipped_edge"])
         #expect(TranscriptFlagVocabulary.otherMarkers(["backend_speaker_evidence"]).isEmpty)
         #expect(!TranscriptFlagVocabulary.marksUncertainty(["backend_speaker_evidence"]))
+        // The event flag has a word of its own — the row — so it is not an
+        // "other marker" either, and it marks nothing for review.
+        #expect(TranscriptFlagVocabulary.otherMarkers(["non_speech_event"]).isEmpty)
+        #expect(!TranscriptFlagVocabulary.marksUncertainty(["non_speech_event"]))
+    }
+
+    // MARK: Non-speech events
+
+    /// On the 2026-09-01 run three of 248 rows are nothing but the engine's
+    /// non-speech marker, and the text column printed them as speech. The row
+    /// reads the event through the flag, or through the text for a run sealed
+    /// before the flag existed, and prints it in the reader's language; a
+    /// marker inside speech is speech and prints verbatim.
+    @Test
+    func aRowThatHoldsNoSpeechPrintsTheEventNotTheEnginesMarker() {
+        let english = Locale(identifier: "en")
+        let korean = Locale(identifier: "ko")
+
+        let sealedBeforeTheFlag = NonSpeechEvent.of(
+            text: "[Silence]", flags: ["conflict", "uncertain"]
+        )
+        #expect(sealedBeforeTheFlag?.kind == .silence)
+        #expect(sealedBeforeTheFlag?.label(locale: english) == "Silence")
+        #expect(sealedBeforeTheFlag?.label(locale: korean) == "무음")
+
+        let flagged = NonSpeechEvent.of(
+            text: "[Human Sounds]", flags: ["non_speech_event", "conflict"]
+        )
+        #expect(flagged?.label(locale: english) == "Human sounds")
+        #expect(NonSpeechEvent.of(text: "[Environmental Sounds]", flags: nil)?
+            .label(locale: english) == "Environmental sounds")
+        #expect(NonSpeechEvent.of(text: "[Speech]", flags: nil)?
+            .label(locale: english) == "Speech without words")
+
+        // Every known kind has a word in the reader's language, and none of
+        // those words is the engine's marker.
+        for kind in NonSpeechEvent.Kind.allCases where kind != .other {
+            let label = NonSpeechEvent(kind: kind, marker: "[x]").label(locale: english)
+            #expect(!label.isEmpty, Comment(rawValue: "\(kind)"))
+            #expect(!label.hasPrefix("["), Comment(rawValue: "\(kind)"))
+        }
+        // A label outside the vocabulary has no word and prints its marker,
+        // which is the only record of what it was.
+        #expect(NonSpeechEvent.of(text: "[Buzzer]", flags: nil)?.label(locale: english) == "[Buzzer]")
+
+        // Speech with a marker inside it is speech.
+        #expect(NonSpeechEvent.of(text: "we heard a [Buzzer] just then", flags: nil) == nil)
+        #expect(NonSpeechEvent.of(
+            text: "Overlapping exchange segment 000001 about the release plan.",
+            flags: ["backend_speaker_evidence", "conflict", "uncertain"]
+        ) == nil)
+    }
+
+    /// The event row is one line tall like a speech row, and its text column
+    /// is the event treatment rather than selectable transcript text.
+    @Test @MainActor
+    func anEventRowKeepsTheRowPitchOfASpeechRow() {
+        var fixture = TranscriptFixtures.meetingShaped()
+        // Rows 1 and 2 are both attributed and one line tall; row 2 becomes
+        // the event row, keeping the review flags the real run's three carry.
+        fixture.run.segments[2].segment.text = "[Silence]"
+        let speech = fixture.run.segments[1]
+        let event = fixture.run.segments[2]
+        #expect(SpeakerRoster.isAttributed(speech.segment.speaker))
+        #expect(SpeakerRoster.isAttributed(event.segment.speaker))
+        let roster = SpeakerRoster(segments: fixture.run.transcript.segments)
+        func height(_ item: TranscriptSegment) -> CGFloat {
+            let row = TranscriptSegmentRow(
+                item: item,
+                attribution: SegmentAttributionSummary(item: item),
+                displaySpeaker: "Jina",
+                speakerName: { $0 },
+                speakerColor: { roster.color(for: $0) },
+                text: item.segment.text,
+                reviewState: nil,
+                isFocused: false,
+                isPlaying: false,
+                isSelected: false,
+                play: {}, select: {}, rename: {}, review: {}
+            )
+            let hosting = NSHostingView(rootView: row.frame(width: 1_000))
+            return hosting.fittingSize.height
+        }
+        #expect(NonSpeechEvent.of(text: event.segment.text, flags: event.segment.flags) != nil)
+        #expect(abs(height(event) - height(speech)) < 1)
     }
 
     @Test

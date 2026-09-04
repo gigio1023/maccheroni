@@ -262,6 +262,8 @@
 	<string>English is the default. A manual choice applies to Maccheroni without changing the Mac system language.</string>
 	<key>Enhancement</key>
 	<string>Enhancement</string>
+	<key>Environmental sounds</key>
+	<string>Environmental sounds</string>
 	<key>Exact Identities</key>
 	<string>Exact Identities</string>
 	<key>Export</key>
@@ -300,6 +302,8 @@
 	<string>Has Conflicts</string>
 	<key>How</key>
 	<string>How</string>
+	<key>Human sounds</key>
+	<string>Human sounds</string>
 	<key>Import Audio</key>
 	<string>Import Audio</string>
 	<key>Import Audio…</key>
@@ -414,6 +418,8 @@
 	<string>Move to Trash…</string>
 	<key>Move “%@” to the Trash?</key>
 	<string>Move “%@” to the Trash?</string>
+	<key>Music</key>
+	<string>Music</string>
 	<key>New Recording</key>
 	<string>New Recording</string>
 	<key>No</key>
@@ -432,6 +438,10 @@
 	<string>No speaker proposed</string>
 	<key>No speaker was active on the speaker timeline during this segment.</key>
 	<string>No speaker was active on the speaker timeline during this segment.</string>
+	<key>Noise</key>
+	<string>Noise</string>
+	<key>Non-speech event: %@</key>
+	<string>Non-speech event: %@</string>
 	<key>None</key>
 	<string>None</string>
 	<key>Not Created</key>
@@ -650,6 +660,8 @@
 	<string>Show or hide how this run was produced.</string>
 	<key>Show this layer of the transcript.</key>
 	<string>Show this layer of the transcript.</string>
+	<key>Silence</key>
+	<string>Silence</string>
 	<key>Size</key>
 	<string>Size</string>
 	<key>Some segments carry no recorded speaker evidence.</key>
@@ -696,6 +708,8 @@
 	<string>Speech recognition returned output Maccheroni could not verify, so nothing was promoted into the transcript.</string>
 	<key>Speech recognition stopped producing new words and repeated itself to the end of its output budget, so that stretch of audio produced no usable text.</key>
 	<string>Speech recognition stopped producing new words and repeated itself to the end of its output budget, so that stretch of audio produced no usable text.</string>
+	<key>Speech without words</key>
+	<string>Speech without words</string>
 	<key>Stale Bookmark</key>
 	<string>Stale Bookmark</string>
 	<key>Start Recording</key>
@@ -806,6 +820,8 @@
 	<string>The speaker timeline covered %@ of this segment, below what this run requires.</string>
 	<key>The speech model also reported a speaker for this segment. It is kept as evidence and never becomes the speaker.</key>
 	<string>The speech model also reported a speaker for this segment. It is kept as evidence and never becomes the speaker.</string>
+	<key>The speech model marked this segment as a non-speech event, not as words.</key>
+	<string>The speech model marked this segment as a non-speech event, not as words.</string>
 	<key>The speech model that answered is not the exact model this profile pins, so its output was refused.</key>
 	<string>The speech model that answered is not the exact model this profile pins, so its output was refused.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>

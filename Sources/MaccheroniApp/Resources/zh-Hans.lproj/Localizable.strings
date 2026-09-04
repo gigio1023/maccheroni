@@ -262,6 +262,8 @@
 	<string>默认为英语。手动选择适用于 Maccheroni，无需更改 Mac 系统语言。</string>
 	<key>Enhancement</key>
 	<string>强化</string>
+	<key>Environmental sounds</key>
+	<string>环境音</string>
 	<key>Exact Identities</key>
 	<string>精确标识</string>
 	<key>Export</key>
@@ -300,6 +302,8 @@
 	<string>有冲突</string>
 	<key>How</key>
 	<string>方式</string>
+	<key>Human sounds</key>
+	<string>人声响动</string>
 	<key>Import Audio</key>
 	<string>导入音频</string>
 	<key>Import Audio…</key>
@@ -414,6 +418,8 @@
 	<string>移到垃圾箱…</string>
 	<key>Move “%@” to the Trash?</key>
 	<string>将“%@”移到垃圾箱？</string>
+	<key>Music</key>
+	<string>音乐</string>
 	<key>New Recording</key>
 	<string>新录音</string>
 	<key>No</key>
@@ -432,6 +438,10 @@
 	<string>未提出说话人</string>
 	<key>No speaker was active on the speaker timeline during this segment.</key>
 	<string>在此片段期间，说话人时间轴上没有任何说话人。</string>
+	<key>Noise</key>
+	<string>噪音</string>
+	<key>Non-speech event: %@</key>
+	<string>非语音事件：%@</string>
 	<key>None</key>
 	<string>无</string>
 	<key>Not Created</key>
@@ -650,6 +660,8 @@
 	<string>显示或隐藏本次运行的生成方式。</string>
 	<key>Show this layer of the transcript.</key>
 	<string>显示转录文本的此图层。</string>
+	<key>Silence</key>
+	<string>静音</string>
 	<key>Size</key>
 	<string>尺寸</string>
 	<key>Some segments carry no recorded speaker evidence.</key>
@@ -696,6 +708,8 @@
 	<string>语音识别返回了 Maccheroni 无法验证的输出，因此没有任何内容进入转录文本。</string>
 	<key>Speech recognition stopped producing new words and repeated itself to the end of its output budget, so that stretch of audio produced no usable text.</key>
 	<string>语音识别不再产生新词，而是重复同一内容直到用尽输出预算，因此那段音频没有产生可用文本。</string>
+	<key>Speech without words</key>
+	<string>无文字的语音</string>
 	<key>Stale Bookmark</key>
 	<string>过期的书签</string>
 	<key>Start Recording</key>
@@ -806,6 +820,8 @@
 	<string>说话人时间轴仅覆盖此片段的 %@，低于本次运行的要求。</string>
 	<key>The speech model also reported a speaker for this segment. It is kept as evidence and never becomes the speaker.</key>
 	<string>语音模型也为此片段报告了一个说话人。该值仅作为证据保留，绝不会成为说话人。</string>
+	<key>The speech model marked this segment as a non-speech event, not as words.</key>
+	<string>语音模型将此片段标记为非语音事件，而不是文字。</string>
 	<key>The speech model that answered is not the exact model this profile pins, so its output was refused.</key>
 	<string>作出响应的语音模型并非此配置文件锁定的模型，其输出已被拒绝。</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>

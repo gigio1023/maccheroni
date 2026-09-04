@@ -1052,8 +1052,12 @@ enum TranscriptFlagVocabulary {
         flags.contains { $0.caseInsensitiveCompare(backendSpeakerEvidence) == .orderedSame }
     }
 
+    /// A segment whose text is the engine's non-speech marker. The row itself
+    /// is the word for it, so it is not an "other marker".
+    static let nonSpeechEvent = NonSpeechEvent.flag
+
     static func otherMarkers(_ flags: [String]) -> [String] {
-        let known = [conflict, uncertain, backendSpeakerEvidence]
+        let known = [conflict, uncertain, backendSpeakerEvidence, nonSpeechEvent]
         return flags.filter { flag in
             !known.contains { $0.caseInsensitiveCompare(flag) == .orderedSame }
         }
@@ -2223,14 +2227,25 @@ struct TranscriptSegmentRow: View {
         }
     }
 
+    /// The engine's non-speech marker, when this row's text is one and nothing
+    /// else. Read from the flag the run wrote, or from the text for a run
+    /// sealed before the flag existed.
+    private var nonSpeechEvent: NonSpeechEvent? {
+        NonSpeechEvent.of(text: text, flags: item.segment.flags)
+    }
+
     private var textColumn: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.tight) {
-            Text(text)
-                .font(AppTheme.Typography.body)
-                .lineSpacing(AppTheme.Typography.bodyLineSpacing)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if let nonSpeechEvent {
+                NonSpeechEventText(event: nonSpeechEvent)
+            } else {
+                Text(text)
+                    .font(AppTheme.Typography.body)
+                    .lineSpacing(AppTheme.Typography.bodyLineSpacing)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if let reason = acousticReason {
                 Text(verbatim: reason)
                     .font(AppTheme.Typography.meta)
@@ -2243,6 +2258,47 @@ struct TranscriptSegmentRow: View {
                     .foregroundStyle(AppTheme.Palette.inkSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+}
+
+/// The event treatment: what the text column prints for a segment that holds
+/// no speech. The engine's marker, `[Silence]`, is a token and never reaches
+/// the reading surface; the row prints the event in the reader's language,
+/// italic and in the secondary ink, so it reads as a stage direction rather
+/// than as something somebody said, and the italic carries the mark for a
+/// reader who cannot tell the two inks apart. No glyph, no chip, no brackets.
+/// A label outside the known vocabulary prints its own marker, because the
+/// marker is the only record of what it was.
+struct NonSpeechEventText: View {
+    let event: NonSpeechEvent
+
+    var body: some View {
+        let label = event.label()
+        Text(verbatim: label)
+            .font(AppTheme.Typography.body)
+            .italic()
+            .lineSpacing(AppTheme.Typography.bodyLineSpacing)
+            .foregroundStyle(AppTheme.Palette.inkSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help(appLocalized("The speech model marked this segment as a non-speech event, not as words."))
+            .accessibilityLabel(Text(verbatim: appString("Non-speech event: \(label)")))
+    }
+}
+
+extension NonSpeechEvent {
+    /// The event in the reader's language. `other` has no word of its own and
+    /// prints the marker the engine wrote.
+    func label(locale: Locale? = nil) -> String {
+        switch kind {
+        case .silence: appString("Silence", locale: locale)
+        case .humanSounds: appString("Human sounds", locale: locale)
+        case .environmentalSounds: appString("Environmental sounds", locale: locale)
+        case .music: appString("Music", locale: locale)
+        case .noise: appString("Noise", locale: locale)
+        case .untranscribedSpeech: appString("Speech without words", locale: locale)
+        case .other: marker
         }
     }
 }
@@ -2594,11 +2650,17 @@ struct SegmentReviewSheet: View {
                 .font(AppTheme.Typography.meta)
                 .foregroundStyle(AppTheme.Palette.inkSecondary)
                 .monospacedDigit()
-            Text(verbatim: displayedText)
-                .font(AppTheme.Typography.body)
-                .lineSpacing(AppTheme.Typography.bodyLineSpacing)
-                .textSelection(.enabled)
-                .padding(.top, AppTheme.Spacing.tight)
+            Group {
+                if let event = NonSpeechEvent.of(text: displayedText, flags: item.segment.flags) {
+                    NonSpeechEventText(event: event)
+                } else {
+                    Text(verbatim: displayedText)
+                        .font(AppTheme.Typography.body)
+                        .lineSpacing(AppTheme.Typography.bodyLineSpacing)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(.top, AppTheme.Spacing.tight)
         }
     }
 
