@@ -125,54 +125,84 @@ glossary entry inserted twice where the speaker said something else.
 
 ## 6. Current Position
 
-- **now**: On 2026-09-01 one real 20.7-minute Korean meeting was run through the shipped
-  `ko-meeting` profile for the first time. It failed outright, and so did four other
-  things that 324 passing tests and two public fixtures had not surfaced: VibeVoice
-  collapsed into repetition on real Korean meeting audio and the run discarded every
-  completed chunk with it; the diarization validator rejected roughly half of all
-  mid-file clips on an arbitrary tie-break; a `/private`-spelled output root failed its
-  own containment check, which also turned out to accept a symlink escaping the run
-  directory; the capture screen offered to start runs the profile could not perform; and
-  a failed run named no cause. All are repaired. The same recording now completes at
-  **1212.52 s of 1243.08 s (97.5 %)**, naming the one lost range `[871.552, 902.112) s`,
-  with `merged/segments.json` written. Suite is 374 Swift tests in 27 suites plus 36 and
-  37 Python tests. The 2026-08-31 sealed evaluations stand unchanged:
+- **now**: PR #30 merged on 2026-09-03 as `e3dcc62`, a squash of twelve commits carrying
+  the 2026-09-01 real-usage repairs, the layered attribution work, and D45-D52. An
+  independent read-only review of that branch against this document produced 24
+  findings, 6 High, 13 Medium and 5 Low; all 24 are closed in the merged tree, each
+  behaviour change with a named test. Re-verified at `e3dcc62` on 2026-09-04 in a fresh
+  checkout: `swift test` 533 tests in 32 suites pass, of which 6 are opt-in model and
+  backend lanes that skip without their environment and 8 are offscreen render tests
+  that return without asserting unless `P6_RENDER` is set and the private fixture is
+  present; the ASR Python suite 38; the provisioning script suite 38; the contract
+  checker passes all four schemas; 472 localized keys present in all ten locales and the
+  string catalog; `git diff --check` clean; all 84 `path:line` anchors in
+  `docs/terminology.md` resolve. The 20.7-minute recording still completes at
+  **1212.52 s of 1243.08 s (97.5 %)** with the lost range `[871.552, 902.112) s` named
+  and 248 merged segments of which 110 carry no speaker. The D50 confirm-or-decline set
+  over it holds 59 confirmations and 51 declines, 26 by the model, 23 exact ties and 2
+  with no overlapping turn, zero proposals naming a non-top-ranked speaker, and the
+  source `merged/segments.json` is byte-identical afterwards. On 2026-09-03 the app
+  bundle, driven through its model layer against a real library, imported a 7-minute
+  clip and transcribed it through its own runner at 420.012 of 420.012 s in 4 of 4
+  chunks, 576 s wall, 31 segments, 48 conflicts each carrying speaker evidence, 21 of
+  the 31 without a speaker on a 70 % overlap passage; chunk 0 was recovered by a split
+  after its first attempt looped, according to the test's own record, since the same
+  test then moved the run to the Trash. No control was clicked and no live frame was
+  seen. The 2026-08-31 sealed evaluations are untouched: PR #30 changed no file under
+  `benchmarks/`, and their seals remain
   `hike-20260831-t7-04` `055122968710f3b3732b8eb2cd9e0c8bc8d137919b4f8ac2835bbe5b931d533d`,
   `ami-20260831-t8-02` `41336850701d0bd368aab7b726b6e32d0483303864904b3c830753f8f77a15fd`,
   `hike-20260831-t9-01` `8b5bdbccd5bb260b9c5cfb1882e8ab63b8f45ff15f38b5f5b4fa44d2f32b5b87`.
   The threshold declaration is still a placeholder, so none of this is a quality pass,
   a profile promotion, or closure of C3.
-- **next** (revised 2026-09-03; the previous `next` landed in PR #30): close the review
-  findings on that PR — a run must keep completed siblings on every leaf failure, a
-  limit-stopped prefix must never be filed as end-of-sequence, the derived-manifest
-  schema and run-layout contract must describe the proposal and partial-source forms
-  the code now writes, the partial-source verifier must check coverage rather than
-  status, and the copy surface must export the layer it displays. Then measure the D50
-  confirmations against a ground truth before any revisit of overturns. Reopen the C3
-  fixture only after one uninterrupted 10-minute completion through the shipped profile,
-  and add overlap share and backchannel density to its acceptance criteria when
-  reopening, because the current TTS candidate is concatenated and carries 0 % overlap.
-  Keep the D43 DiCoW lane separate and re-aimed per D47. Do not change a model, backend,
-  chunk, token, timeout, retry, fallback, or cache setting to make a measurement pass.
+- **next** (revised 2026-09-04; the previous `next` listed review findings that the
+  commit recording it had already closed): (1) measure the D50 confirmations and
+  declines against a ground truth on the public AMI evidence. That lane is running and
+  its result is pending; nothing here presumes it. Overturns stay disallowed until a
+  measurement shows them right more often than wrong. (2) One timed human correction
+  pass on the 20.7-minute real meeting, recording only timing and structural metadata.
+  It is the only thing that can answer the north-star question and is still
+  unscheduled. (3) The app defects being fixed in parallel: backend non-speech tokens
+  (`[Silence]`, `[Human Sounds]`, `[Environmental Sounds]`) reaching the text column
+  verbatim on 3 of 248 rows; the switch between two available layers, never exercised
+  in the rendered app; model decline reasons that name speakers by merger ID beside a
+  UI that names them, on 21 of the 51 declines in the D50 set; and a retention policy
+  for the scratch directories a failed or cancelled request keeps under `Requests/`.
+  Then the carried conditions: reopen the C3 fixture only after one uninterrupted
+  10-minute completion through the shipped profile, and add overlap share and
+  backchannel density to its acceptance criteria when reopening, because the current
+  TTS candidate is concatenated and carries 0 % overlap; keep the D43 DiCoW lane
+  separate and re-aimed per D47. Do not change a model, backend, chunk, token, timeout,
+  retry, fallback, or cache setting to make a measurement pass.
 - **under review**: The ASR-to-diarization granularity mismatch and the merge assignment
-  thresholds; whether a marked non-acoustic speaker proposal may ever be the default
-  reading layer (D46); per-term glossary insertion risk for short acronyms, with one
-  observed false insertion; speaker identity and speaker count varying with the
-  diarization window, since the whole file resolves 2 speakers where a 420 s clip
-  resolves 3; raw-quality thresholds and a rate or scoped maximum for
-  `correct_to_incorrect`; a decoder-level early abort for repetition, which would have
-  saved roughly 10 of one run's 28 minutes but cannot be validated without truncating
-  leaves that would have recovered; generalization to other accents, overlap, and noise;
-  the Codex backend's OS-level read scope; and VibeVoice memory use.
+  thresholds, where 0.60 is kept on measurement and `minimumTimelineCoverage` 0.50 is
+  kept under acknowledged ignorance; the AMI four-speaker signal that the right
+  dominant-share value may depend on speaker count; whether a marked non-acoustic
+  speaker proposal may ever be the default reading layer (D46); per-term glossary
+  insertion risk for short acronyms, with one observed false insertion, and glossary
+  application that differed between two decodes of the same chunk under the same
+  glossary; speaker identity and speaker count varying with the diarization window,
+  since the whole file resolves 2 speakers where a 420 s clip resolves 3; raw-quality
+  thresholds and a rate or scoped maximum for `correct_to_incorrect`; a decoder-level
+  early abort for repetition, which would have saved roughly 10 of one run's 28 minutes
+  but cannot be validated without truncating leaves that would have recovered; whether
+  the failure screen's details box, which shows the engine's own message with the run
+  ID, path and fingerprint stripped, satisfies the rule that no raw code reaches that
+  screen; how the suite count should report tests that cannot run on a fresh clone,
+  since 8 render tests pass without asserting and 6 opt-in lanes skip; generalization to
+  other accents, overlap, and noise; the Codex backend's OS-level read scope; and
+  VibeVoice memory use.
 - **success measure**: Retain the north-star question: can 1 important meeting become a
   reliable speaker-attributed record with no more than 30 minutes of human correction?
-  Still not a current acceptance gate, because human review time has never been measured.
-  The 2026-09-01 run gives the first input to it: 248 segments of which 110 carry no
-  speaker and 192 are flagged. Under D48 the agent produces a structural correction-effort
-  estimate from artifacts instead, which sharpens the question without answering it — a
-  timed human pass remains the only thing that can close it, and stays available and
-  unscheduled. Supporting observations remain reference-term recall, omitted utterance
-  count, speaker-count accuracy, processing time, and human review time.
+  Still not a current acceptance gate, because human review time has never been
+  measured. The 2026-09-01 run gives the first input to it, and the 2026-09-02 inventory
+  partitions it from artifacts alone: of 248 segments, 51 have no speaker and no
+  proposal, 59 carry a confirmation still owed as a decision, 82 flagged rows are
+  settled by the printed shares, 56 need nothing, and 30.56 s has no transcript at all.
+  Under D48 that inventory sharpens the question without answering it: it carries no
+  time figure, and a timed human pass, now item (2) of `next`, remains the only thing
+  that can close it. Supporting observations remain reference-term recall, omitted
+  utterance count, speaker-count accuracy, processing time, and human review time.
 
 ## Decisions
 
