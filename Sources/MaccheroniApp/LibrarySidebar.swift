@@ -244,28 +244,42 @@ enum LibraryTrashWording {
     }
 
     static func message(for plan: LibraryTrashPlan, locale: Locale? = nil) -> String {
+        let files: String
         switch (plan.sourceURL != nil, plan.runURL != nil) {
         case (true, true):
-            appString(
+            files = appString(
                 "This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.",
                 locale: locale
             )
         case (true, false):
-            appString(
+            files = appString(
                 "This moves the source audio to the Trash. Nothing is deleted, and the Finder's Put Back restores it.",
                 locale: locale
             )
         case (false, true):
-            appString(
+            files = appString(
                 "This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.",
                 locale: locale
             )
         case (false, false):
-            appString(
-                "The files this recording named are no longer on disk, so this removes its library entry and nothing else.",
-                locale: locale
-            )
+            // A failed request can leave only its engine log behind: the run
+            // never wrote a directory and the audio is gone. That is still a
+            // move, and the sentence says what moves.
+            return plan.requestURL != nil
+                ? appString(
+                    "This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.",
+                    locale: locale
+                )
+                : appString(
+                    "The files this recording named are no longer on disk, so this removes its library entry and nothing else.",
+                    locale: locale
+                )
         }
+        guard plan.requestURL != nil else { return files }
+        return files + " " + appString(
+            "This also moves the engine log kept from the failed run.",
+            locale: locale
+        )
     }
 
     static func confirmLabel(

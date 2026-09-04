@@ -852,6 +852,10 @@
 	<string>アクティブな録音はありません。</string>
 	<key>This Run</key>
 	<string>この実行</string>
+	<key>This also moves the engine log kept from the failed run.</key>
+	<string>失敗した実行から保持していたエンジンのログも一緒に移動します。</string>
+	<key>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>失敗した実行から保持していたエンジンのログをゴミ箱に移動します。何も削除されず、Finder の「戻す」で元に戻せます。</string>
 	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
 	<string>実行結果をゴミ箱に移動します。何も削除されず、Finder の「戻す」で元に戻せます。</string>
 	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>

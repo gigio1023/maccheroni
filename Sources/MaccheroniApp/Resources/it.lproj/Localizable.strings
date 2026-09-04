@@ -852,6 +852,10 @@
 	<string>Non c'è alcuna registrazione attiva.</string>
 	<key>This Run</key>
 	<string>Questa esecuzione</string>
+	<key>This also moves the engine log kept from the failed run.</key>
+	<string>Sposta anche il log del motore conservato dall'esecuzione non riuscita.</string>
+	<key>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>Sposta nel cestino il log del motore conservato dall'esecuzione non riuscita. Non viene eliminato nulla e «Rimetti a posto» nel Finder lo ripristina.</string>
 	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
 	<string>Sposta nel cestino l'output dell'esecuzione. Non viene eliminato nulla e «Rimetti a posto» nel Finder lo ripristina.</string>
 	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>

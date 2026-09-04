@@ -63,9 +63,10 @@ enum LibraryRepositoryError: Error, LocalizedError {
 /// resolved against the disk when the confirmation opens so the sentence a
 /// reader agrees to names what is actually there.
 ///
-/// A recording owns its source audio and its run directory and nothing else.
-/// Nothing shared is ever in a plan: not the library index, not the
-/// recordings or runs root, not a glossary, not a model cache.
+/// A recording owns its source audio, its run directory, and the engine
+/// scratch its record still names — the log kept from a failed request — and
+/// nothing else. Nothing shared is ever in a plan: not the library index, not
+/// the recordings or runs root, not a glossary, not a model cache.
 struct LibraryTrashPlan: Equatable, Sendable {
     var recordID: UUID
     var displayName: String
@@ -73,21 +74,29 @@ struct LibraryTrashPlan: Equatable, Sendable {
     var sourceURL: URL?
     /// This recording's run directory, when it has one on disk.
     var runURL: URL?
+    /// The engine's scratch directory for this recording's failed request,
+    /// when the record names one and it is on disk. It goes with the
+    /// recording: the run's lifetime is the anchor of the retention policy
+    /// (`EngineRequestScratch`), and the Finder's Put Back brings it back
+    /// with the rest.
+    var requestURL: URL?
 
     init(
         recordID: UUID,
         displayName: String,
         sourceURL: URL? = nil,
-        runURL: URL? = nil
+        runURL: URL? = nil,
+        requestURL: URL? = nil
     ) {
         self.recordID = recordID
         self.displayName = displayName
         self.sourceURL = sourceURL
         self.runURL = runURL
+        self.requestURL = requestURL
     }
 
     /// What the move would actually touch.
-    var targets: [URL] { [sourceURL, runURL].compactMap { $0 } }
+    var targets: [URL] { [sourceURL, runURL, requestURL].compactMap { $0 } }
 
     /// Nothing this record names is on disk any more, so confirming drops the
     /// library entry and moves no file. Removing an entry that points at
@@ -461,8 +470,107 @@ struct LibraryRepository: Sendable {
             recordID: record.id,
             displayName: record.displayName,
             sourceURL: exists(source) ? source : nil,
-            runURL: record.runURL.flatMap { exists($0) ? $0 : nil }
+            runURL: record.runURL.flatMap { exists($0) ? $0 : nil },
+            requestURL: requestDirectory(for: record)
         )
+    }
+
+    /// The engine scratch directory the record names, when it is on disk.
+    /// A succeeded request discarded its directory, so this is nil for a
+    /// record whose latest request succeeded, and for one written before
+    /// records carried the link.
+    func requestDirectory(for record: LibraryRecord) -> URL? {
+        guard let requestID = record.requestID else { return nil }
+        let directory = requestsRoot.appendingPathComponent(
+            EngineRequestScratch.directoryName(for: requestID),
+            isDirectory: true
+        )
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else { return nil }
+        return directory
+    }
+
+    /// Where the library writes down what it did to files on its own: one
+    /// line per action, appended, never rewritten. Today that is the pruning
+    /// of orphaned engine scratch; judgment rule 2 says nothing may be
+    /// dropped silently, and this is where it is not silent.
+    var maintenanceLogURL: URL { root.appendingPathComponent("library-maintenance.log") }
+
+    /// Removes engine scratch directories that no record names and that are
+    /// older than `EngineRequestScratch.orphanMaximumAge`, and writes each
+    /// removal to `maintenanceLogURL`. Returns what was removed.
+    ///
+    /// Called once per launch, right after the library index is loaded and
+    /// reconciled, which is the one documented trigger. A directory named by
+    /// any record — whatever the record's state, including one still
+    /// transcribing and one the launch just marked interrupted — is never a
+    /// candidate. A directory whose age cannot be read is kept. Age is the
+    /// directory's creation date against `now`; exactly at the bound is kept.
+    @discardableResult
+    func pruneOrphanedRequestDirectories(
+        records: [LibraryRecord],
+        now: Date = Date()
+    ) -> [URL] {
+        let named = Set(records.compactMap { record in
+            record.requestID.map(EngineRequestScratch.directoryName(for:))
+        })
+        let manager = FileManager.default
+        guard let entries = try? manager.contentsOfDirectory(
+            at: requestsRoot,
+            includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        let bound = EngineRequestScratch.orphanMaximumAge
+        var pruned: [URL] = []
+        for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            let name = entry.lastPathComponent
+            guard EngineRequestScratch.isScratchDirectoryName(name),
+                  !named.contains(name),
+                  let values = try? entry.resourceValues(forKeys: [
+                      .isDirectoryKey, .creationDateKey, .contentModificationDateKey,
+                  ]),
+                  values.isDirectory == true,
+                  let created = values.creationDate ?? values.contentModificationDate
+            else { continue }
+            let age = now.timeIntervalSince(created)
+            guard age > bound else { continue }
+            // Addressed under the library's own root rather than through the
+            // enumerator's URL, which may spell the same directory through a
+            // resolved symlink; what is returned is what a caller can compare.
+            let directory = requestsRoot.appendingPathComponent(name, isDirectory: true)
+            do {
+                try manager.removeItem(at: directory)
+                pruned.append(directory)
+                appendMaintenanceLog(
+                    "request-scratch pruned \(name) created=\(Self.iso8601(created)) age_s=\(Int(age)) bound_s=\(Int(bound))",
+                    at: now
+                )
+            } catch {
+                appendMaintenanceLog(
+                    "request-scratch prune-failed \(name) error=\(error.localizedDescription)",
+                    at: now
+                )
+            }
+        }
+        return pruned
+    }
+
+    private func appendMaintenanceLog(_ line: String, at now: Date) {
+        let record = Data("\(Self.iso8601(now)) \(line)\n".utf8)
+        let url = maintenanceLogURL
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: record)
+        } else {
+            try? record.write(to: url, options: .withoutOverwriting)
+        }
+    }
+
+    private static func iso8601(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
     }
 
     /// Moves one recording's own files to the Finder Trash, together or not at

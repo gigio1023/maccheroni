@@ -852,6 +852,10 @@
 	<string>활성 녹음이 없습니다.</string>
 	<key>This Run</key>
 	<string>이 실행</string>
+	<key>This also moves the engine log kept from the failed run.</key>
+	<string>실패한 실행에서 보관한 엔진 로그도 함께 옮깁니다.</string>
+	<key>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>실패한 실행에서 보관한 엔진 로그를 휴지통으로 옮깁니다. 아무것도 삭제하지 않으며 Finder의 '되돌려놓기'로 복구할 수 있습니다.</string>
 	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
 	<string>실행 결과를 휴지통으로 옮깁니다. 아무것도 삭제하지 않으며 Finder의 '되돌려놓기'로 복구할 수 있습니다.</string>
 	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>

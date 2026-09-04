@@ -947,6 +947,60 @@ struct AppShellTests {
         #expect(model.selectedRun?.manifest.runID == "run-b")
     }
 
+    /// The link between a record and the engine scratch its request keeps on
+    /// failure. Written to the index before the engine starts, kept by a
+    /// failure, and cleared by a success, because a succeeded request
+    /// discards its scratch (`EngineRequestScratch`).
+    @Test @MainActor
+    func aRecordNamesItsEngineRequestFromLaunchUntilTheRequestSucceeds() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = LibraryRepository(root: root)
+        let run = try appShellRunFixture(in: root, runID: "run-a", text: "Transcript A")
+        var record = appShellRecord(sourceURL: run.inputURL)
+        record.id = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
+        try repository.saveRecords([record])
+        let runner = AppShellControllableRunner()
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: runner,
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+        #expect(model.records[0].requestID == nil)
+
+        model.select(.record(record.id))
+        model.retrySelectedTranscription()
+        await appShellWait { runner.isWaiting }
+        let launched = try #require(runner.latestRequest?.requestID)
+        // Named before the engine started, and already on disk.
+        #expect(model.records[0].requestID == launched)
+        #expect(try repository.loadRecords()[0].requestID == launched)
+
+        runner.fail(with: AppShellFakeError.notImplemented)
+        await appShellWait { !model.isTranscribing }
+        #expect(model.records[0].state == .failed)
+        #expect(model.records[0].requestID == launched)
+        #expect(try repository.loadRecords()[0].requestID == launched)
+
+        // A retry is a new request: the record moves to the new one, and the
+        // superseded scratch becomes an orphan for the retention policy.
+        model.retrySelectedTranscription()
+        await appShellWait { runner.isWaiting }
+        let retried = try #require(runner.latestRequest?.requestID)
+        #expect(retried != launched)
+        #expect(model.records[0].requestID == retried)
+
+        runner.succeed(with: run.runURL)
+        await appShellWait { !model.isTranscribing }
+        #expect(model.records[0].state == .hasConflicts || model.records[0].state == .done)
+        #expect(model.records[0].requestID == nil)
+        #expect(try repository.loadRecords()[0].requestID == nil)
+    }
+
     @Test @MainActor
     func recordingFinalizationFailureIndexesPreservedChannelsForRemixRetry() async throws {
         let root = try appShellTemporaryDirectory()

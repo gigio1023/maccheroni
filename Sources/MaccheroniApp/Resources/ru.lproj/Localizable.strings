@@ -852,6 +852,10 @@
 	<string>Активной записи нет.</string>
 	<key>This Run</key>
 	<string>Этот запуск</string>
+	<key>This also moves the engine log kept from the failed run.</key>
+	<string>Также будет перемещён журнал движка, сохранённый после неудачного запуска.</string>
+	<key>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>Журнал движка, сохранённый после неудачного запуска, будет перемещён в корзину. Ничего не удаляется, и команда «Положить обратно» в Finder его восстановит.</string>
 	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
 	<string>Результат запуска будет перемещён в корзину. Ничего не удаляется, и команда «Положить обратно» в Finder его восстановит.</string>
 	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>

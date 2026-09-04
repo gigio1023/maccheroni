@@ -852,6 +852,10 @@
 	<string>There is no active recording.</string>
 	<key>This Run</key>
 	<string>This Run</string>
+	<key>This also moves the engine log kept from the failed run.</key>
+	<string>This also moves the engine log kept from the failed run.</string>
+	<key>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</string>
 	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
 	<string>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</string>
 	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>

@@ -852,6 +852,10 @@
 	<string>No hay ninguna grabación activa.</string>
 	<key>This Run</key>
 	<string>Esta ejecución</string>
+	<key>This also moves the engine log kept from the failed run.</key>
+	<string>Esto también mueve el registro del motor conservado de la ejecución fallida.</string>
+	<key>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>Esto mueve a la papelera el registro del motor conservado de la ejecución fallida. No se elimina nada, y «Devolver» en el Finder lo restaura.</string>
 	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
 	<string>Esto mueve la salida de la ejecución a la papelera. No se elimina nada, y «Devolver» en el Finder la restaura.</string>
 	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>

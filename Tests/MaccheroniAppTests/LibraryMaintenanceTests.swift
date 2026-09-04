@@ -253,6 +253,288 @@ struct LibraryMaintenanceTests {
         #expect(message.contains("Wait for this recording's transcription"))
     }
 
+    // MARK: - The engine scratch of a failed run
+
+    /// A failed request keeps its scratch directory because `stderr.log` is
+    /// the only complete record of what the engine said. Nothing pruned it,
+    /// so failed runs accumulated scratch for ever. The policy
+    /// (`EngineRequestScratch`) anchors it on the run's own lifetime: the
+    /// record names it, the Trash takes it with the recording, Put Back
+    /// brings it back, and only what no record names any more is pruned,
+    /// past a declared bound, on one trigger, with a line in the
+    /// maintenance log.
+
+    @Test
+    func theTrashPlanTakesTheEngineLogOfAFailedRunOnlyWhileItIsOnDisk() throws {
+        let world = try LibraryMaintenanceWorld(keepsFailedRequest: true)
+        let requestURL = try #require(world.requestURL)
+
+        let plan = world.model.trashPlan(for: world.record)
+        #expect(plan.requestURL == requestURL)
+        #expect(plan.targets.count == 3)
+        #expect(Set(plan.targets) == Set([world.sourceURL, world.runURL, requestURL]))
+        #expect(!plan.targets.contains(world.requestsRoot))
+
+        // Gone from disk: not promised.
+        try FileManager.default.removeItem(at: requestURL)
+        #expect(world.model.trashPlan(for: world.record).requestURL == nil)
+
+        // A record that names no request — every record written before the
+        // link existed, and every record whose latest request succeeded —
+        // has nothing here.
+        var unlinked = world.record
+        unlinked.requestID = nil
+        #expect(world.model.trashPlan(for: unlinked).requestURL == nil)
+    }
+
+    @Test
+    func movingAFailedRunToTheTrashTakesItsEngineLogInTheSameMove() async throws {
+        let recycler = LibraryMaintenanceRecycler()
+        let world = try LibraryMaintenanceWorld(
+            recycler: recycler,
+            keepsFailedRequest: true
+        )
+        let requestURL = try #require(world.requestURL)
+        let plan = world.model.trashPlan(for: world.record)
+
+        await world.model.moveToTrash(plan)
+
+        #expect(world.model.errorMessage == nil)
+        let calls = await recycler.calls
+        #expect(calls.count == 1)
+        #expect(Set(calls[0]) == Set([world.sourceURL, world.runURL, requestURL]))
+        #expect(!FileManager.default.fileExists(atPath: requestURL.path))
+        let trashed = await recycler.moved
+        let inTrash = try #require(trashed[requestURL])
+        // Recycled whole, not emptied: the stderr is still readable where
+        // the Finder's Put Back would bring it back from.
+        #expect(try String(contentsOf: inTrash.appendingPathComponent("stderr.log"), encoding: .utf8)
+            .contains("engine refused the request"))
+        #expect(world.model.records.isEmpty)
+    }
+
+    @Test
+    func aPartialMoveThatRefusesTheRunPutsTheEngineLogBackToo() async throws {
+        let recycler = LibraryMaintenanceRecycler()
+        let world = try LibraryMaintenanceWorld(
+            recycler: recycler,
+            keepsFailedRequest: true
+        )
+        let requestURL = try #require(world.requestURL)
+        await recycler.refuse(world.runURL, message: "The run folder is in use.")
+        let before = try world.fileFingerprints()
+
+        await world.model.moveToTrash(world.model.trashPlan(for: world.record))
+
+        // Together or not at all still holds with three targets.
+        #expect(try world.fileFingerprints() == before)
+        #expect(FileManager.default.fileExists(atPath: requestURL.path))
+        #expect(world.model.records.count == 1)
+        #expect(world.model.records[0].requestID == world.record.requestID)
+        #expect(world.model.errorMessage?.contains("still in your library") == true)
+    }
+
+    @Test
+    func anEngineLogTheFinderPutBackIsKeptUntilTheBoundAndPrunedAfterIt() async throws {
+        let recycler = LibraryMaintenanceRecycler()
+        let world = try LibraryMaintenanceWorld(
+            recycler: recycler,
+            keepsFailedRequest: true
+        )
+        let requestURL = try #require(world.requestURL)
+        await world.model.moveToTrash(world.model.trashPlan(for: world.record))
+        #expect(world.model.records.isEmpty)
+        let inTrash = try #require(await recycler.moved[requestURL])
+
+        // The Finder's Put Back: the directory returns to where it was. No
+        // record names it now, so it is an orphan — recoverable, readable,
+        // and subject to the bound rather than dropped on the spot.
+        try FileManager.default.moveItem(at: inTrash, to: requestURL)
+        let created = try #require(
+            try requestURL.resourceValues(forKeys: [.creationDateKey]).creationDate
+        )
+        let bound = EngineRequestScratch.orphanMaximumAge
+
+        let keptAt = created.addingTimeInterval(bound)
+        #expect(world.repository.pruneOrphanedRequestDirectories(records: [], now: keptAt).isEmpty)
+        #expect(FileManager.default.fileExists(atPath: requestURL.path))
+        #expect(!FileManager.default.fileExists(atPath: world.repository.maintenanceLogURL.path))
+
+        let prunedAt = created.addingTimeInterval(bound + 1)
+        #expect(world.repository.pruneOrphanedRequestDirectories(records: [], now: prunedAt) == [requestURL])
+        #expect(!FileManager.default.fileExists(atPath: requestURL.path))
+        let log = try String(contentsOf: world.repository.maintenanceLogURL, encoding: .utf8)
+        #expect(log.contains("request-scratch pruned \(requestURL.lastPathComponent)"))
+    }
+
+    @Test
+    func anOrphanIsPrunedOnlyPastTheBoundAndTheMaintenanceLogSaysWhich() throws {
+        let world = try LibraryMaintenanceWorld()
+        let now = Date(timeIntervalSince1970: 1_788_000_000)
+        let bound = EngineRequestScratch.orphanMaximumAge
+        #expect(bound == 30 * 24 * 60 * 60)
+        // L - ε, L, and L + ε, with ε one second: the policy's three
+        // boundary tests for one limit.
+        let younger = try LibraryMaintenanceWorld.writeRequestScratch(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000A01")!,
+            in: world.requestsRoot,
+            createdAt: now.addingTimeInterval(-(bound - 1))
+        )
+        let exact = try LibraryMaintenanceWorld.writeRequestScratch(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000A02")!,
+            in: world.requestsRoot,
+            createdAt: now.addingTimeInterval(-bound)
+        )
+        let older = try LibraryMaintenanceWorld.writeRequestScratch(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000A03")!,
+            in: world.requestsRoot,
+            createdAt: now.addingTimeInterval(-(bound + 1))
+        )
+        // Things under the requests root that are not the engine's scratch
+        // are never candidates, however old: a stray file, a hidden file,
+        // and a directory with another name.
+        let strayFile = world.requestsRoot.appendingPathComponent("request-notes.txt")
+        try Data("keep".utf8).write(to: strayFile)
+        let hidden = world.requestsRoot.appendingPathComponent(".DS_Store")
+        try Data().write(to: hidden)
+        let other = world.requestsRoot.appendingPathComponent("archive", isDirectory: true)
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: false)
+        for url in [strayFile, hidden, other] {
+            try FileManager.default.setAttributes(
+                [.creationDate: now.addingTimeInterval(-10 * bound)],
+                ofItemAtPath: url.path
+            )
+        }
+
+        let pruned = world.repository.pruneOrphanedRequestDirectories(
+            records: world.model.records,
+            now: now
+        )
+
+        #expect(pruned == [older])
+        #expect(FileManager.default.fileExists(atPath: younger.path))
+        #expect(FileManager.default.fileExists(atPath: exact.path))
+        #expect(!FileManager.default.fileExists(atPath: older.path))
+        for url in [strayFile, hidden, other] {
+            #expect(FileManager.default.fileExists(atPath: url.path))
+        }
+        let log = try String(contentsOf: world.repository.maintenanceLogURL, encoding: .utf8)
+        let lines = log.split(separator: "\n")
+        #expect(lines.count == 1)
+        // The clock of the load, then the action, the directory, and the
+        // numbers a reader needs to check the decision.
+        #expect(lines[0].hasPrefix("2026-08-29T10:40:00Z request-scratch pruned \(older.lastPathComponent) created=2026-07-30T10:39:59Z"))
+        #expect(lines[0].contains(" age_s=\(Int(bound + 1)) bound_s=\(Int(bound))"))
+
+        // Running again does nothing and writes nothing.
+        #expect(world.repository.pruneOrphanedRequestDirectories(records: [], now: now).isEmpty)
+        #expect(try String(contentsOf: world.repository.maintenanceLogURL, encoding: .utf8) == log)
+    }
+
+    @Test
+    func aRequestDirectoryARecordStillNamesIsNeverPrunedWhateverItsAge() throws {
+        let bound = EngineRequestScratch.orphanMaximumAge
+        let ancient = Date(timeIntervalSince1970: 1_700_000_000)
+        let orphanID = UUID(uuidString: "00000000-0000-0000-0000-000000000B01")!
+        let liveID = UUID(uuidString: "00000000-0000-0000-0000-000000000B02")!
+        var liveURL: URL?
+        var orphanURL: URL?
+        // A launch is the one trigger. The world's record names its own
+        // failed request; a second record still transcribing names another;
+        // a third directory is named by nobody. All three are years old.
+        let world = try LibraryMaintenanceWorld(keepsFailedRequest: true) { root in
+            let repository = LibraryRepository(root: root)
+            try FileManager.default.setAttributes(
+                [.creationDate: ancient],
+                ofItemAtPath: repository.requestsRoot
+                    .appendingPathComponent(
+                        EngineRequestScratch.directoryName(
+                            for: UUID(uuidString: "00000000-0000-0000-0000-00000000E0F1")!
+                        )
+                    ).path
+            )
+            liveURL = try LibraryMaintenanceWorld.writeRequestScratch(
+                id: liveID,
+                in: repository.requestsRoot,
+                createdAt: ancient
+            )
+            orphanURL = try LibraryMaintenanceWorld.writeRequestScratch(
+                id: orphanID,
+                in: repository.requestsRoot,
+                createdAt: ancient
+            )
+            var records = try repository.loadRecords()
+            var transcribing = records[0]
+            transcribing.id = UUID(uuidString: "00000000-0000-0000-0000-0000000000B7")!
+            transcribing.state = .transcribing
+            transcribing.requestID = liveID
+            records.append(transcribing)
+            try repository.saveRecords(records)
+        }
+
+        // The launch marked the transcribing record interrupted and kept its
+        // request; the failed record kept its own; the orphan is gone.
+        #expect(world.model.records.count == 2)
+        #expect(world.model.records.contains { $0.state == .interrupted && $0.requestID == liveID })
+        #expect(world.model.records.contains { $0.state == .failed && $0.requestID == world.record.requestID })
+        #expect(FileManager.default.fileExists(atPath: try #require(world.requestURL).path))
+        #expect(FileManager.default.fileExists(atPath: try #require(liveURL).path))
+        #expect(!FileManager.default.fileExists(atPath: try #require(orphanURL).path))
+        let log = try String(contentsOf: world.repository.maintenanceLogURL, encoding: .utf8)
+        #expect(log.split(separator: "\n").count == 1)
+        #expect(log.contains(EngineRequestScratch.directoryName(for: orphanID)))
+        #expect(!log.contains(EngineRequestScratch.directoryName(for: liveID)))
+        #expect(Date().timeIntervalSince(ancient) > bound)
+
+        // And a later prune with the records the launch loaded still leaves
+        // both named directories alone.
+        #expect(world.repository.pruneOrphanedRequestDirectories(records: world.model.records).isEmpty)
+    }
+
+    @Test
+    func theRequestDirectoryNameIsTheRunnersOwn() {
+        let id = UUID(uuidString: "7695E7C7-0059-455F-ABAF-378E935F757A")!
+        #expect(EngineRequestScratch.directoryName(for: id) == "request-7695e7c7-0059-455f-abaf-378e935f757a")
+        #expect(EngineRequestScratch.isScratchDirectoryName("request-7695e7c7-0059-455f-abaf-378e935f757a"))
+        #expect(!EngineRequestScratch.isScratchDirectoryName("request-"))
+        #expect(!EngineRequestScratch.isScratchDirectoryName("archive"))
+    }
+
+    @Test
+    func theConfirmationSaysWhenTheEngineLogMovesToo() {
+        let id = UUID()
+        let audio = URL(fileURLWithPath: "/tmp/maccheroni-fixture/meeting.wav")
+        let run = URL(fileURLWithPath: "/tmp/maccheroni-fixture/run", isDirectory: true)
+        let scratch = URL(fileURLWithPath: "/tmp/maccheroni-fixture/request-1", isDirectory: true)
+        let en = Locale(identifier: "en")
+
+        let all = LibraryTrashPlan(
+            recordID: id, displayName: "A", sourceURL: audio, runURL: run, requestURL: scratch
+        )
+        #expect(!all.movesNothing)
+        #expect(LibraryTrashWording.message(for: all, locale: en)
+            .hasSuffix("Put Back restores them. This also moves the engine log kept from the failed run."))
+        #expect(String(localized: LibraryTrashWording.confirmLabel(for: all, locale: en)) == "Move to Trash")
+
+        let audioAndLog = LibraryTrashPlan(
+            recordID: id, displayName: "A", sourceURL: audio, requestURL: scratch
+        )
+        #expect(LibraryTrashWording.message(for: audioAndLog, locale: en)
+            == "This moves the source audio to the Trash. Nothing is deleted, and the Finder's Put Back restores it. This also moves the engine log kept from the failed run.")
+
+        // Only the log is left: still a move, and the sentence says of what.
+        let logOnly = LibraryTrashPlan(recordID: id, displayName: "A", requestURL: scratch)
+        #expect(!logOnly.movesNothing)
+        #expect(LibraryTrashWording.title(for: logOnly, locale: en) == "Move \u{201C}A\u{201D} to the Trash?")
+        #expect(LibraryTrashWording.message(for: logOnly, locale: en)
+            == "This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.")
+
+        // Without a log nothing changes in what a reader has always read.
+        let both = LibraryTrashPlan(recordID: id, displayName: "A", sourceURL: audio, runURL: run)
+        #expect(LibraryTrashWording.message(for: both, locale: en)
+            .hasSuffix("Put Back restores them."))
+    }
+
     // MARK: - The two steps a reader sees
 
     @Test
@@ -328,6 +610,8 @@ struct LibraryMaintenanceTests {
             "%@ The system reported: %@",
             "Speaker Proposal",
             "Renames this recording in the library only. The audio file and the run folder keep their names.",
+            "This also moves the engine log kept from the failed run.",
+            "This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.",
         ]
 
         let catalogURL = try #require(appResourcesBundle.url(
@@ -473,14 +757,26 @@ private struct LibraryMaintenanceWorld {
     let root: URL
     let sourceURL: URL
     let runURL: URL
+    let requestsRoot: URL
+    /// The engine scratch of the record's failed request, when the world was
+    /// built with `keepsFailedRequest`.
+    let requestURL: URL?
     let repository: LibraryRepository
     let model: MaccheroniAppModel
     let record: LibraryRecord
     private let defaultsSuite: String
 
+    /// - Parameters:
+    ///   - keepsFailedRequest: the recording's run failed and the engine's
+    ///     scratch for that request is on disk and named by the record.
+    ///   - beforeLaunch: runs against the library root after the index is
+    ///     saved and before the model loads it, which is the moment the
+    ///     retention policy's trigger fires.
     init(
         recycler: LibraryMaintenanceRecycler? = nil,
-        recordSaverFails: Bool = false
+        recordSaverFails: Bool = false,
+        keepsFailedRequest: Bool = false,
+        beforeLaunch: ((URL) throws -> Void)? = nil
     ) throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "MaccheroniLibraryMaintenanceTests-\(UUID().uuidString)",
@@ -510,6 +806,15 @@ private struct LibraryMaintenanceWorld {
             trash = { _ in LibraryRecycleReport() }
         }
         repository = LibraryRepository(root: root, recycler: trash)
+        requestsRoot = repository.requestsRoot
+        var requestID: UUID?
+        if keepsFailedRequest {
+            let id = UUID(uuidString: "00000000-0000-0000-0000-00000000E0F1")!
+            requestID = id
+            requestURL = try Self.writeRequestScratch(id: id, in: requestsRoot)
+        } else {
+            requestURL = nil
+        }
         record = LibraryRecord(
             id: UUID(uuidString: "00000000-0000-0000-0000-0000000000A7")!,
             createdAt: Date(timeIntervalSince1970: 1_756_729_620),
@@ -523,12 +828,14 @@ private struct LibraryMaintenanceWorld {
             profileID: .koreanITMeeting,
             postprocess: .none,
             durationS: 1_243.08,
-            state: .done,
+            state: keepsFailedRequest ? .failed : .done,
             speakerNames: [:],
             conflictResolutions: [:],
-            failureMessage: nil
+            failureMessage: keepsFailedRequest ? "engine refused the request" : nil,
+            requestID: requestID
         )
         try repository.saveRecords([record])
+        try beforeLaunch?(root)
 
         defaultsSuite = "MaccheroniLibraryMaintenance-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: defaultsSuite)!
@@ -547,12 +854,42 @@ private struct LibraryMaintenanceWorld {
         )
     }
 
-    /// Every file under the recording and its run, by path and content hash.
-    /// A rename that touched anything, or a failed move that left something
-    /// behind, shows up as a difference here.
+    /// One engine scratch directory as the runner leaves it after a failure:
+    /// the profile it was handed, an empty stdout, and the stderr the failure
+    /// message was cut from.
+    @discardableResult
+    static func writeRequestScratch(
+        id: UUID,
+        in requestsRoot: URL,
+        createdAt: Date? = nil
+    ) throws -> URL {
+        let directory = requestsRoot.appendingPathComponent(
+            EngineRequestScratch.directoryName(for: id),
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        try Data("{\"profiles\":[]}".utf8).write(to: directory.appendingPathComponent("profiles.json"))
+        try Data().write(to: directory.appendingPathComponent("stdout.log"))
+        try Data("engine refused the request\n".utf8)
+            .write(to: directory.appendingPathComponent("stderr.log"))
+        if let createdAt {
+            try FileManager.default.setAttributes(
+                [.creationDate: createdAt, .modificationDate: createdAt],
+                ofItemAtPath: directory.path
+            )
+        }
+        return directory
+    }
+
+    /// Every file under the recording, its run and its request scratch, by
+    /// path and content hash. A rename that touched anything, or a failed
+    /// move that left something behind, shows up as a difference here.
     func fileFingerprints() throws -> [String: String] {
         var prints: [String: String] = [:]
-        for url in [sourceURL, runURL] {
+        for url in [sourceURL, runURL] + (requestURL.map { [$0] } ?? []) {
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
             var isDirectory: ObjCBool = false
             _ = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)

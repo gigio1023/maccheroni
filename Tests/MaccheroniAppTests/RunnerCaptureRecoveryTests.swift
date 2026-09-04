@@ -109,6 +109,13 @@ struct RunnerCaptureRecoveryTests {
             includingPropertiesForKeys: nil
         )
         #expect(kept.count == 1, "a failed run keeps its request scratch for diagnosis")
+        // Named after the request's own ID, so the library record that
+        // launched it can find it without the runner reporting anything.
+        #expect(
+            kept.first?.lastPathComponent
+                == EngineRequestScratch.directoryName(for: fixture.request.requestID)
+        )
+        #expect(kept.first?.lastPathComponent.hasPrefix("request-") == true)
         let stderrLog = try #require(kept.first).appendingPathComponent("stderr.log")
         #expect(try String(contentsOf: stderrLog, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines) == "engine refused the request")

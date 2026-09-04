@@ -852,6 +852,10 @@
 	<string>Es gibt keine aktive Aufzeichnung.</string>
 	<key>This Run</key>
 	<string>Dieser Lauf</string>
+	<key>This also moves the engine log kept from the failed run.</key>
+	<string>Damit wird auch das Engine-Protokoll verschoben, das vom fehlgeschlagenen Lauf aufbewahrt wurde.</string>
+	<key>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>Damit wird das vom fehlgeschlagenen Lauf aufbewahrte Engine-Protokoll in den Papierkorb gelegt. Nichts wird gelöscht, und „Zurücklegen“ im Finder stellt es wieder her.</string>
 	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
 	<string>Damit wird die Run-Ausgabe in den Papierkorb gelegt. Nichts wird gelöscht, und „Zurücklegen“ im Finder stellt sie wieder her.</string>
 	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>

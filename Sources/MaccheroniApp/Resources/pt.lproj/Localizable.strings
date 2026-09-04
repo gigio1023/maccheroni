@@ -852,6 +852,10 @@
 	<string>Não há gravação ativa.</string>
 	<key>This Run</key>
 	<string>Esta execução</string>
+	<key>This also moves the engine log kept from the failed run.</key>
+	<string>Isto também move o registo do motor guardado da execução falhada.</string>
+	<key>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>Isto move para a lixeira o registo do motor guardado da execução falhada. Nada é apagado, e «Repor» no Finder restaura-o.</string>
 	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
 	<string>Isto move a saída da execução para a lixeira. Nada é apagado, e «Repor» no Finder restaura-a.</string>
 	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>

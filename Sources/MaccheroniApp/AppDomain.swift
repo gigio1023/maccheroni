@@ -203,6 +203,16 @@ struct LibraryRecord: Codable, Equatable, Identifiable, Sendable {
     /// existed.
     var translationReviewAcknowledgements: [TranslationReviewAcknowledgement]? = nil
     var failureMessage: String?
+    /// The engine request this record's latest run or post-processing went
+    /// through, while its scratch directory still exists: the runner names
+    /// that directory after this value (`EngineRequestScratch`).
+    ///
+    /// Written when the request is launched and cleared when it succeeds,
+    /// because a succeeded request discards its scratch. A failed, cancelled or
+    /// interrupted request keeps both, so the record can say where the
+    /// engine's own account of the failure is, and a move to the Trash can
+    /// take it along. Optional so indexes written before it decode.
+    var requestID: UUID? = nil
 }
 
 struct DerivedCorrectionResolution: Codable, Equatable, Sendable {
@@ -768,6 +778,10 @@ struct TranscriptionRequest: Equatable, Sendable {
     var postprocessMode: PostprocessMode = .correction
     var translationTargetLanguage: String? = nil
     var glossaryURL: URL?
+    /// Names the engine's scratch directory for this request. Chosen by the
+    /// caller so the library record can carry it before the engine starts;
+    /// see `EngineRequestScratch`.
+    var requestID: UUID = UUID()
 }
 
 struct ExistingRunPostprocessRequest: Equatable, Sendable {
@@ -778,6 +792,65 @@ struct ExistingRunPostprocessRequest: Equatable, Sendable {
     var translationTargetLanguage: String?
     var glossarySemantics: DerivedGlossarySemantics = .currentProfile
     var glossaryURL: URL?
+    /// See `TranscriptionRequest.requestID`.
+    var requestID: UUID = UUID()
+}
+
+/// The engine's per-request scratch directory, `Requests/request-<id>/`,
+/// holding the profile handed to the engine and its stdout and stderr.
+///
+/// A succeeded request discards it. A failed or cancelled request keeps it,
+/// because `stderr.log` is the only complete record of what the engine said
+/// and the failure message shown in the app is cut from it. Nothing pruned
+/// it, so failed runs accumulated scratch for ever. The retention policy is
+/// anchored on the run's own lifetime and declared here, in typed
+/// configuration, the way `docs/engineering-constraint-policy.md` asks for
+/// an execution-scope value:
+///
+/// - A directory named by a library record's `requestID` is *live*: it goes
+///   to the Trash with the record, together with the audio and the run, and
+///   is otherwise never touched.
+/// - A directory no record names is an *orphan*: a superseded request whose
+///   record went on to a newer one, a request whose record was removed while
+///   its files were already gone, a scratch written before records carried
+///   the link, or one the Finder put back after its record was dropped. It is
+///   pruned once it is older than `orphanMaximumAge`, on one trigger — the
+///   library load at launch — and every pruning is written to the library's
+///   maintenance log, so nothing is dropped silently (judgment rule 2).
+enum EngineRequestScratch {
+    static let directoryPrefix = "request-"
+
+    /// The single naming rule the runner writes with and the library reads
+    /// with. Lower-case so the directory reads the same as the older ones.
+    static func directoryName(for requestID: UUID) -> String {
+        directoryPrefix + requestID.uuidString.lowercased()
+    }
+
+    /// Whether a directory under the requests root is one of the engine's.
+    /// Only these are ever candidates for pruning.
+    static func isScratchDirectoryName(_ name: String) -> Bool {
+        name.hasPrefix(directoryPrefix) && name.count > directoryPrefix.count
+    }
+
+    /// How old an orphan may be before the library load prunes it: 30 days,
+    /// measured from the directory's creation date against the clock at the
+    /// time of the load. Exactly at the bound is kept; the rule is strict.
+    ///
+    /// Ledger, in the terms of the constraint policy:
+    /// - `per_request_bytes`: two log files and one profile; observed under
+    ///   1 KB for an engine that refused a request and under 200 B of stderr
+    ///   for the real 20.7-minute run of 2026-09-01, whose engine stderr is
+    ///   quiet. Headroom assumed: 1 MB per request.
+    /// - `orphan_arrival_rate`: at most one per run that failed and was then
+    ///   retried or removed; a run takes minutes, so an upper bound of 100
+    ///   orphans a day is already absurd.
+    /// - `retained_orphan_bytes <= orphan_arrival_rate * 30 d * per_request_bytes`
+    ///   = 3,000 MB at that absurd rate, and a few MB at any real one.
+    /// An age rather than a count, because an orphan's only remaining value
+    /// is diagnostic and decays with time, not with how many other runs
+    /// failed; a count bound would drop the newest evidence on the day it is
+    /// most likely wanted.
+    static let orphanMaximumAge: TimeInterval = 30 * 24 * 60 * 60
 }
 
 struct ExistingRunPostprocessProgress: Equatable, Sendable {

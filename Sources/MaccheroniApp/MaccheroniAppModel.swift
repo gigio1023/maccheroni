@@ -421,6 +421,11 @@ final class MaccheroniAppModel {
                 return (record.id, failure)
             }
         )
+        // The one trigger of the engine-scratch retention policy: once the
+        // index is loaded and reconciled, scratch no record names and older
+        // than the declared bound is pruned, each pruning written to the
+        // maintenance log. See `EngineRequestScratch`.
+        repository.pruneOrphanedRequestDirectories(records: loadedRecords)
         recorder.setMeterHandler { [weak self] meters in
             self?.captureMeters = meters
         }
@@ -945,6 +950,11 @@ final class MaccheroniAppModel {
                     }
                 }
                 _ = try RunIntegrityVerifier.verifyCompletedRun(at: runURL)
+                let requestID = UUID()
+                if let index = records.firstIndex(where: { $0.id == record.id }) {
+                    records[index].requestID = requestID
+                    try recordSaver(records)
+                }
                 let request = ExistingRunPostprocessRequest(
                     sourceRunURL: runURL,
                     profile: profile,
@@ -958,7 +968,8 @@ final class MaccheroniAppModel {
                         ? try activeGlossaryURL(
                             at: glossaryURL(for: record.profileID)
                         )
-                        : nil
+                        : nil,
+                    requestID: requestID
                 )
                 _ = try await runner.postprocess(request) { [weak self] progress in
                     guard let self,
@@ -973,6 +984,7 @@ final class MaccheroniAppModel {
                 records[index].state = loaded.requiresReview(for: records[index])
                     ? .hasConflicts
                     : .done
+                records[index].requestID = nil
                 try recordSaver(records)
                 if selection == .record(record.id) {
                     selectedRun = loaded
@@ -1289,6 +1301,10 @@ final class MaccheroniAppModel {
         }
         records[index].state = .transcribing
         records[index].failureMessage = nil
+        // The record names its engine request before the engine starts, so
+        // the scratch the runner keeps on failure is never unaccounted for.
+        let requestID = UUID()
+        records[index].requestID = requestID
         runFailures.removeValue(forKey: recordID)
         activeRecordID = recordID
         try recordSaver(records)
@@ -1312,7 +1328,8 @@ final class MaccheroniAppModel {
                 : (record.postprocessMode == .translation
                     ? record.translationTargetLanguage
                     : nil),
-            glossaryURL: glossaryURL
+            glossaryURL: glossaryURL,
+            requestID: requestID
         )
         let runURL = try await runner.run(request) { [weak self] snapshot in
             guard let self else { return }
@@ -1331,6 +1348,8 @@ final class MaccheroniAppModel {
         let loaded = try repository.loadRun(at: runURL)
         records[finalIndex].state = loaded.requiresReview ? .hasConflicts : .done
         records[finalIndex].failureMessage = nil
+        // A succeeded request discarded its scratch; the link goes with it.
+        records[finalIndex].requestID = nil
         runFailures.removeValue(forKey: recordID)
         try recordSaver(records)
         if selection == .record(recordID) {
