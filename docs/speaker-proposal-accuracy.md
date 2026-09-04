@@ -133,31 +133,12 @@ batches           12 planned, maximum prompt 4999 bytes, maximum response 1876 b
 result            44 unattributed: 24 proposals (confirmations), 20 declines
 ```
 
-**Why run A has no proposal.** Two attempts on run A ended in the typed
+Run A has no proposal: both attempts on the full file ended in the typed
 failure `POSTPROCESS_ERROR`, "backend output needs a conservative 5291-token
 upper bound, above the 4096-token planning budget" (5280 on the second
 attempt), each leaving a create-only failed derived set with no artifact
-(`20260904T114405Z-bba735`, `20260904T114701Z-fabe1e`). The cause is
-structural. `TextBatchPlanner` packs consecutive segments into batches of at
-most 32 segments or 16384 prompt bytes; English AMI segments are short, median
-42 bytes, so the segment cap binds. After the model answers, `SpeakerProposer`
-computes an accepted output upper bound of `response bytes + 32 + 96 ×
-decisions` and refuses the batch when it exceeds the planning budget. On run A
-the unannotated tail is transcribed as `[Environmental Sounds]`,
-`[Unintelligible Speech]` and French sentences, the whole-file timeline places
-no turn under most of it, and every one of those segments is `UNKNOWN`, so the
-last batch carries 21 targets: a reserve of 2048 tokens plus a response of
-about 3.2 KB, roughly 155 bytes per JSON decision with a one-sentence reason,
-exceeds 4096. Every other batch carries 3 to 6 targets. On the 2026-09-01
-Korean recording the same policy planned 20 batches with a maximum accepted
-bound of 2630, because Korean text is longer per segment and the prompt-byte
-cap split batches before the segment cap did. The local backend is not a
-fallback here: it is not provisioned on the measuring machine, and its batch
-policy reserves 96 output tokens per decision against a 768-token planning
-budget, so an eight-target batch is refused at 800 tokens before a single
-response byte is counted. This is a coupled-constraint gap of the kind
-`docs/engineering-constraint-policy.md` exists to name, and it belongs to that
-ledger; it is not a D50 question.
+(`20260904T114405Z-bba735`, `20260904T114701Z-fabe1e`). The cause is recorded
+as a finding of its own below.
 
 ## Method
 
@@ -343,6 +324,73 @@ once and the top-ranked candidate was right four times; on the two clear
 segments the overturn would have been wrong both times. This is the only
 overturn evidence the run yields, it is seven segments of one English meeting,
 and it points the same way as D50's basis.
+
+## Finding: one over-full batch fails the whole derived set
+
+The full-span proposal fails by construction, not by chance; the two attempts
+differed by 11 tokens in the bound they hit. `TextBatchPlanner` packs
+consecutive segments into batches of at most 32 segments or 16384 prompt
+bytes. English AMI segments are short, median 42 bytes, so on run A the
+segment cap binds: seven batches of 32 and one of 24. After the model answers
+a batch, `SpeakerProposer` computes an accepted output upper bound of
+`response bytes + 32 + 96 × decisions` and throws
+`backendOutputBudgetExceeded` when it exceeds the 4096-token planning budget
+of `CodexPostprocessBackend.defaultBatchPolicy`. Nothing in the planner bounds
+the number of targets a batch carries, so the reserve alone can approach the
+budget before a byte of response is counted.
+
+| batch (segment indices) | targets | input text bytes | reserve 32 + 96 × targets | response bytes implied by 5291 |
+| --- | ---: | ---: | ---: | ---: |
+| 0 to 31 | 5 | 1508 | 512 | 4779 |
+| 32 to 63 | 4 | 2307 | 416 | 4875 |
+| 64 to 95 | 3 | 2350 | 320 | 4971 |
+| 96 to 127 | 4 | 1716 | 416 | 4875 |
+| 128 to 159 | 5 | 1448 | 512 | 4779 |
+| 160 to 191 | 5 | 2023 | 512 | 4779 |
+| 192 to 223 | 6 | 1798 | 608 | 4683 |
+| 224 to 247 | 21 | 717 | 2048 | 3243 |
+
+Only the last batch is consistent with the observed bound: 21 targets reserve
+2048 tokens, and a response of about 3.2 KB, roughly 155 bytes per JSON
+decision with a one-sentence English reason, exceeds 4096. Every other batch
+would need a response above 4.6 KB for three to six decisions. The 21 targets
+are every segment from 224 to 247 except 232, 234 and 241, which is the tail
+described in the next section. Because the failure is thrown from the batch
+loop, the derivation stops there: the seven batches that had already been
+accepted are discarded and the derived set is sealed as `failed` with no
+artifact. One over-full batch loses the entire derived set. On the 2026-09-01
+Korean recording the same policy planned 20 batches with a maximum accepted
+bound of 2630, because Korean text is longer per segment and the prompt-byte
+cap split batches before the segment cap did; on run B, whose unattributed
+segments never cluster as densely, the planner produced 12 batches and the
+maximum accepted bound was 3060.
+
+The local backend does not change the picture. It is not provisioned on the
+measuring machine, and its batch policy reserves 96 output tokens per decision
+against a 768-token planning budget, so an eight-target batch is refused at
+800 tokens before a single response byte is counted.
+
+The fix belongs to batch planning by target count, not to the budget: the
+budget describes what the backend accepts, and the planner is what packed 21
+targets against it. That is an execution-scope change under
+`docs/engineering-constraint-policy.md`; it is recorded here as a finding and
+routed by the lead, and it is not a D50 question.
+
+## Observation: the recording's unannotated tail
+
+The AMI annotation of IN1009 ends at 1200.86 s and the audio continues to
+1256.35 s, 55.49 s in which the participants talk after the meeting has ended.
+On run A that region holds 11 merged segments (237 to 247): 10 `UNKNOWN`, 1
+attributed. By text, 6 are French sentences, 4 are `[Environmental Sounds]`
+and 1 is `[Unintelligible Speech]`. Eight of the ten unattributed segments
+have no diarization candidate at all; 7 timeline turns overlap the region for
+8.3 s in total. The 21.3 s before the last annotated turn (1179.6 s to
+1200.86 s) hold 7 more segments, 5 of them `UNKNOWN`, 4 English, 2
+`[Environmental Sounds]`, 1 `[Human Sounds]`. The head of the recording,
+before the first annotated turn at 32.736 s, is one `UNKNOWN` segment of
+`[Environmental Sounds]` spanning 0.00 s to 32.23 s with no diarization turn
+beneath it. Counts only; the observation bears on non-speech handling and
+end-of-recording behaviour and is recorded here for that lane, not judged.
 
 ## Caveats
 
