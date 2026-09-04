@@ -2,10 +2,10 @@
 //
 // These tests write PNGs; they are not assertions about pixels. They are the
 // instrument D48 asks for, kept in the repository so the next person who
-// changes a screen can look at it instead of guessing. Every test is a no-op
+// changes a screen can look at it instead of guessing. Every test is skipped
 // unless `P6_RENDER` is set, and every test that needs the private 2026-09-01
-// recording skips itself when that directory is absent, so a fresh clone runs
-// this file green without it.
+// recording is skipped when that directory is absent, so a fresh clone reports
+// this file as skipped rather than as passing tests that asserted nothing.
 //
 // Two rendering paths, because they see different things:
 //
@@ -65,6 +65,21 @@ struct ScreenSnapshotTests {
 
     static var enabled: Bool { ProcessInfo.processInfo.environment["P6_RENDER"] != nil }
     static var tag: String { ProcessInfo.processInfo.environment["P6_TAG"] ?? "p6" }
+
+    /// Skipped, not passed. Without `P6_RENDER` these tests used to return
+    /// early and count as green on a fresh clone while asserting nothing;
+    /// as traits, `swift test` reports them as skipped and says why.
+    static var whenRendering: ConditionTrait {
+        .enabled(if: enabled, "P6_RENDER is not set")
+    }
+
+    /// The same, for a test that renders the private 2026-09-01 recording.
+    static var whenRenderingTheRealRun: ConditionTrait {
+        .enabled(
+            if: enabled && exists(proposalRunURL),
+            "P6_RENDER is not set or the private 2026-09-01 run is absent"
+        )
+    }
     static let english = Locale(identifier: "en")
 
     static func exists(_ url: URL) -> Bool {
@@ -430,9 +445,8 @@ struct ScreenSnapshotTests {
 
     // MARK: - Screens: capture readiness
 
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
     func captureReadiness() async throws {
-        guard Self.enabled else { return }
         for (label, report) in [
             ("notready", Self.unprovisionedReport()),
             ("ready", Self.readyReport()),
@@ -454,9 +468,8 @@ struct ScreenSnapshotTests {
 
     // MARK: - Screens: run failure
 
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
     func runFailureScreens() throws {
-        guard Self.enabled else { return }
         let cases: [(String, URL, LibraryItemState, Double)] = [
             ("runerror", Self.runErrorURL, .failed, 1_243.08),
             ("diarizationerror", Self.diarizationErrorURL, .failed, 420.048),
@@ -490,13 +503,8 @@ struct ScreenSnapshotTests {
 
     // MARK: - Screens: transcript
 
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRenderingTheRealRun) @MainActor
     func transcriptScreen() throws {
-        guard Self.enabled else { return }
-        guard Self.exists(Self.proposalRunURL) else {
-            print("SKIP transcript: real run absent")
-            return
-        }
         // The P1-merged copy. `t4-verify/full-acceptance` was merged on
         // 2026-09-01, before P1, so its `conflicts.json` carries no
         // `speaker_attribution` at all; that run is rendered separately below
@@ -579,13 +587,8 @@ struct ScreenSnapshotTests {
     /// screen is composed here from the same shipped views the real screen
     /// uses: `TranscriptHeaderBar`, `ProposalLayerNotice`, `AppHairline` and
     /// `TranscriptSegmentColumn`.
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRenderingTheRealRun) @MainActor
     func proposalLayerScreen() throws {
-        guard Self.enabled else { return }
-        guard Self.exists(Self.proposalRunURL) else {
-            print("SKIP proposal: proposal run absent")
-            return
-        }
         let real = try Self.realRun(
             at: Self.proposalRunURL, name: "Weekly product sync", state: .hasConflicts
         )
@@ -727,10 +730,8 @@ struct ScreenSnapshotTests {
 
     /// One row of each D50 decline cause, plus a confirmation, so the three
     /// sentences a reader has to tell apart are on screen together.
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRenderingTheRealRun) @MainActor
     func proposalDeclineCauses() throws {
-        guard Self.enabled else { return }
-        guard Self.exists(Self.proposalRunURL) else { return }
         let real = try Self.realRun(
             at: Self.proposalRunURL, name: "Weekly product sync", state: .hasConflicts
         )
@@ -827,9 +828,8 @@ struct ScreenSnapshotTests {
     /// switch had never been rendered. Each image is read back twice: by OCR,
     /// for what the rows say, and by pixel, for where the accent underline
     /// under the displayed tab sits.
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
     func layerSwitchRendersEachAvailableLayerInTheShippedView() throws {
-        guard Self.enabled else { return }
         let root = try derivedLayerTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let fixture = try derivedLayerRunFixture(in: root, complete: false)
@@ -913,9 +913,8 @@ struct ScreenSnapshotTests {
     /// runs on any machine; the real run's three event rows (indexes 25, 135
     /// and 247, each `UNKNOWN` and flagged for review) are rendered beside
     /// their neighbours when the private recording is present.
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
     func nonSpeechEventRows() throws {
-        guard Self.enabled else { return }
         var fixture = TranscriptFixtures.meetingShaped()
         // Row 2 is attributed with a contested share; row 3 is unnamed with
         // two candidates and a band. Both become event rows, as the real run's
@@ -978,9 +977,8 @@ struct ScreenSnapshotTests {
 
     // MARK: - Screens: sidebar
 
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
     func sidebarScreens() throws {
-        guard Self.enabled else { return }
         let states: [(LibraryItemState, String, Bool)] = [
             (.recorded, "Board review", false),
             (.transcribing, "Weekly product sync", false),
@@ -1076,13 +1074,8 @@ struct ScreenSnapshotTests {
 
     // MARK: - Screens: inspector
 
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRenderingTheRealRun) @MainActor
     func inspectorScreens() throws {
-        guard Self.enabled else { return }
-        guard Self.exists(Self.proposalRunURL) else {
-            print("SKIP inspector: run absent")
-            return
-        }
         let real = try Self.realRun(
             at: Self.proposalRunURL, name: "Weekly product sync", state: .hasConflicts
         )
@@ -1116,9 +1109,8 @@ struct ScreenSnapshotTests {
 
     /// Records, in an image, exactly what the `ImageRenderer` path loses. The
     /// report cites this rather than asserting the limits from memory.
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
     func rendererComparison() throws {
-        guard Self.enabled else { return }
         let sample = VStack(alignment: .leading, spacing: 10) {
             Text(verbatim: "Renderer probe").font(.title2)
             TextField("Search", text: .constant("glossary"))
