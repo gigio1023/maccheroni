@@ -16,6 +16,8 @@
 	<string>%@ is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ is no longer where the library expects it, so nothing was moved.</string>
+	<key>%@ not transcribed</key>
+	<string>%@ not transcribed</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%@ of %@ (%@)</string>
 	<key>%@ of speech</key>

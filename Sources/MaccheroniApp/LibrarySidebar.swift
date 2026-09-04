@@ -21,6 +21,7 @@ struct LibrarySidebar: View {
                     LibraryRecordRow(
                         record: record,
                         isPostprocessing: model.isPostprocessingExistingRun(recordID: record.id),
+                        partialCoverage: model.partialCoverage(for: record),
                         draftName: renamingRecordID == record.id ? $draftName : nil,
                         commitRename: { commitRename(record) },
                         cancelRename: cancelRename
@@ -100,6 +101,10 @@ struct LibrarySidebar: View {
 struct LibraryRecordRow: View {
     let record: LibraryRecord
     let isPostprocessing: Bool
+    /// What a readable partial run did not transcribe. The row says so in
+    /// its own words beside the state, because a reader choosing a recording
+    /// must see the loss before opening it, not after (judgment rule 2).
+    var partialCoverage: RunPartialCoverage? = nil
     /// Non-nil while this row's name is being edited.
     var draftName: Binding<String>?
     var commitRename: () -> Void = {}
@@ -107,13 +112,17 @@ struct LibraryRecordRow: View {
 
     @FocusState private var isEditingName: Bool
 
+    private var partialPhrase: String? {
+        partialCoverage.map { LibraryRowStatus.partialPhrase(missingDurationS: $0.missingDurationS) }
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: AppTheme.Spacing.small) {
             Group {
                 if isPostprocessing {
                     ProgressView().controlSize(.small)
                 } else {
-                    StatusGlyph(state: record.state)
+                    StatusGlyph(state: record.state, isPartial: partialCoverage != nil)
                 }
             }
             .padding(.top, 1)
@@ -139,6 +148,16 @@ struct LibraryRecordRow: View {
                     // where the state is genuinely open, and never alone.
                     Text(record.state.title)
                         .foregroundStyle(LibraryRowStatus.tint(record.state))
+                    if let partialPhrase {
+                        Text(verbatim: "·")
+                            .accessibilityHidden(true)
+                            .foregroundStyle(AppTheme.Palette.inkSecondary)
+                        // A named loss is an open matter and takes the open
+                        // tint; the state word beside it stays as it is.
+                        Text(verbatim: partialPhrase)
+                            .foregroundStyle(AppTheme.Palette.open)
+                            .lineLimit(1)
+                    }
                 }
                 .font(AppTheme.Typography.meta)
             }
@@ -146,7 +165,10 @@ struct LibraryRecordRow: View {
         .padding(.vertical, 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            Text(verbatim: "\(record.displayName), \(record.state.localizedTitle())")
+            Text(verbatim: LibraryRowStatus.accessibilityLabel(
+                for: record,
+                partialCoverage: partialCoverage
+            ))
         )
     }
 
@@ -216,15 +238,56 @@ enum LibraryRowStatus {
         case .failed: AppTheme.Palette.error
         }
     }
+
+    /// A readable partial run keeps its state's glyph shape but takes the
+    /// open tint and the triangle: the run finished, and it lost something
+    /// the reader has to know about before opening it.
+    static func symbol(_ state: LibraryItemState, isPartial: Bool) -> String {
+        isPartial && state.isReadable ? "exclamationmark.triangle" : symbol(state)
+    }
+
+    static func tint(_ state: LibraryItemState, isPartial: Bool) -> Color {
+        isPartial && state.isReadable ? AppTheme.Palette.open : tint(state)
+    }
+
+    /// `31s not transcribed`: the loss a partial run names, rounded up so a
+    /// loss is never understated, in the row's own units.
+    static func partialPhrase(missingDurationS: Double, locale: Locale? = nil) -> String {
+        let seconds = missingDurationS.isFinite ? max(0, missingDurationS) : 0
+        var style = Duration.UnitsFormatStyle(
+            allowedUnits: [.hours, .minutes, .seconds],
+            width: .narrow,
+            fractionalPart: .hide(rounded: .up)
+        )
+        if let locale { style = style.locale(locale) }
+        let missing = Duration.seconds(seconds).formatted(style)
+        return appString("\(missing) not transcribed", locale: locale)
+    }
+
+    static func accessibilityLabel(
+        for record: LibraryRecord,
+        partialCoverage: RunPartialCoverage?,
+        locale: Locale? = nil
+    ) -> String {
+        var parts = [record.displayName, record.state.localizedTitle(locale: locale)]
+        if let partialCoverage {
+            parts.append(partialPhrase(
+                missingDurationS: partialCoverage.missingDurationS,
+                locale: locale
+            ))
+        }
+        return parts.joined(separator: ", ")
+    }
 }
 
 private struct StatusGlyph: View {
     let state: LibraryItemState
+    var isPartial = false
 
     var body: some View {
-        Image(systemName: LibraryRowStatus.symbol(state))
+        Image(systemName: LibraryRowStatus.symbol(state, isPartial: isPartial))
             .font(.system(size: 12))
-            .foregroundStyle(LibraryRowStatus.tint(state))
+            .foregroundStyle(LibraryRowStatus.tint(state, isPartial: isPartial))
             .accessibilityHidden(true)
     }
 }

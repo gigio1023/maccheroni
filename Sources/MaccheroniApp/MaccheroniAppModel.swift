@@ -267,6 +267,13 @@ final class MaccheroniAppModel {
     private(set) var errorMessage: String?
     private(set) var activeRecordID: UUID?
     private(set) var runFailures: [UUID: Failure]
+    /// What a partial run did not transcribe, per readable record, read from
+    /// the run's own `primary/partial-coverage.json` (or, for a run written
+    /// without one, from the manifest's coverage) at launch and when a run
+    /// finishes. Not persisted: the manifest's `partial` status and coverage
+    /// are the source of truth, and this is only their read-out for the
+    /// sidebar, which cannot open a run per row.
+    private(set) var partialCoverages: [UUID: RunPartialCoverage] = [:]
     private(set) var codexAvailability: CodexAvailability
     private(set) var activeExistingRunPostprocess: ActiveExistingRunPostprocess?
     private(set) var existingRunPostprocessFailures: [UUID: String] = [:]
@@ -411,16 +418,46 @@ final class MaccheroniAppModel {
             loadedRecords[index].failureMessage = appString("Interrupted")
             reconciledInterruptedRun = true
         }
+        // A partial run is readable (D51): before 2026-09-04 the runner threw
+        // on it and the record was filed as failed, so an index written then
+        // still lists the project's own real recording as a failure. Re-file
+        // such a record as readable when its run opens; one that does not
+        // open stays failed with its diagnosis. The manifest is read once per
+        // record here for the failure map and the partial coverage.
+        var reconciledPartialRun = false
+        for index in loadedRecords.indices
+            where loadedRecords[index].state == .failed
+        {
+            guard let runURL = loadedRecords[index].runURL,
+                  Self.readManifest(at: runURL)?.status == .partial,
+                  let loaded = try? repository.loadRun(at: runURL)
+            else { continue }
+            loadedRecords[index].state = loaded.requiresReview(for: loadedRecords[index])
+                ? .hasConflicts
+                : .done
+            loadedRecords[index].failureMessage = nil
+            reconciledPartialRun = true
+        }
         records = loadedRecords
         selectedRunIssue = nil
-        runFailures = Dictionary(
-            uniqueKeysWithValues: loadedRecords.compactMap { record in
-                guard let runURL = record.runURL,
-                      let failure = Self.readFailure(at: runURL)
-                else { return nil }
-                return (record.id, failure)
+        var failures: [UUID: Failure] = [:]
+        var coverages: [UUID: RunPartialCoverage] = [:]
+        for record in loadedRecords {
+            guard let runURL = record.runURL,
+                  let manifest = Self.readManifest(at: runURL)
+            else { continue }
+            if record.state.isReadable {
+                // A readable record has no failure to diagnose; a partial one
+                // has a loss to name.
+                if manifest.status == .partial {
+                    coverages[record.id] = Self.readPartialCoverage(at: runURL, manifest: manifest)
+                }
+            } else if let failure = manifest.failure {
+                failures[record.id] = failure
             }
-        )
+        }
+        runFailures = failures
+        partialCoverages = coverages
         // The one trigger of the engine-scratch retention policy: once the
         // index is loaded and reconciled, scratch no record names and older
         // than the declared bound is pruned, each pruning written to the
@@ -429,7 +466,7 @@ final class MaccheroniAppModel {
         recorder.setMeterHandler { [weak self] meters in
             self?.captureMeters = meters
         }
-        if reconciledInterruptedRun || !recoveredCaptureRecords.isEmpty {
+        if reconciledInterruptedRun || reconciledPartialRun || !recoveredCaptureRecords.isEmpty {
             try self.recordSaver(loadedRecords)
         }
     }
@@ -505,6 +542,13 @@ final class MaccheroniAppModel {
 
     func failure(for record: LibraryRecord) -> Failure? {
         runFailures[record.id]
+    }
+
+    /// What this readable record's run did not transcribe, when it is a
+    /// partial run. `nil` for a complete run and for a run that is not
+    /// readable at all.
+    func partialCoverage(for record: LibraryRecord) -> RunPartialCoverage? {
+        partialCoverages[record.id]
     }
 
     func isMOSSLimitExhausted(_ record: LibraryRecord) -> Bool {
@@ -1083,15 +1127,18 @@ final class MaccheroniAppModel {
         }
         let previousRecords = records
         let previousRunFailure = runFailures[plan.recordID]
+        let previousPartialCoverage = partialCoverages[plan.recordID]
         let previousPostprocessFailure = existingRunPostprocessFailures[plan.recordID]
         records.removeAll { $0.id == plan.recordID }
         runFailures.removeValue(forKey: plan.recordID)
+        partialCoverages.removeValue(forKey: plan.recordID)
         existingRunPostprocessFailures.removeValue(forKey: plan.recordID)
         do {
             try recordSaver(records)
         } catch {
             records = previousRecords
             runFailures[plan.recordID] = previousRunFailure
+            partialCoverages[plan.recordID] = previousPartialCoverage
             existingRunPostprocessFailures[plan.recordID] = previousPostprocessFailure
             let head = appString(
                 "\(plan.displayName) is in the Trash, but the library could not be saved, so the recording is still listed. Put it back in the Finder."
@@ -1306,6 +1353,7 @@ final class MaccheroniAppModel {
         let requestID = UUID()
         records[index].requestID = requestID
         runFailures.removeValue(forKey: recordID)
+        partialCoverages.removeValue(forKey: recordID)
         activeRecordID = recordID
         try recordSaver(records)
         let glossaryURL = try activeGlossaryURL(at: glossaryURL(for: record.profileID))
@@ -1346,10 +1394,23 @@ final class MaccheroniAppModel {
         guard let finalIndex = records.firstIndex(where: { $0.id == recordID }) else { return }
         records[finalIndex].runURL = runURL
         let loaded = try repository.loadRun(at: runURL)
+        // A partial run files exactly like a succeeded one (D51): readable,
+        // with the manifest's own status and coverage as the record of what
+        // was lost. The loss is named beside the run, never as a failure.
         records[finalIndex].state = loaded.requiresReview ? .hasConflicts : .done
         records[finalIndex].failureMessage = nil
-        // A succeeded request discarded its scratch; the link goes with it.
-        records[finalIndex].requestID = nil
+        if loaded.manifest.status == .partial {
+            // The runner kept the scratch of a partial run; the record keeps
+            // naming it so the Trash takes it along.
+            partialCoverages[recordID] = Self.readPartialCoverage(
+                at: runURL,
+                manifest: loaded.manifest
+            )
+        } else {
+            // A succeeded request discarded its scratch; the link goes with it.
+            records[finalIndex].requestID = nil
+            partialCoverages.removeValue(forKey: recordID)
+        }
         runFailures.removeValue(forKey: recordID)
         try recordSaver(records)
         if selection == .record(recordID) {
@@ -1678,12 +1739,34 @@ final class MaccheroniAppModel {
             .joined(separator: "\n")
     }
 
-    private static func readFailure(at runURL: URL) -> Failure? {
+    private static func readManifest(at runURL: URL) -> Manifest? {
         guard let data = try? Data(
             contentsOf: runURL.appendingPathComponent("manifest.json")
-        ), let manifest = try? JSONDecoder().decode(Manifest.self, from: data)
-        else { return nil }
-        return manifest.failure
+        ) else { return nil }
+        return try? JSONDecoder().decode(Manifest.self, from: data)
+    }
+
+    private static func readFailure(at runURL: URL) -> Failure? {
+        readManifest(at: runURL)?.failure
+    }
+
+    /// The run's own account of what it did not transcribe. A run written
+    /// before `partial-coverage.json` existed states the same loss in its
+    /// manifest coverage, without the ranges, so that is read instead of
+    /// showing nothing.
+    private static func readPartialCoverage(
+        at runURL: URL,
+        manifest: Manifest
+    ) -> RunPartialCoverage {
+        LibraryRepository.readPartialCoverage(at: runURL) ?? RunPartialCoverage(
+            inputDurationS: manifest.coverage.inputDurationS,
+            promotedDurationS: manifest.coverage.processedDurationS,
+            missingDurationS: max(
+                0,
+                manifest.coverage.inputDurationS - manifest.coverage.processedDurationS
+            ),
+            missing: []
+        )
     }
 }
 

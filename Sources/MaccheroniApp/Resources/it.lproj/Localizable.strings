@@ -16,6 +16,8 @@
 	<string>%@ è nel Cestino, ma non è stato possibile salvare la libreria, quindi la registrazione resta in elenco. Rimettila a posto nel Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ non si trova più dove l'archivio se lo aspetta, quindi non è stato spostato nulla.</string>
+	<key>%@ not transcribed</key>
+	<string>%@ non trascritti</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%1$@ di %2$@ (%3$@)</string>
 	<key>%@ of speech</key>

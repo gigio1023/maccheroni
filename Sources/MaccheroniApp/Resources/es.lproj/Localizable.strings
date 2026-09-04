@@ -16,6 +16,8 @@
 	<string>%@ está en la Papelera, pero no se pudo guardar la biblioteca, así que la grabación sigue en la lista. Devuélvela desde el Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ ya no está donde la biblioteca lo espera, así que no se movió nada.</string>
+	<key>%@ not transcribed</key>
+	<string>%@ sin transcribir</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%1$@ de %2$@ (%3$@)</string>
 	<key>%@ of speech</key>

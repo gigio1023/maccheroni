@@ -168,6 +168,16 @@ enum LibraryItemState: String, Codable, Sendable {
         case .interrupted: appString("Interrupted", locale: locale)
         }
     }
+
+    /// The states whose run opens in the transcript view. A partial run
+    /// (D51) is filed in one of these like a succeeded run; the manifest's
+    /// own status and coverage say what it lost.
+    var isReadable: Bool {
+        switch self {
+        case .done, .hasConflicts: true
+        case .recorded, .transcribing, .failed, .cancelled, .interrupted: false
+        }
+    }
 }
 
 enum LibrarySourceKind: String, Codable, Sendable {

@@ -491,6 +491,44 @@ struct LibraryMaintenanceTests {
         #expect(world.repository.pruneOrphanedRequestDirectories(records: world.model.records).isEmpty)
     }
 
+    /// The sidebar row of a readable partial run says what it lost before
+    /// the reader opens it, in the row's own units, rounded up so a loss is
+    /// never understated; the state word beside it is unchanged.
+    @Test
+    func aPartialRunsRowNamesItsLossAndTakesTheOpenMark() {
+        let en = Locale(identifier: "en")
+        #expect(LibraryRowStatus.partialPhrase(missingDurationS: 30.56, locale: en) == "31s not transcribed")
+        #expect(LibraryRowStatus.partialPhrase(missingDurationS: 0.5, locale: en) == "1s not transcribed")
+        #expect(LibraryRowStatus.partialPhrase(missingDurationS: 406.55, locale: en) == "6m 47s not transcribed")
+        #expect(LibraryRowStatus.partialPhrase(missingDurationS: 3_600, locale: en) == "1h not transcribed")
+        #expect(LibraryRowStatus.partialPhrase(missingDurationS: .nan, locale: en) == "0s not transcribed")
+        #expect(LibraryRowStatus.symbol(.done, isPartial: true) == "exclamationmark.triangle")
+        #expect(LibraryRowStatus.symbol(.hasConflicts, isPartial: true) == "exclamationmark.triangle")
+        #expect(LibraryRowStatus.symbol(.done, isPartial: false) == "checkmark.circle")
+        // A partial mark never reaches a state that is not readable.
+        #expect(LibraryRowStatus.symbol(.failed, isPartial: true) == "exclamationmark.triangle")
+        #expect(LibraryRowStatus.tint(.failed, isPartial: true) == LibraryRowStatus.tint(.failed))
+        #expect(LibraryRowStatus.tint(.done, isPartial: true) == AppTheme.Palette.open)
+
+        var record = TranscriptFixtures.meetingShaped().record
+        record.displayName = "Weekly sync"
+        record.state = .done
+        let coverage = RunPartialCoverage(
+            inputDurationS: 1_243.08,
+            promotedDurationS: 1_212.52,
+            missingDurationS: 30.56,
+            missing: []
+        )
+        #expect(
+            LibraryRowStatus.accessibilityLabel(for: record, partialCoverage: coverage, locale: en)
+                == "Weekly sync, Done, 31s not transcribed"
+        )
+        #expect(
+            LibraryRowStatus.accessibilityLabel(for: record, partialCoverage: nil, locale: en)
+                == "Weekly sync, Done"
+        )
+    }
+
     @Test
     func theRequestDirectoryNameIsTheRunnersOwn() {
         let id = UUID(uuidString: "7695E7C7-0059-455F-ABAF-378E935F757A")!
@@ -612,6 +650,7 @@ struct LibraryMaintenanceTests {
             "Renames this recording in the library only. The audio file and the run folder keep their names.",
             "This also moves the engine log kept from the failed run.",
             "This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.",
+            "%@ not transcribed",
         ]
 
         let catalogURL = try #require(appResourcesBundle.url(

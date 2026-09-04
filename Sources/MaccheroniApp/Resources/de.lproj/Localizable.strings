@@ -16,6 +16,8 @@
 	<string>%@ befindet sich im Papierkorb, aber die Bibliothek konnte nicht gespeichert werden, sodass die Aufnahme weiterhin aufgeführt ist. Legen Sie sie im Finder zurück.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ befindet sich nicht mehr dort, wo die Bibliothek es erwartet; es wurde nichts verschoben.</string>
+	<key>%@ not transcribed</key>
+	<string>%@ nicht transkribiert</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%1$@ von %2$@ (%3$@)</string>
 	<key>%@ of speech</key>

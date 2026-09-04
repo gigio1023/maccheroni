@@ -16,6 +16,8 @@
 	<string>%@ 항목이 휴지통에 있지만 라이브러리를 저장하지 못해 녹음이 목록에 남아 있습니다. Finder에서 되돌려 놓으세요.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@이(가) 라이브러리가 기대한 위치에 없어 아무것도 옮기지 않았습니다.</string>
+	<key>%@ not transcribed</key>
+	<string>%@ 전사되지 않음</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%2$@ 중 %1$@ (%3$@)</string>
 	<key>%@ of speech</key>

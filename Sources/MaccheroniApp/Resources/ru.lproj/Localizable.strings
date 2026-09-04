@@ -16,6 +16,8 @@
 	<string>%@ находится в Корзине, но библиотеку не удалось сохранить, поэтому запись осталась в списке. Верните её на место в Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ больше не находится там, где ожидает библиотека, поэтому ничего не перемещено.</string>
+	<key>%@ not transcribed</key>
+	<string>%@ не расшифровано</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%1$@ из %2$@ (%3$@)</string>
 	<key>%@ of speech</key>

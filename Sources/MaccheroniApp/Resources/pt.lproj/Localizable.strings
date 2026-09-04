@@ -16,6 +16,8 @@
 	<string>%@ está no Lixo, mas não foi possível salvar a biblioteca, então a gravação continua listada. Coloque-o de volta no Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ já não está onde a biblioteca espera, por isso nada foi movido.</string>
+	<key>%@ not transcribed</key>
+	<string>%@ não transcritos</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%1$@ de %2$@ (%3$@)</string>
 	<key>%@ of speech</key>

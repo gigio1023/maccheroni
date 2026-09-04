@@ -203,12 +203,26 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
             requestedPostprocessModelID: request.postprocess.requestedModelID,
             accumulator: &progressAccumulator
         ))
-        guard manifest.status == .succeeded else {
+        // A partial run is a completed run (D51): it lost one named range and
+        // kept everything else, `merged/segments.json` included, so it is
+        // returned to be read. Only a failed or cancelled run is an error
+        // here. The manifest's own `partial` status and coverage remain the
+        // record of the loss; nothing here restates them.
+        switch manifest.status {
+        case .succeeded:
+            requestSucceeded = true
+        case .partial:
+            // The scratch is kept, as for a failure: the manifest names the
+            // lost range and its cause, but the engine's stderr is its only
+            // full account of the leaf it lost, and the retention policy
+            // (`EngineRequestScratch`) already bounds a kept directory by the
+            // record's own lifetime. The record keeps naming it.
+            requestSucceeded = false
+        case .failed, .canceled:
             throw TranscriptionRunnerError.pipelineFailed(
                 manifest.failure?.message ?? appString("The run did not succeed.")
             )
         }
-        requestSucceeded = true
         return runURL
     }
 
@@ -641,7 +655,8 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
     ) -> RunProgressSnapshot {
         let message = manifest.coverage.message ?? manifest.failure?.message
         let stage: PipelineStage
-        if manifest.status == .succeeded {
+        if manifest.status == .succeeded || manifest.status == .partial {
+            // Partial is complete with a named loss, not a failed stage.
             stage = .complete
         } else if manifest.failure?.code != "RUN_INCOMPLETE" {
             stage = .failed

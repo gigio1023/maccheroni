@@ -16,6 +16,8 @@
 	<string>%@ はゴミ箱にありますが、ライブラリを保存できなかったため、この録音は一覧に残っています。Finder で元に戻してください。</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ はライブラリが想定する場所にないため、何も移動しませんでした。</string>
+	<key>%@ not transcribed</key>
+	<string>%@ 未転写</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%2$@ 中 %1$@ (%3$@)</string>
 	<key>%@ of speech</key>

@@ -16,6 +16,8 @@
 	<string>%@ est dans la corbeille, mais la bibliothèque n'a pas pu être enregistrée, donc l'enregistrement reste dans la liste. Remettez-le en place dans le Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ ne se trouve plus là où la bibliothèque l’attend ; rien n’a été déplacé.</string>
+	<key>%@ not transcribed</key>
+	<string>%@ non transcrit</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%1$@ sur %2$@ (%3$@)</string>
 	<key>%@ of speech</key>
