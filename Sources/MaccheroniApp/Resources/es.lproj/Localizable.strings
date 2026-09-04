@@ -20,8 +20,14 @@
 	<string>%1$@ de %2$@ (%3$@)</string>
 	<key>%@ of speech</key>
 	<string>%@ del habla</string>
+	<key>%@ of this recording produced no transcript, from %@. The transcript covers %@ of %@.</key>
+	<string>%@ de esta grabación no produjeron transcripción, de %@. La transcripción cubre %@ de %@.</string>
 	<key>%@ of this recording produced no transcript, so these proposals cover %@ of %@.</key>
 	<string>%@ de esta grabación no produjo transcripción, así que estas propuestas cubren %@ de %@.</string>
+	<key>%@ of this recording produced no transcript. The transcript covers %@ of %@.</key>
+	<string>%@ de esta grabación no produjeron transcripción. La transcripción cubre %@ de %@.</string>
+	<key>%@ to %@</key>
+	<string>%@ a %@</string>
 	<key>%@, %@</key>
 	<string>%@, %@</string>
 	<key>%lld bytes</key>
@@ -438,6 +444,10 @@
 	<string>Sin hablante propuesto</string>
 	<key>No speaker was active on the speaker timeline during this segment.</key>
 	<string>Ningún hablante estaba activo en la línea de tiempo durante este segmento.</string>
+	<key>No transcript for %@ of the recording.</key>
+	<string>Sin transcripción durante %@ de la grabación.</string>
+	<key>No transcript from %@ to %@ (%@).</key>
+	<string>Sin transcripción de %@ a %@ (%@).</string>
 	<key>Noise</key>
 	<string>Ruido</string>
 	<key>Non-speech event: %@</key>

@@ -149,10 +149,13 @@ struct TranscriptReadingTests {
             layer: .translated
         )
 
-        #expect(raw.text.hasPrefix("Transcript layer: Speaker-labelled\n\n"))
+        // The fixture has the real run's partial coverage, so the hole is named
+        // on the line under the layer header, on both layers.
+        let hole = "30.6 sec of this recording produced no transcript. The transcript covers 20:12 of 20:43."
+        #expect(raw.text.hasPrefix("Transcript layer: Speaker-labelled\n\(hole)\n\n"))
         #expect(raw.text.contains(source.segments[0].text))
         #expect(!raw.text.contains("Translated line "))
-        #expect(translated.text.hasPrefix("Transcript layer: Translated\n\n"))
+        #expect(translated.text.hasPrefix("Transcript layer: Translated\n\(hole)\n\n"))
         #expect(translated.text.contains("Translated line "))
         #expect(!translated.text.contains(source.segments[0].text))
         // The layer is a reading of what is loaded; copying it writes nothing.
@@ -586,6 +589,61 @@ struct TranscriptReadingTests {
         // "other marker" either, and it marks nothing for review.
         #expect(TranscriptFlagVocabulary.otherMarkers(["non_speech_event"]).isEmpty)
         #expect(!TranscriptFlagVocabulary.marksUncertainty(["non_speech_event"]))
+    }
+
+    // MARK: A run short of its input
+
+    /// A partial run names its missing range where the reader looks: once in
+    /// the header with the places, and once as a row at the hole's place.
+    @Test
+    func aPartialRunNamesItsMissingRangeInTheHeaderAndAtItsPlaceInTheRows() throws {
+        let english = Locale(identifier: "en")
+        let root = try derivedLayerTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try derivedLayerRunFixture(in: root, complete: false)
+        let run = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+        let record = TranscriptFixtures.record(runURL: fixture.runURL)
+
+        let coverage = try #require(TranscriptMissingCoverage.load(run: run, record: record))
+        #expect(coverage.missingDurationS == 2)
+        #expect(coverage.gaps == [TranscriptGap(startS: 6, endS: 8)])
+        #expect(coverage.sentence(locale: english)
+            == "2.0 sec of this recording produced no transcript, from 00:06 to 00:08. The transcript covers 00:06 of 00:08.")
+        #expect(coverage.gaps[0].sentence(locale: english)
+            == "No transcript from 00:06 to 00:08 (2.0 sec).")
+
+        // The gap sits before the first segment that starts at or after it.
+        let entries = TranscriptSegmentColumn.entries(segments: run.segments, gaps: coverage.gaps)
+        #expect(entries.map(\.id) == [
+            .segment(run.segments[0].id), .segment(run.segments[1].id),
+            .segment(run.segments[2].id), .gap(coverage.gaps[0].id),
+            .segment(run.segments[3].id),
+        ])
+        // A gap after the last segment, and one before the first.
+        let tail = TranscriptGap(startS: 8, endS: 9)
+        #expect(TranscriptSegmentColumn.entries(segments: run.segments, gaps: [tail]).last?.id == .gap(tail.id))
+        let head = TranscriptGap(startS: 0, endS: 1)
+        #expect(TranscriptSegmentColumn.entries(segments: run.segments, gaps: [head]).first?.id == .gap(head.id))
+
+        // A complete run has no notice and no gap rows.
+        let complete = try derivedLayerRunFixture(in: root, runID: "complete-run")
+        let completeRun = try LibraryRepository(root: root).loadRun(at: complete.runURL)
+        #expect(TranscriptMissingCoverage.load(
+            run: completeRun,
+            record: TranscriptFixtures.record(runURL: complete.runURL)
+        ) == nil)
+        #expect(TranscriptSegmentColumn.entries(segments: completeRun.segments, gaps: []).count == 4)
+
+        // A run short of its input whose coverage record is missing still
+        // says how much is missing, without the places.
+        let withoutRecord = try #require(TranscriptMissingCoverage(
+            coverage: run.manifest.coverage,
+            status: run.manifest.status,
+            partial: nil
+        ))
+        #expect(withoutRecord.gaps.isEmpty)
+        #expect(withoutRecord.sentence(locale: english)
+            == "2.0 sec of this recording produced no transcript. The transcript covers 00:06 of 00:08.")
     }
 
     // MARK: Non-speech events
@@ -1726,7 +1784,9 @@ enum TranscriptFixtures {
         )
     }
 
-    private static func record() -> LibraryRecord {
+    static func record(
+        runURL: URL = URL(fileURLWithPath: "/tmp/20260901T122702Z-f2d938")
+    ) -> LibraryRecord {
         LibraryRecord(
             id: UUID(uuidString: "00000000-0000-0000-0000-0000000000f2")!,
             createdAt: Date(timeIntervalSince1970: 1_788_000_000),
@@ -1736,7 +1796,7 @@ enum TranscriptFixtures {
             securityScopedBookmark: nil,
             microphoneURL: nil,
             systemAudioURL: nil,
-            runURL: URL(fileURLWithPath: "/tmp/20260901T122702Z-f2d938"),
+            runURL: runURL,
             profileID: .koreanITMeeting,
             postprocess: .none,
             durationS: recordingDurationS,

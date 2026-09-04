@@ -20,8 +20,14 @@
 	<string>%1$@ из %2$@ (%3$@)</string>
 	<key>%@ of speech</key>
 	<string>%@ речи</string>
+	<key>%@ of this recording produced no transcript, from %@. The transcript covers %@ of %@.</key>
+	<string>%@ этой записи не дали расшифровки: %@. Расшифровка охватывает %@ из %@.</string>
 	<key>%@ of this recording produced no transcript, so these proposals cover %@ of %@.</key>
 	<string>%@ этой записи не дали расшифровки, поэтому предложения охватывают %@ из %@.</string>
+	<key>%@ of this recording produced no transcript. The transcript covers %@ of %@.</key>
+	<string>%@ этой записи не дали расшифровки. Расшифровка охватывает %@ из %@.</string>
+	<key>%@ to %@</key>
+	<string>%@ – %@</string>
 	<key>%@, %@</key>
 	<string>%@, %@</string>
 	<key>%lld bytes</key>
@@ -438,6 +444,10 @@
 	<string>Говорящий не предложен</string>
 	<key>No speaker was active on the speaker timeline during this segment.</key>
 	<string>В этом сегменте на шкале говорящих никто не был активен.</string>
+	<key>No transcript for %@ of the recording.</key>
+	<string>Нет расшифровки для %@ записи.</string>
+	<key>No transcript from %@ to %@ (%@).</key>
+	<string>Нет расшифровки с %@ по %@ (%@).</string>
 	<key>Noise</key>
 	<string>Шум</string>
 	<key>Non-speech event: %@</key>

@@ -17,6 +17,9 @@ struct TranscriptView: View {
     /// open at all — so today this is always `nil` in the running app and the
     /// layer reports itself as not produced.
     var proposal: SpeakerProposalDocument?
+    /// What the run did not transcribe, read once from the run's own record
+    /// and `nil` for a run that covered its input.
+    private let missingCoverage: TranscriptMissingCoverage?
     /// Collapsed by default. Provenance is a reference, not the first thing a
     /// reader needs, and the panel used to open onto run IDs and hashes.
     @State private var isInspectorPresented = false
@@ -53,6 +56,7 @@ struct TranscriptView: View {
         self.record = record
         self.run = run
         self.proposal = proposal
+        missingCoverage = TranscriptMissingCoverage.load(run: run, record: record)
         _selectedLayer = State(initialValue: initialLayer)
     }
 
@@ -294,6 +298,7 @@ struct TranscriptView: View {
                 focusedSegmentIndex: focusedSegmentIndex,
                 step: { step($0) },
                 missingEvidence: missingEvidence,
+                missingCoverage: missingCoverage,
                 playback: playback,
                 totalDurationS: max(record.durationS, run.manifest.coverage.inputDurationS),
                 togglePlayback: {
@@ -303,7 +308,7 @@ struct TranscriptView: View {
                 seek: { playback.seek(to: $0, record: record) }
             )
             if displayLayer == .proposed, let proposalLayer {
-                ProposalLayerNotice(layer: proposalLayer)
+                ProposalLayerNotice(layer: proposalLayer, showsCoverage: missingCoverage == nil)
             }
             if let copyFeedback {
                 Label(
@@ -385,6 +390,7 @@ struct TranscriptView: View {
                     selectedSegmentIDs: selectedSegmentIDs,
                     evidenceIsLoaded: !isTranslation,
                     proposalLayer: displayLayer == .proposed ? proposalLayer : nil,
+                    gaps: searchText.isEmpty ? (missingCoverage?.gaps ?? []) : [],
                     play: { item in
                         model.stopPlayback()
                         playback.play(from: item.segment.startS, record: record)
@@ -1513,6 +1519,8 @@ struct TranscriptHeaderBar: View {
     let step: (Int) -> Void
     /// Stated once here rather than under every unnamed row.
     var missingEvidence: TranscriptMissingEvidence?
+    /// The run's missing ranges, stated once above the rows on every layer.
+    var missingCoverage: TranscriptMissingCoverage?
     let playback: TranscriptPlaybackController
     let totalDurationS: Double
     let togglePlayback: () -> Void
@@ -1557,6 +1565,19 @@ struct TranscriptHeaderBar: View {
                 }
                 .font(AppTheme.Typography.meta)
                 .foregroundStyle(AppTheme.Palette.inkSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            // A hole in the record is open work for the reader, so this is the
+            // open colour beside a sentence: how much, where, and what the
+            // transcript covers. It prints on every layer.
+            if let missingCoverage {
+                Label {
+                    Text(verbatim: missingCoverage.sentence())
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(AppTheme.Typography.meta)
+                .foregroundStyle(AppTheme.Palette.open)
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -1878,6 +1899,9 @@ struct TranscriptPlayhead: View {
 /// hole in it must say so where the proposals are, not in a manifest.
 struct ProposalLayerNotice: View {
     let layer: TranscriptProposalLayer
+    /// False when the header already prints the run's missing ranges, which
+    /// say the same thing with the places named.
+    var showsCoverage: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.tight) {
@@ -1889,7 +1913,7 @@ struct ProposalLayerNotice: View {
             .font(AppTheme.Typography.meta)
             .foregroundStyle(AppTheme.Palette.inkSecondary)
 
-            if !layer.sourceCoverage.complete {
+            if showsCoverage, !layer.sourceCoverage.complete {
                 Label {
                     Text(appLocalized("\(SegmentAttributionSummary.overlap(layer.sourceCoverage.missingDurationS)) of this recording produced no transcript, so these proposals cover \(TranscriptPlaybackTimeline.clock(layer.sourceCoverage.processedDurationS)) of \(TranscriptPlaybackTimeline.clock(layer.sourceCoverage.inputDurationS))."))
                 } icon: {
@@ -1930,6 +1954,9 @@ struct TranscriptSegmentColumn: View {
     /// Non-nil only while the proposal layer is the one being shown, so a
     /// proposal can never appear on a layer the reader did not ask for.
     var proposalLayer: TranscriptProposalLayer?
+    /// Where the recording produced no transcript, each shown as a row at its
+    /// place in time so a reader sees where the hole is.
+    var gaps: [TranscriptGap] = []
     let play: (TranscriptSegment) -> Void
     let select: (TranscriptSegment) -> Void
     let rename: (TranscriptSegment) -> Void
@@ -1944,26 +1971,32 @@ struct TranscriptSegmentColumn: View {
                         .foregroundStyle(AppTheme.Palette.inkSecondary)
                         .padding(.vertical, AppTheme.Spacing.screen)
                 }
-                ForEach(segments) { item in
-                    TranscriptSegmentRow(
-                        item: item,
-                        attribution: attribution(for: item),
-                        proposal: proposalLayer?.proposal(at: item.index),
-                        displaySpeaker: displayName(item.segment.speaker),
-                        speakerName: displayName,
-                        speakerColor: { roster.color(for: $0) },
-                        text: text(item),
-                        reviewState: reviewState(for: item),
-                        isFocused: focusedSegmentIndex == item.index,
-                        isPlaying: playingSegmentIndex == item.index,
-                        isSelected: selectedSegmentIDs.contains(item.id),
-                        isLast: item.id == segments.last?.id,
-                        play: { play(item) },
-                        select: { select(item) },
-                        rename: { rename(item) },
-                        review: { review(item) }
-                    )
-                    .id(item.id)
+                let entries = self.entries
+                ForEach(entries) { entry in
+                    switch entry {
+                    case let .segment(item):
+                        TranscriptSegmentRow(
+                            item: item,
+                            attribution: attribution(for: item),
+                            proposal: proposalLayer?.proposal(at: item.index),
+                            displaySpeaker: displayName(item.segment.speaker),
+                            speakerName: displayName,
+                            speakerColor: { roster.color(for: $0) },
+                            text: text(item),
+                            reviewState: reviewState(for: item),
+                            isFocused: focusedSegmentIndex == item.index,
+                            isPlaying: playingSegmentIndex == item.index,
+                            isSelected: selectedSegmentIDs.contains(item.id),
+                            isLast: entry.id == entries.last?.id,
+                            play: { play(item) },
+                            select: { select(item) },
+                            rename: { rename(item) },
+                            review: { review(item) }
+                        )
+                        .id(item.id)
+                    case let .gap(gap):
+                        TranscriptGapRow(gap: gap, isLast: entry.id == entries.last?.id)
+                    }
                 }
             } header: {
                 TranscriptColumnHeader()
@@ -1973,6 +2006,30 @@ struct TranscriptSegmentColumn: View {
         .padding(.horizontal, AppTheme.Spacing.screen)
         .padding(.bottom, AppTheme.Spacing.screen)
         .frame(maxWidth: .infinity)
+    }
+
+    private var entries: [TranscriptRowEntry] {
+        Self.entries(segments: segments, gaps: gaps)
+    }
+
+    /// The rows in reading order: every segment, with each gap placed before
+    /// the first segment that starts at or after it, or after the last.
+    static func entries(
+        segments: [TranscriptSegment],
+        gaps: [TranscriptGap]
+    ) -> [TranscriptRowEntry] {
+        guard !gaps.isEmpty else { return segments.map(TranscriptRowEntry.segment) }
+        let positions = TranscriptGap.positions(
+            of: gaps,
+            amongSegmentsStartingAt: segments.map(\.segment.startS)
+        )
+        var entries: [TranscriptRowEntry] = []
+        for (index, item) in segments.enumerated() {
+            entries.append(contentsOf: (positions[index] ?? []).map(TranscriptRowEntry.gap))
+            entries.append(.segment(item))
+        }
+        entries.append(contentsOf: (positions[segments.count] ?? []).map(TranscriptRowEntry.gap))
+        return entries
     }
 
     /// The joined conflict record is the evidence of record. The proposal
@@ -2002,6 +2059,67 @@ struct TranscriptSegmentColumn: View {
             needsReview: needsReview(item),
             hasWordingToChoose: !TranscriptReviewTarget(item: item).textAlternatives.isEmpty
         )
+    }
+}
+
+/// One row of the table: a segment, or the place where a stretch of the
+/// recording produced no transcript.
+enum TranscriptRowEntry: Identifiable, Equatable {
+    case segment(TranscriptSegment)
+    case gap(TranscriptGap)
+
+    enum ID: Hashable {
+        case segment(TranscriptSegmentID)
+        case gap(String)
+    }
+
+    var id: ID {
+        switch self {
+        case let .segment(item): .segment(item.id)
+        case let .gap(gap): .gap(gap.id)
+        }
+    }
+}
+
+/// The row at a hole in the record. It keeps the table's columns so the eye
+/// reading down the times finds it where it belongs: the gap's start in the
+/// time column and one sentence in the text column, both in the open colour
+/// beside a glyph, nothing in the speaker or review columns, and the same
+/// hairline as every other row. No fill, no strip.
+struct TranscriptGapRow: View {
+    let gap: TranscriptGap
+    var isLast: Bool = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Color.clear
+                .frame(width: AppTheme.Layout.selectColumn, height: 1)
+            Spacer().frame(width: AppTheme.Layout.columnGap)
+            Text(verbatim: TranscriptPlaybackTimeline.clock(gap.startS))
+                .font(AppTheme.Typography.metaStrong)
+                .monospacedDigit()
+                .lineLimit(1)
+                .foregroundStyle(AppTheme.Palette.open)
+                .frame(width: AppTheme.Layout.timeColumn, alignment: .leading)
+            Spacer().frame(width: AppTheme.Layout.columnGap)
+            Color.clear
+                .frame(width: AppTheme.Layout.evidenceSpan, height: 1)
+            Spacer().frame(width: AppTheme.Layout.textGap)
+            Label {
+                Text(verbatim: gap.sentence())
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+            }
+            .font(AppTheme.Typography.meta)
+            .foregroundStyle(AppTheme.Palette.open)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, AppTheme.Spacing.rowVertical)
+        .overlay(alignment: .bottom) {
+            if !isLast { AppHairline() }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

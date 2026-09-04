@@ -20,8 +20,14 @@
 	<string>%2$@ 중 %1$@ (%3$@)</string>
 	<key>%@ of speech</key>
 	<string>발화의 %@</string>
+	<key>%@ of this recording produced no transcript, from %@. The transcript covers %@ of %@.</key>
+	<string>이 녹음 중 %@ 구간은 전사되지 않았습니다 (%@). 전사본은 전체 %@ 중 %@ 를 다룹니다.</string>
 	<key>%@ of this recording produced no transcript, so these proposals cover %@ of %@.</key>
 	<string>이 녹음 중 %@는 전사문이 없어 이 제안은 %@ / %@만 다룹니다.</string>
+	<key>%@ of this recording produced no transcript. The transcript covers %@ of %@.</key>
+	<string>이 녹음 중 %@ 구간은 전사되지 않았습니다. 전사본은 전체 %@ 중 %@ 를 다룹니다.</string>
+	<key>%@ to %@</key>
+	<string>%@부터 %@까지</string>
 	<key>%@, %@</key>
 	<string>%@, %@</string>
 	<key>%lld bytes</key>
@@ -438,6 +444,10 @@
 	<string>제안된 화자 없음</string>
 	<key>No speaker was active on the speaker timeline during this segment.</key>
 	<string>이 구간 동안 화자 타임라인에서 말한 화자가 없습니다.</string>
+	<key>No transcript for %@ of the recording.</key>
+	<string>녹음 중 %@ 구간은 전사 없음.</string>
+	<key>No transcript from %@ to %@ (%@).</key>
+	<string>%@부터 %@까지 전사 없음 (%@).</string>
 	<key>Noise</key>
 	<string>소음</string>
 	<key>Non-speech event: %@</key>

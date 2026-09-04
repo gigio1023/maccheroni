@@ -642,7 +642,8 @@ struct ScreenSnapshotTests {
         width: CGFloat,
         focused: Int?,
         selected: Set<Int>,
-        rows: Int = 40
+        rows: Int = 40,
+        firstRow: Int = 0
     ) -> some View {
         let run = real.run
         let record = real.record
@@ -676,7 +677,8 @@ struct ScreenSnapshotTests {
         let unattributed = run.transcript.segments.count { !SpeakerRoster.isAttributed($0.speaker) }
         let summary = "\(run.transcript.segments.count) segments · \(run.transcript.numSpeakers) speakers · \(unattributed) without a speaker · \(queue.count) to review"
         let playback = TranscriptPlaybackController()
-        let visible = Array(run.segments.prefix(rows))
+        let missingCoverage = TranscriptMissingCoverage.load(run: run, record: record)
+        let visible = Array(run.segments.dropFirst(firstRow).prefix(rows))
         let selectedIDs = Set(visible.filter { selected.contains($0.index) }.map(\.id))
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.medium) {
@@ -692,13 +694,14 @@ struct ScreenSnapshotTests {
                     focusedSegmentIndex: focused,
                     step: { _ in },
                     missingEvidence: missingEvidence,
+                    missingCoverage: missingCoverage,
                     playback: playback,
                     totalDurationS: run.manifest.coverage.inputDurationS,
                     togglePlayback: {},
                     seek: { _ in }
                 )
                 if layer == .proposed, let proposalLayer {
-                    ProposalLayerNotice(layer: proposalLayer)
+                    ProposalLayerNotice(layer: proposalLayer, showsCoverage: missingCoverage == nil)
                 }
             }
             .frame(maxWidth: AppTheme.Layout.measure, alignment: .leading)
@@ -719,6 +722,9 @@ struct ScreenSnapshotTests {
                 selectedSegmentIDs: selectedIDs,
                 evidenceIsLoaded: true,
                 proposalLayer: layer == .proposed ? proposalLayer : nil,
+                gaps: missingCoverage?.gaps.filter { gap in
+                    visible.contains { $0.segment.startS >= gap.startS }
+                } ?? [],
                 play: { _ in },
                 select: { _ in },
                 rename: { _ in },
@@ -904,6 +910,85 @@ struct ScreenSnapshotTests {
             let proposedUnderline = try #require(underlines[.proposed]?[schemeLabel])
             #expect(sourceUnderline != proposedUnderline)
             #expect(proposedUnderline.lowerBound > sourceUnderline.upperBound)
+        }
+    }
+
+    // MARK: - Screens: a run short of its input
+
+    /// The shipped view over the synthetic partial run: the notice under the
+    /// tabs naming the lost range, and the gap row at its place among the
+    /// rows. Read back by OCR. The real 20.7-minute run's own gap, at 14:31,
+    /// is rendered through `composedTranscript` when that run is present.
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
+    func partialTranscriptScreen() throws {
+        let root = try derivedLayerTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try derivedLayerRunFixture(in: root, complete: false)
+        let run = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+        let record = Self.record(
+            named: "Partial run fixture",
+            runURL: fixture.runURL,
+            durationS: 8,
+            state: .hasConflicts,
+            speakerNames: ["SPEAKER_00": "Jina", "SPEAKER_01": "Minsu"]
+        )
+        let model = try Self.model()
+        var readings: [String: String] = [:]
+        for (widthLabel, width) in Self.widths {
+            for (schemeLabel, scheme) in Self.schemes {
+                let name = "\(Self.tag)-partial-\(widthLabel)-\(schemeLabel)"
+                try Self.host(
+                    Self.shippedScreen(
+                        TranscriptView(model: model, record: record, run: run, proposal: nil)
+                    ),
+                    width: width, height: 700, scheme: scheme, name: name
+                )
+                if scheme == .light {
+                    let lines = try Self.recognisedText(in: Self.outRoot.appendingPathComponent("\(name).png"))
+                    print("partial \(widthLabel) OCR lines: \(lines.count)")
+                    readings[widthLabel] = Self.compact(lines.joined(separator: "\n"))
+                }
+            }
+        }
+        for (widthLabel, text) in readings {
+            #expect(text.contains(Self.compact("2.0 sec of this recording produced no transcript, from 00:06 to 00:08")), Comment(rawValue: widthLabel))
+            #expect(text.contains(Self.compact("The transcript covers 00:06 of 00:08")), Comment(rawValue: widthLabel))
+            #expect(text.contains(Self.compact("No transcript from 00:06 to 00:08 (2.0 sec)")), Comment(rawValue: widthLabel))
+            // The gap row sits between the third and fourth segments.
+            let two = text.range(of: Self.compact("Two"))
+            // The row's sentence, not the header's, which also starts this way.
+            let gap = text.range(of: Self.compact("No transcript from 00:06 to 00:08 (2.0 sec)."))
+            let three = text.range(of: Self.compact("Three"))
+            if let two, let gap, let three {
+                #expect(two.lowerBound < gap.lowerBound, Comment(rawValue: widthLabel))
+                #expect(gap.lowerBound < three.lowerBound, Comment(rawValue: widthLabel))
+            } else {
+                Issue.record("rows or gap not read back at \(widthLabel)")
+            }
+        }
+        // The real run, composed from the shipped views around its own gap at
+        // 14:31: the rows on either side of the lost range and the row between.
+        guard Self.exists(Self.proposalRunURL) else {
+            print("SKIP partial real: real run absent")
+            return
+        }
+        let real = try Self.realRun(
+            at: Self.proposalRunURL, name: "Weekly product sync", state: .hasConflicts
+        )
+        let coverage = try #require(TranscriptMissingCoverage.load(run: real.run, record: real.record))
+        print("partial real gaps: \(coverage.gaps.map { [$0.startS, $0.endS] })")
+        for (schemeLabel, scheme) in Self.schemes {
+            try Self.host(
+                Self.composedTranscript(
+                    real: real, proposal: nil, layer: .speakerLabelled, width: 1_400,
+                    focused: nil, selected: [], rows: 8,
+                    firstRow: max(0, (real.run.segments.firstIndex {
+                        $0.segment.startS >= (coverage.gaps.first?.startS ?? 0)
+                    } ?? 0) - 4)
+                ),
+                width: 1_400, height: 900, scheme: scheme,
+                name: "\(Self.tag)-partial-real-\(schemeLabel)"
+            )
         }
     }
 

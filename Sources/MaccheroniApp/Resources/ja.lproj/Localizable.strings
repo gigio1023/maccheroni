@@ -20,8 +20,14 @@
 	<string>%2$@ 中 %1$@ (%3$@)</string>
 	<key>%@ of speech</key>
 	<string>発話の %@</string>
+	<key>%@ of this recording produced no transcript, from %@. The transcript covers %@ of %@.</key>
+	<string>この録音のうち %@ は文字起こしされませんでした（%@）。文字起こしは %@ / %@ をカバーしています。</string>
 	<key>%@ of this recording produced no transcript, so these proposals cover %@ of %@.</key>
 	<string>この録音のうち %@ は文字起こしが得られなかったため、これらの提案は %@ / %@ を対象としています。</string>
+	<key>%@ of this recording produced no transcript. The transcript covers %@ of %@.</key>
+	<string>この録音のうち %@ は文字起こしされませんでした。文字起こしは %@ / %@ をカバーしています。</string>
+	<key>%@ to %@</key>
+	<string>%@〜%@</string>
 	<key>%@, %@</key>
 	<string>%@、%@</string>
 	<key>%lld bytes</key>
@@ -438,6 +444,10 @@
 	<string>話者の提案なし</string>
 	<key>No speaker was active on the speaker timeline during this segment.</key>
 	<string>このセグメントの間、話者タイムライン上で話していた話者はいません。</string>
+	<key>No transcript for %@ of the recording.</key>
+	<string>録音のうち %@ は文字起こしなし。</string>
+	<key>No transcript from %@ to %@ (%@).</key>
+	<string>%@〜%@ は文字起こしなし（%@）。</string>
 	<key>Noise</key>
 	<string>雑音</string>
 	<key>Non-speech event: %@</key>

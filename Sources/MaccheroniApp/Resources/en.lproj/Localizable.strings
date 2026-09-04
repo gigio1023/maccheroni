@@ -20,8 +20,14 @@
 	<string>%@ of %@ (%@)</string>
 	<key>%@ of speech</key>
 	<string>%@ of speech</string>
+	<key>%@ of this recording produced no transcript, from %@. The transcript covers %@ of %@.</key>
+	<string>%@ of this recording produced no transcript, from %@. The transcript covers %@ of %@.</string>
 	<key>%@ of this recording produced no transcript, so these proposals cover %@ of %@.</key>
 	<string>%@ of this recording produced no transcript, so these proposals cover %@ of %@.</string>
+	<key>%@ of this recording produced no transcript. The transcript covers %@ of %@.</key>
+	<string>%@ of this recording produced no transcript. The transcript covers %@ of %@.</string>
+	<key>%@ to %@</key>
+	<string>%@ to %@</string>
 	<key>%@, %@</key>
 	<string>%@, %@</string>
 	<key>%lld bytes</key>
@@ -438,6 +444,10 @@
 	<string>No speaker proposed</string>
 	<key>No speaker was active on the speaker timeline during this segment.</key>
 	<string>No speaker was active on the speaker timeline during this segment.</string>
+	<key>No transcript for %@ of the recording.</key>
+	<string>No transcript for %@ of the recording.</string>
+	<key>No transcript from %@ to %@ (%@).</key>
+	<string>No transcript from %@ to %@ (%@).</string>
 	<key>Noise</key>
 	<string>Noise</string>
 	<key>Non-speech event: %@</key>

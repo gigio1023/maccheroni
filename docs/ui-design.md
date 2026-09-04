@@ -326,6 +326,42 @@ speech, in the primary ink beside a speaker cell. The field's term is a
   vocabulary. Every row, speech or event, is therefore byte-exact against the
   run. The segments-JSON export is the document itself and keeps the flag.
 
+#### A run that lost a stretch of the recording
+
+A `partial` run promoted everything it could and lost a range; under D51 it
+writes `primary/partial-coverage.json` naming each lost range, and the
+measured run lost `[871.552, 902.112) s`, 30.56 s of 1243.08. The transcript
+screen states the hole in two places so a reader sees where it is, not only
+that one exists:
+
+- **The notice**, in the header under the tabs on every layer: *30.6 sec of
+  this recording produced no transcript, from 14:31 to 15:02. The transcript
+  covers 20:12 of 20:43.* It is the open colour beside the warning glyph, the
+  one use of status colour the header already had for a missing range, and it
+  names every range when there are several. A run short of its input whose
+  record is missing still gets the sentence without the ranges, so the hole is
+  never silent (judgment rule 2). The proposal notice's own coverage sentence
+  stands down when this one is present, because this one says the same thing
+  with the places named.
+- **The gap row**, at the hole's place in the row order: before the first
+  segment that starts at or after it, or after the last. It keeps the table's
+  columns, the gap's start in the time column and one sentence in the text
+  column, *No transcript from 14:31 to 15:02 (30.6 sec).*, both in the open
+  colour beside the glyph, nothing in the speaker or review columns, and the
+  same hairline as any row. No fill, no strip. A search narrows the rows to
+  the matches and shows no gap rows; the notice stays.
+- **Copy and export.** The clipboard prints the notice sentence on the line
+  under the layer header on every layer, and a whole-transcript copy also
+  prints each gap at its place among the rows, in the row's own timestamp
+  form and with no speaker: `[00:14:31.552 – 00:15:02.112] No transcript for
+  30.6 sec of the recording.` A selection copy prints the sentence under the
+  header only: the rows a reader chose are the rows they get. The Markdown
+  export opens with the sentence and carries the same gap lines; the SRT
+  export carries each gap as a subtitle of its own at its place, renumbering
+  around it, so a player shows the hole while it plays. Speech rows are
+  byte-exact in every format. The segments-JSON export is the document and
+  is unchanged; the manifest and the coverage record name the ranges there.
+
 #### The proposal layer on a row
 
 When the Proposed layer is displayed, every segment the source left
