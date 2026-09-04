@@ -275,7 +275,7 @@ field has no word for the distinction the project needs.
   another speaker. Human-in-the-loop labelling calls the analogous restriction
   *verification-only*.
   `Sources/MaccheroniPostprocess/Postprocess.swift:411`, decided at
-  `PROJECT.md:644`.
+  `PROJECT.md:670`.
 
 ## Glossary
 
@@ -310,7 +310,7 @@ field has no word for the distinction the project needs.
   post-editing evaluation know the concept under names such as
   *over-correction*, and no single established name was confirmed.
   `benchmarks/scripts/scoring/score_corrected.py:905`, project status in
-  decision D44 at `PROJECT.md:511`
+  decision D44 at `PROJECT.md:537`
 
 ## Measurement
 
@@ -338,7 +338,7 @@ field has no word for the distinction the project needs.
 - **held-out observation** [field]: An observation made on data that was not
   used to choose the method, the threshold, or the condition being judged.
   Required, together with a predeclared calibration method, before a measurement
-  campaign can support a quality claim. `PROJECT.md:560`
+  campaign can support a quality claim. `PROJECT.md:586`
 
 ## Identity
 

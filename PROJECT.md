@@ -118,9 +118,12 @@ attribution: 110 of 248 merged segments carry no speaker, against a 43.4 % overl
 share and 761 diarization turns averaging 2.11 s. The acoustic evidence for most of
 those segments exists and sits just under the assignment thresholds rather than being
 absent. So the open question is where the remaining judgment should come from, how much
-of it a reader must verify, and what a non-acoustic proposal may claim. The public
-component measurements still do not combine mixed-language speech with multiple scored
-speakers, and `correct_to_incorrect` remains unmeasured, with one observed instance: a
+of it a reader must verify, and what a non-acoustic proposal may claim. The first
+measurement of that claim, on one English AMI clip on 2026-09-04, found the model's
+confirmations no more precise than the acoustic top-ranked candidate alone (11 of 15
+against 15 of 19 on clear segments) and its declines mostly on segments the reference
+itself calls mixed. The public component measurements still do not combine
+mixed-language speech with multiple scored speakers, and `correct_to_incorrect` remains unmeasured, with one observed instance: a
 glossary entry inserted twice where the speaker said something else.
 
 ## 6. Current Position
@@ -156,19 +159,33 @@ glossary entry inserted twice where the speaker said something else.
   The threshold declaration is still a placeholder, so none of this is a quality pass,
   a profile promotion, or closure of C3.
 - **next** (revised 2026-09-04; the previous `next` listed review findings that the
-  commit recording it had already closed): (1) measure the D50 confirmations and
-  declines against a ground truth on the public AMI evidence. That lane is running and
-  its result is pending; nothing here presumes it. Overturns stay disallowed until a
-  measurement shows them right more often than wrong. (2) One timed human correction
-  pass on the 20.7-minute real meeting, recording only timing and structural metadata.
-  It is the only thing that can answer the north-star question and is still
-  unscheduled. (3) The app defects being fixed in parallel: backend non-speech tokens
-  (`[Silence]`, `[Human Sounds]`, `[Environmental Sounds]`) reaching the text column
-  verbatim on 3 of 248 rows; the switch between two available layers, never exercised
-  in the rendered app; model decline reasons that name speakers by merger ID beside a
-  UI that names them, on 21 of the 51 declines in the D50 set; and a retention policy
-  for the scratch directories a failed or cancelled request keeps under `Requests/`.
-  Then the carried conditions: reopen the C3 fixture only after one uninterrupted
+  commit recording it had already closed): (1) the D50 confirmations and declines were
+  measured on 2026-09-04 against the AMI reference, on the IN1009 audio cut to its
+  annotated span, a declared subset of the sealed fixture, through the shipped profile
+  and the same Codex path as the D50 set (`docs/speaker-proposal-accuracy.md`). Over
+  44 unattributed segments: 24 confirmations, 20 declines; confirmation precision
+  11/15 strict (0.733, 95 % interval 0.48 to 0.89) against 15/19 (0.789) for confirming
+  every top-ranked candidate without a model; the four wrong confirmations are the
+  four segments whose top-ranked candidate was already wrong; the twelve model declines
+  fall on eight reference-mixed segments and four where the acoustics were right; read
+  by hand from eight decline reasons, the speaker the conversation pointed to was right
+  once against four times for the acoustics. On this clip the language layer neither
+  improved nor clearly damaged the top-ranked candidate's precision, and its declines
+  fell mostly where a single-speaker answer does not exist. Overturns stay disallowed;
+  nothing measured argues for loosening D50. Next on this lane: the same measurement
+  on a second clip with overlap, and the full-span run once batch planning splits by
+  target count (see `under review`). (2) One timed human correction pass on the
+  20.7-minute real meeting, recording only timing and structural metadata. It is the
+  only thing that can answer the north-star question, and it was blocked until
+  2026-09-04 by an app defect: the runner threw on a `partial` manifest, so the
+  recording could never be opened in the app. (3) The app defects fixed on 2026-09-04
+  and awaiting review on a draft branch: partial runs open as completed runs with the
+  loss named on the transcript, in exports and in the sidebar; backend non-speech
+  tokens (`[Silence]`, `[Human Sounds]`, `[Environmental Sounds]`) typed as non-speech
+  events instead of reaching the text column as speech; the switch between two
+  available layers rendered through the D48 harness; model decline reasons rendered
+  with display names at read time and written in plain language; and failed-request
+  scratch retention anchored on the run's lifetime. Then the carried conditions: reopen the C3 fixture only after one uninterrupted
   10-minute completion through the shipped profile, and add overlap share and
   backchannel density to its acceptance criteria when reopening, because the current
   TTS candidate is concatenated and carries 0 % overlap; keep the D43 DiCoW lane
@@ -189,9 +206,18 @@ glossary entry inserted twice where the speaker said something else.
   the failure screen's details box, which shows the engine's own message with the run
   ID, path and fingerprint stripped, satisfies the rule that no raw code reaches that
   screen; how the suite count should report tests that cannot run on a fresh clone,
-  since 8 render tests pass without asserting and 6 opt-in lanes skip; generalization to
-  other accents, overlap, and noise; the Codex backend's OS-level read scope; and
-  VibeVoice memory use.
+  since 8 render tests pass without asserting and 6 opt-in lanes skip; whether the
+  language layer earns its place at all, since on one English clip it neither improved
+  nor damaged the acoustic candidate's precision while costing 12 of 36 candidates in
+  coverage; speaker-proposal batch planning, which reserves tokens per target and let
+  one 21-target batch overflow the output budget and lose the whole derived set, so
+  batches should be split by target count rather than the budget raised; the engine's
+  hallucinated text after a recording ends, six French sentences and five non-speech
+  markers on the 55 s AMI tail; existing-run post-processing, which still gates on a
+  complete run, so a partial run is readable but not post-processable from the app;
+  Korean particle agreement after a substituted speaker name in rendered reasons;
+  generalization to other accents, overlap, and noise; the Codex backend's OS-level
+  read scope; and VibeVoice memory use.
 - **success measure**: Retain the north-star question: can 1 important meeting become a
   reliable speaker-attributed record with no more than 30 minutes of human correction?
   Still not a current acceptance gate, because human review time has never been
