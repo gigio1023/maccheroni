@@ -1233,10 +1233,16 @@ public struct SpeakerProposer: Sendable {
                 modelAnswer: modelAnswer
             ))
         }
+        // The sentences below are read by a person, on screen and in the
+        // clipboard, whenever this app has no sentence of its own for the
+        // cause. They are written in plain language and name a speaker only
+        // in the `speaker <id>` form: the ID is what the artifact knows, and
+        // the reading surface renders that form with the reader's own names
+        // at read time. None of the prompt's field names appear in them.
         guard let decision else {
             return decline(
                 .noDecision,
-                reason: "the proposer returned no decision for this segment"
+                reason: "The proposal run returned no answer for this segment, so no speaker is proposed."
             )
         }
         guard let topRanked else {
@@ -1245,14 +1251,14 @@ public struct SpeakerProposer: Sendable {
             if evidence.candidates.isEmpty {
                 return decline(
                     .noAcousticCandidates,
-                    reason: "Declined under confirm-or-decline: no diarization turn overlapped this segment, so there is no top-ranked candidate to confirm. "
+                    reason: "No speaker was active on the speaker timeline during this segment, so there was nobody to confirm and no speaker is proposed. "
                         + Self.modelAnswerClause(decision),
                     modelAnswer: decision
                 )
             }
             return decline(
                 .noTopRankedCandidate,
-                reason: "Declined under confirm-or-decline: the acoustic candidates \(Self.tiedSpeakers(in: evidence.candidates)) hold equal overlap, so there is no top-ranked candidate to confirm. "
+                reason: "\(Self.tiedSpeakers(in: evidence.candidates)) held the same time in this segment, so there was nobody to confirm and no speaker is proposed. "
                     + Self.modelAnswerClause(decision),
                 modelAnswer: decision
             )
@@ -1275,7 +1281,7 @@ public struct SpeakerProposer: Sendable {
                 .map { Self.percent($0.share) } ?? "an unknown share"
             return decline(
                 .modelDisagreedWithTopRankedCandidate,
-                reason: "Declined under confirm-or-decline: the language evidence pointed to speaker \(decision.proposedSpeaker), but the top-ranked candidate is speaker \(topRanked) at \(share) of the overlapped speech, and a proposal may only confirm that candidate. The model's reason: \(decision.reason)",
+                reason: "The conversation pointed to speaker \(decision.proposedSpeaker), but speaker \(topRanked) held the most of this segment's speech, \(share) of it, and only that speaker could be confirmed, so no speaker is proposed. The model's reason: \(decision.reason)",
                 modelAnswer: decision
             )
         }
@@ -1292,17 +1298,20 @@ public struct SpeakerProposer: Sendable {
         }
     }
 
-    /// The speakers sharing the top overlap, named in the order the merger
-    /// ranked them.
+    /// The speakers sharing the top overlap, each in the `speaker <id>` form,
+    /// named in the order the merger ranked them and capitalised to open a
+    /// sentence: "Speaker 0 and speaker 1".
     private static func tiedSpeakers(
         in candidates: [SpeakerCandidateEvidence]
     ) -> String {
         let top = candidates.map(\.overlapS).max() ?? 0
         let names = candidates
             .filter { top - $0.overlapS <= SpeakerProposalConstraint.topRankedMarginS }
-            .map(\.speaker)
-        guard names.count > 1 else { return names.joined() }
-        return names.dropLast().joined(separator: ", ") + " and " + names.last!
+            .map { "speaker \($0.speaker)" }
+        let listed = names.count > 1
+            ? names.dropLast().joined(separator: ", ") + " and " + names.last!
+            : names.joined()
+        return listed.prefix(1).uppercased() + listed.dropFirst()
     }
 
     private static func percent(_ share: Double) -> String {
@@ -1671,6 +1680,22 @@ public enum SpeakerProposalPrompt {
         return (value * 1_000).rounded() / 1_000
     }
 
+    /// How the model is told to write the one field a person reads.
+    ///
+    /// On the first real run the reasons named speakers by bare ID, in
+    /// whichever form the model chose, and leaned on this prompt's own
+    /// vocabulary — `acoustic`, `candidate`, `top-ranked`, `confirm`,
+    /// `overlap`, `share`, `turn`, `target` — which means nothing to a reader
+    /// who has not seen the prompt. Two rules fix that at the source. The
+    /// speaker form is fixed to `speaker <id>`, because the artifact must keep
+    /// the merger's IDs (display names are assigned later and change) and
+    /// that is the one form the reading surface can render with a name
+    /// safely: a bare `1` is also a segment number and half of `0.5`. And the
+    /// sentence is written for the transcript's reader, in the transcript's
+    /// language, about the conversation rather than about the evidence
+    /// fields. The output schema is unchanged.
+    static let reasonInstruction = "Write each reason for a reader of the transcript who has not seen this instruction and will not see these fields. Say what in the conversation supports or undermines the speaker: who asked, who is answering, whose sentence continues. Refer to a speaker only as the word speaker followed by its exact id from known_speakers, for example speaker 0, and never by a name, a role, or a bare number. Do not mention candidates, shares, overlap, seconds, acoustics, diarization, targets, confirmation, or any field name of this input. Write in the language the transcript is written in."
+
     fileprivate static func make(
         segments: [IndexedTextSegment],
         document: SegmentsDocument,
@@ -1712,6 +1737,7 @@ public enum SpeakerProposalPrompt {
             "acoustic_candidates lists the speakers whose diarization turns overlapped a target segment, how many seconds each held, and each one's share of the segment's attributed time. top_ranked_candidate names the candidate with the largest share, or is null when no candidate leads: none overlapped the segment, or the top candidates tie. What you add is the conversation: who was answering whom, who was mid-sentence, who the surrounding turns belong to.",
             "Propose only to confirm top_ranked_candidate: when the conversation supports that speaker, set proposed_speaker to top_ranked_candidate. Never propose any other speaker, even when the conversation points to one, and never invent a speaker.",
             "Decline when top_ranked_candidate is null, when the conversation gives no real reason to confirm that candidate, or when the conversation points to a different speaker; in that last case, name in the reason the speaker the conversation pointed to. A decline is a correct answer; a guess dressed as a proposal is not.",
+            Self.reasonInstruction,
             "Return exactly one JSON object with this shape and no commentary:",
             #"{"speaker_proposals":[{"segment_index":0,"proposed_speaker":"0","disposition":"propose","reason":"brief reason"}]}"#,
             #"The only root key is speaker_proposals. Every entry has exactly segment_index, proposed_speaker, disposition, and reason. disposition is propose or decline. When disposition is decline, proposed_speaker must be the empty string. Answer exactly once for every segment whose target is true, and for no other segment."#,

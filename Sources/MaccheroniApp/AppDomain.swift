@@ -397,6 +397,173 @@ struct LoadedRun: Equatable, Sendable {
     }
 }
 
+extension LibraryRecord {
+    /// The name the reading surface shows for one global speaker ID: the
+    /// reader's own name for it when one is set, and the roster's worded
+    /// fallback otherwise, so an ID never reaches the screen as a bare digit.
+    func displayName(forSpeaker speaker: String, locale: Locale? = nil) -> String {
+        if let name = speakerNames[speaker], !name.isEmpty { return name }
+        return SpeakerRoster.fallbackName(for: speaker, locale: locale)
+    }
+}
+
+extension LoadedRun {
+    /// The global speaker IDs this run resolved: what a proposal reason may
+    /// legitimately refer to. `UNKNOWN` and `UNASSIGNED` are not speakers.
+    var resolvedSpeakerIDs: Set<String> {
+        Set(effectiveSourceTranscript.segments.map(\.speaker))
+            .subtracting(UnattributedSpeaker.labels)
+    }
+
+    /// The speaker-proposal document with every speaker reference in its
+    /// reasons rendered with the record's current display names.
+    ///
+    /// Computed at read time and never stored: the artifact keeps the
+    /// merger's IDs, because a display name is assigned by the reader later,
+    /// lives only on the library record, and can change after the proposal
+    /// exists. Every ID-bearing field — `proposedSpeaker`,
+    /// `topRankedCandidate`, the candidates — is left as the ID; only the
+    /// sentences change. See `SpeakerReasonRendering`.
+    func speakerProposal(
+        renderedFor record: LibraryRecord,
+        locale: Locale? = nil
+    ) -> SpeakerProposalDocument? {
+        guard let speakerProposal else { return nil }
+        return SpeakerReasonRendering.render(
+            speakerProposal,
+            speakers: resolvedSpeakerIDs
+        ) { record.displayName(forSpeaker: $0, locale: locale) }
+    }
+}
+
+/// Renders the speaker references in a proposal reason with display names.
+///
+/// The proposal artifact names speakers by the merger's global speaker ID,
+/// `0`, `1`, and so on, while the reading surface shows the reader's names
+/// for them. The two cannot be reconciled in the artifact: names are assigned
+/// after the proposal exists and change afterwards. So the artifact keeps the
+/// IDs and this substitutes them when a sentence is read.
+///
+/// A bare ID is not a safe token — `1` is also a segment number, a count, and
+/// half of `0.5` — so the only forms recognised are the ones the prompt asks
+/// the model to write and the runner's own sentences use: the word `speaker`
+/// (any case) or its Korean counterpart `화자`, followed by the exact ID of a
+/// speaker this run resolved, and the Korean ordinal form `0번 화자` that the
+/// first real run's Korean answers also wrote. A reference to an ID the run
+/// does not know is left exactly as written. The one other form accepted is
+/// the runner's pre-2026-09-04 tie sentence, `the acoustic candidates 0 and 1
+/// hold equal overlap`, which sealed artifacts still carry and which named
+/// the tied speakers as bare IDs (D52: a sealed artifact is read through its
+/// legacy form, never rewritten).
+enum SpeakerReasonRendering {
+    /// `reason` with each recognised reference replaced by `displayName(id)`.
+    static func render(
+        _ reason: String,
+        speakers: some Sequence<String>,
+        displayName: (String) -> String
+    ) -> String {
+        guard let alternation = idAlternation(speakers), !reason.isEmpty else {
+            return reason
+        }
+        var rendered = reason
+        // The legacy tie clause first: its IDs are bare and only recognisable
+        // by the sentence around them.
+        rendered = replacing(
+            pattern: "(?<=the acoustic candidates )(?:\(alternation))(?:, (?:\(alternation)))* and (?:\(alternation))(?= hold equal overlap)",
+            in: rendered
+        ) { clause in
+            replacing(
+                pattern: "(?<![\\p{N}A-Za-z_])(\(alternation))(?![\\p{N}A-Za-z_])",
+                in: clause
+            ) { displayName($0) }
+        }
+        // The Korean ordinal form puts the ID first: `0번 화자`.
+        rendered = replacing(
+            pattern: "(?<![\\p{N}A-Za-z_])(\(alternation))번[ \u{00A0}]*화자",
+            in: rendered
+        ) { displayName($0) }
+        // Then the token form. The boundary after the ID excludes digits and
+        // Latin letters, so `1` never matches inside `10` and `SPEAKER_0`
+        // never inside `SPEAKER_00`, but lets a Korean particle follow
+        // directly: `화자 0이` is how a Korean answer writes it.
+        return replacing(
+            pattern: "(?<![\\p{L}\\p{N}_])(?:(?i:speaker)|화자)[ \u{00A0}]*(\(alternation))(?![\\p{N}A-Za-z_])",
+            in: rendered
+        ) { displayName($0) }
+    }
+
+    /// The document with every reason rendered and every ID field untouched.
+    static func render(
+        _ document: SpeakerProposalDocument,
+        speakers: some Sequence<String>,
+        displayName: (String) -> String
+    ) -> SpeakerProposalDocument {
+        var rendered = document
+        for index in rendered.proposals.indices {
+            rendered.proposals[index].reason = render(
+                rendered.proposals[index].reason,
+                speakers: speakers,
+                displayName: displayName
+            )
+        }
+        for index in rendered.declined.indices {
+            rendered.declined[index].reason = render(
+                rendered.declined[index].reason,
+                speakers: speakers,
+                displayName: displayName
+            )
+            if let answer = rendered.declined[index].modelAnswer {
+                rendered.declined[index].modelAnswer?.reason = render(
+                    answer.reason,
+                    speakers: speakers,
+                    displayName: displayName
+                )
+            }
+        }
+        return rendered
+    }
+
+    /// The known IDs as one alternation, longest first so that where one ID
+    /// is a prefix of another the longer one is tried first. `nil` when there
+    /// is nothing to recognise.
+    private static func idAlternation(_ speakers: some Sequence<String>) -> String? {
+        let ids = Set(speakers.filter { !$0.isEmpty })
+            .sorted { ($0.count, $0) > ($1.count, $1) }
+        guard !ids.isEmpty else { return nil }
+        return ids.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
+    }
+
+    /// Every match of `pattern` in `text` replaced by `replacement` applied to
+    /// its first capture group, or to the whole match when there is none.
+    /// Built by hand rather than through a template so that a display name
+    /// containing `$` or a backslash is inserted literally.
+    private static func replacing(
+        pattern: String,
+        in text: String,
+        with replacement: (String) -> String
+    ) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let whole = NSRange(text.startIndex..., in: text)
+        var output = ""
+        var cursor = text.startIndex
+        for match in regex.matches(in: text, range: whole) {
+            guard let matchRange = Range(match.range, in: text) else { continue }
+            let captured: String
+            if match.numberOfRanges > 1,
+               let range = Range(match.range(at: 1), in: text) {
+                captured = String(text[range])
+            } else {
+                captured = String(text[matchRange])
+            }
+            output += text[cursor ..< matchRange.lowerBound]
+            output += replacement(captured)
+            cursor = matchRange.upperBound
+        }
+        output += text[cursor...]
+        return output
+    }
+}
+
 struct TranscriptSegmentID: Hashable, Sendable {
     var runID: String
     var index: Int

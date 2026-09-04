@@ -239,8 +239,11 @@ import Testing
         #expect(decline.cause == .noAcousticCandidates)
         #expect(decline.topRankedCandidate == nil)
         #expect(decline.modelAnswer == answer)
+        // The runner's own sentence is read by a person whenever this app
+        // has no sentence of its own for the cause, so it is plain language
+        // that names speakers only in the renderable `speaker <id>` form.
         #expect(decline.reason.contains(
-            "no diarization turn overlapped this segment"
+            "No speaker was active on the speaker timeline during this segment, so there was nobody to confirm and no speaker is proposed."
         ))
         #expect(decline.reason.contains(
             "The model proposed speaker 1: continues the same speaker's turn"
@@ -377,6 +380,17 @@ import Testing
         #expect(parts.instruction.contains("Propose only to confirm top_ranked_candidate"))
         #expect(parts.instruction.contains("Never propose any other speaker"))
         #expect(parts.instruction.contains("Decline when top_ranked_candidate is null"))
+        // The one field a person reads is written for that person: speakers
+        // only in the `speaker <id>` form the reading surface can render with
+        // a name, none of this prompt's own vocabulary, in the transcript's
+        // language. The schema is untouched.
+        #expect(parts.instruction.contains(SpeakerProposalPrompt.reasonInstruction))
+        #expect(SpeakerProposalPrompt.reasonInstruction.contains("for example speaker 0"))
+        #expect(SpeakerProposalPrompt.reasonInstruction.contains("never by a name, a role, or a bare number"))
+        for leaked in ["candidates", "shares", "overlap", "seconds", "acoustics", "diarization", "targets", "confirmation"] {
+            #expect(SpeakerProposalPrompt.reasonInstruction.contains(leaked), "the instruction must forbid \(leaked)")
+        }
+        #expect(SpeakerProposalPrompt.reasonInstruction.contains("language the transcript is written in"))
         #expect(parts.input["known_speakers"] as? [String] == ["0", "1"])
         let segments = try #require(parts.input["segments"] as? [[String: Any]])
         #expect(segments.count == 5)
@@ -408,6 +422,32 @@ import Testing
         #expect(segments[1]["end_s"] == nil)
     }
 
+    /// The instruction is a fixed overhead on every batch. It must stay a
+    /// small fraction of the prompt budget so the planner still packs real
+    /// segments, and the fixture must still fit in one batch under the
+    /// policy the proposal lane runs on; both are checked here rather than
+    /// assumed after the 2026-09-04 wording change. Measured: 1,855 bytes
+    /// before that change, 2,434 after. The local backend's 2,048-byte budget
+    /// was already below the old instruction plus one segment, so it could
+    /// not run a proposal before and cannot now; the Codex budget is the one
+    /// a proposal actually runs under, and no budget is changed here.
+    @Test
+    func theSpeakerPromptInstructionLeavesTheBudgetToTheSegments() async throws {
+        let recorder = SpeakerPromptRecorder()
+        let result = try await SpeakerProposer(
+            backend: StubSpeakerProposalBackend(decisions: [], recorder: recorder)
+        ).propose(speakerProposalRequest())
+        let prompt = try #require(recorder.prompts.first)
+        let parts = try correctionPromptParts(prompt)
+        let instructionBytes = parts.instruction.utf8.count
+        let policy = CodexPostprocessBackend.defaultBatchPolicy
+        #expect(policy.maximumPromptUTF8Bytes == 16_384)
+        #expect(instructionBytes * 4 <= policy.maximumPromptUTF8Bytes)
+        #expect(prompt.utf8.count <= policy.maximumPromptUTF8Bytes)
+        #expect(result.manifestPostprocess.batching?.batchesPlanned == 1)
+        #expect(result.document.batches.map(\.promptUTF8Bytes) == [prompt.utf8.count])
+    }
+
     // MARK: Confirm-or-decline (PROJECT.md D50)
 
     @Test
@@ -429,7 +469,7 @@ import Testing
         #expect(decline.cause == .modelDisagreedWithTopRankedCandidate)
         #expect(decline.topRankedCandidate == "0")
         #expect(decline.modelAnswer == answer)
-        #expect(decline.reason == "Declined under confirm-or-decline: the language evidence pointed to speaker 1, but the top-ranked candidate is speaker 0 at 57% of the overlapped speech, and a proposal may only confirm that candidate. The model's reason: replies to the question speaker 0 just asked")
+        #expect(decline.reason == "The conversation pointed to speaker 1, but speaker 0 held the most of this segment's speech, 57% of it, and only that speaker could be confirmed, so no speaker is proposed. The model's reason: replies to the question speaker 0 just asked")
         // The acoustic evidence beside the decline is the merger's, untouched.
         #expect(decline.acousticOutcome == "no_dominant_speaker")
         #expect(decline.acousticCandidates == speakerProposalEvidence()[0].candidates)
@@ -453,8 +493,8 @@ import Testing
             #expect(decline.cause == .noTopRankedCandidate)
             #expect(decline.topRankedCandidate == nil)
             #expect(decline.modelAnswer == answer)
-            #expect(decline.reason.contains(
-                "the acoustic candidates 0 and 1 hold equal overlap, so there is no top-ranked candidate to confirm"
+            #expect(decline.reason.hasPrefix(
+                "Speaker 0 and speaker 1 held the same time in this segment, so there was nobody to confirm and no speaker is proposed. "
             ))
             #expect(decline.reason.contains(answer.reason))
         }
