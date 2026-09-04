@@ -239,8 +239,11 @@ import Testing
         #expect(decline.cause == .noAcousticCandidates)
         #expect(decline.topRankedCandidate == nil)
         #expect(decline.modelAnswer == answer)
+        // The runner's own sentence is read by a person whenever this app
+        // has no sentence of its own for the cause, so it is plain language
+        // that names speakers only in the renderable `speaker <id>` form.
         #expect(decline.reason.contains(
-            "no diarization turn overlapped this segment"
+            "No speaker was active on the speaker timeline during this segment, so there was nobody to confirm and no speaker is proposed."
         ))
         #expect(decline.reason.contains(
             "The model proposed speaker 1: continues the same speaker's turn"
@@ -377,6 +380,17 @@ import Testing
         #expect(parts.instruction.contains("Propose only to confirm top_ranked_candidate"))
         #expect(parts.instruction.contains("Never propose any other speaker"))
         #expect(parts.instruction.contains("Decline when top_ranked_candidate is null"))
+        // The one field a person reads is written for that person: speakers
+        // only in the `speaker <id>` form the reading surface can render with
+        // a name, none of this prompt's own vocabulary, in the transcript's
+        // language. The schema is untouched.
+        #expect(parts.instruction.contains(SpeakerProposalPrompt.reasonInstruction))
+        #expect(SpeakerProposalPrompt.reasonInstruction.contains("for example speaker 0"))
+        #expect(SpeakerProposalPrompt.reasonInstruction.contains("never by a name, a role, or a bare number"))
+        for leaked in ["candidates", "shares", "overlap", "seconds", "acoustics", "diarization", "targets", "confirmation"] {
+            #expect(SpeakerProposalPrompt.reasonInstruction.contains(leaked), "the instruction must forbid \(leaked)")
+        }
+        #expect(SpeakerProposalPrompt.reasonInstruction.contains("language the transcript is written in"))
         #expect(parts.input["known_speakers"] as? [String] == ["0", "1"])
         let segments = try #require(parts.input["segments"] as? [[String: Any]])
         #expect(segments.count == 5)
@@ -408,6 +422,200 @@ import Testing
         #expect(segments[1]["end_s"] == nil)
     }
 
+    /// The instruction is a fixed overhead on every batch. It must stay a
+    /// small fraction of the prompt budget so the planner still packs real
+    /// segments, and the fixture must still fit in one batch under the
+    /// policy the proposal lane runs on; both are checked here rather than
+    /// assumed after the 2026-09-04 wording change. Measured: 1,855 bytes
+    /// before that change, 2,434 after. The local backend's 2,048-byte budget
+    /// was already below the old instruction plus one segment, so it could
+    /// not run a proposal before and cannot now; the Codex budget is the one
+    /// a proposal actually runs under, and no budget is changed here.
+    @Test
+    func theSpeakerPromptInstructionLeavesTheBudgetToTheSegments() async throws {
+        let recorder = SpeakerPromptRecorder()
+        let result = try await SpeakerProposer(
+            backend: StubSpeakerProposalBackend(decisions: [], recorder: recorder)
+        ).propose(speakerProposalRequest())
+        let prompt = try #require(recorder.prompts.first)
+        let parts = try correctionPromptParts(prompt)
+        let instructionBytes = parts.instruction.utf8.count
+        let policy = CodexPostprocessBackend.defaultBatchPolicy
+        #expect(policy.maximumPromptUTF8Bytes == 16_384)
+        #expect(instructionBytes * 4 <= policy.maximumPromptUTF8Bytes)
+        #expect(prompt.utf8.count <= policy.maximumPromptUTF8Bytes)
+        #expect(result.manifestPostprocess.batching?.batchesPlanned == 1)
+        #expect(result.document.batches.map(\.promptUTF8Bytes) == [prompt.utf8.count])
+    }
+
+    // MARK: Non-speech rows are passed through, not examined
+
+    /// A `[Silence]`-style row the ASR adapter flags `non_speech_event` has
+    /// no speaker to find: on the first real run three such rows cost model
+    /// calls and one drew a proposal. The proposer lists it as not examined,
+    /// asks nothing about it, and the artifact still accounts for every
+    /// unattributed segment exactly once.
+    @Test
+    func aNonSpeechRowIsListedAsNotExaminedAndNeverAskedAbout() async throws {
+        var document = speakerProposalDocument()
+        document.segments.append(Segment(
+            speaker: "UNKNOWN",
+            startS: 10,
+            endS: 11,
+            text: "[Silence]",
+            flags: ["non_speech_event"]
+        ))
+        var evidence = speakerProposalEvidence()
+        // The merger measured the row like any other; its evidence is
+        // legitimate and simply unused.
+        evidence.append(SegmentSpeakerEvidence(
+            segmentIndex: 5,
+            outcome: "no_overlapping_turn",
+            candidates: [],
+            timelineCoverage: 0
+        ))
+        let request = SpeakerProposalRequest(
+            document: document,
+            evidence: evidence,
+            sourceSegmentsSHA256: Self.sourceHash,
+            sourceCoverage: speakerProposalCoverage()
+        )
+        let recorder = SpeakerPromptRecorder()
+        let result = try await SpeakerProposer(
+            backend: StubSpeakerProposalBackend(decisions: [
+                SpeakerProposalDecision(
+                    segmentIndex: 1,
+                    proposedSpeaker: "0",
+                    disposition: .propose,
+                    reason: "speaker 0 keeps the floor"
+                ),
+            ], recorder: recorder)
+        ).propose(request)
+
+        let parts = try correctionPromptParts(try #require(recorder.prompts.first))
+        let prompted = try #require(parts.input["segments"] as? [[String: Any]])
+        #expect(prompted.map { $0["segment_index"] as? Int } == [0, 1, 2, 3, 4])
+        #expect(result.document.proposals.map(\.segmentIndex) == [1])
+        #expect(result.document.declined.map(\.segmentIndex) == [3, 4])
+        #expect(result.document.notExamined == [
+            SpeakerProposalSkip(segmentIndex: 5, reason: .nonSpeechEvent),
+        ])
+        #expect(result.document.batches.map(\.segmentIndices) == [[1, 3, 4]])
+
+        // On the wire, and absent on an artifact written before the field.
+        let encoded = try JSONEncoder().encode(result.document)
+        let object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        let listed = try #require(object["not_examined"] as? [[String: Any]])
+        #expect(listed.count == 1)
+        #expect(listed[0]["segment_index"] as? Int == 5)
+        #expect(listed[0]["reason"] as? String == "non_speech_event")
+        var legacy = object
+        legacy["not_examined"] = nil
+        let decoded = try JSONDecoder().decode(
+            SpeakerProposalDocument.self,
+            from: JSONSerialization.data(withJSONObject: legacy)
+        )
+        #expect(decoded.notExamined == nil)
+
+        // An answer about the row is an answer about a segment the batch did
+        // not ask about.
+        await #expect(throws: PostprocessError.speakerDecisionOutOfRange(5)) {
+            _ = try await SpeakerProposer(
+                backend: StubSpeakerProposalBackend(decisions: [
+                    SpeakerProposalDecision(
+                        segmentIndex: 5,
+                        proposedSpeaker: "",
+                        disposition: .decline,
+                        reason: "silence"
+                    ),
+                ])
+            ).propose(request)
+        }
+    }
+
+    @Test
+    func aNonSpeechRowPassesThroughCorrectionUnchangedAndUnsent() async throws {
+        var input = document()
+        input.segments.insert(Segment(
+            speaker: "S01",
+            startS: 2.4,
+            endS: 2.5,
+            text: "[Silence]",
+            flags: ["non_speech_event"]
+        ), at: 1)
+        let recorder = CorrectionPromptRecorder()
+        let result = try await TranscriptPostprocessor(
+            backend: EchoCorrectionBackend(
+                policy: LocalPostprocessBackend.defaultBatchPolicy,
+                recorder: recorder
+            )
+        ).process(PostprocessRequest(document: input))
+
+        let prompted = try recorder.prompts.flatMap { prompt in
+            try #require(correctionPromptParts(prompt).input["segments"] as? [[String: Any]])
+        }
+        #expect(prompted.map { $0["segment_index"] as? Int } == [0, 2])
+        #expect(result.document == input)
+        #expect(result.conflicts.isEmpty)
+
+        // A proposal on the row cannot be accepted: it is outside every batch.
+        await #expect(throws: PostprocessError.self) {
+            _ = try await TranscriptPostprocessor(
+                backend: StubBackend(proposals: [
+                    PostprocessProposal(
+                        segmentIndex: 1,
+                        replacementText: "(silence)",
+                        disposition: .apply,
+                        reason: "restyled the marker"
+                    ),
+                ])
+            ).process(PostprocessRequest(document: input))
+        }
+    }
+
+    @Test
+    func aNonSpeechRowIsCarriedIntoATranslationVerbatimWithoutBeingSent() async throws {
+        var input = document()
+        input.segments.insert(Segment(
+            speaker: "S01",
+            startS: 2.4,
+            endS: 2.5,
+            text: "[Silence]",
+            flags: ["non_speech_event"]
+        ), at: 1)
+        let recorder = TranslationPromptRecorder()
+        let policy = PostprocessBatchPolicy(
+            maximumPromptUTF8Bytes: 8_192,
+            maximumSegmentsPerBatch: 8,
+            maximumOutputTokens: 1_024,
+            outputTokenLimitStatus: .configured,
+            outputTokenPlanningBudget: 768,
+            outputTokensPerInputUTF8BytePermille: 2_000,
+            baseOutputTokenReserve: 32,
+            perSegmentOutputTokenReserve: 96
+        )
+        let result = try await TranscriptTranslator(
+            backend: EchoTranslationBackend(policy: policy, recorder: recorder)
+        ).translate(TranslationRequest(
+            document: input,
+            targetLanguage: "en",
+            sourceSegmentsSHA256: String(repeating: "c", count: 64),
+            glossary: nil
+        ))
+
+        #expect(result.document.batches.map(\.segmentIndices) == [[0, 2]])
+        // Every segment is covered, the marker as itself.
+        #expect(result.document.translations == [
+            SegmentTranslation(segmentIndex: 0, translatedText: "translated-0"),
+            SegmentTranslation(segmentIndex: 1, translatedText: "[Silence]"),
+            SegmentTranslation(segmentIndex: 2, translatedText: "translated-2"),
+        ])
+        #expect(recorder.prompts.count == 1)
+        #expect(!recorder.prompts[0].contains("[Silence]"))
+    }
+
     // MARK: Confirm-or-decline (PROJECT.md D50)
 
     @Test
@@ -429,7 +637,7 @@ import Testing
         #expect(decline.cause == .modelDisagreedWithTopRankedCandidate)
         #expect(decline.topRankedCandidate == "0")
         #expect(decline.modelAnswer == answer)
-        #expect(decline.reason == "Declined under confirm-or-decline: the language evidence pointed to speaker 1, but the top-ranked candidate is speaker 0 at 57% of the overlapped speech, and a proposal may only confirm that candidate. The model's reason: replies to the question speaker 0 just asked")
+        #expect(decline.reason == "The conversation pointed to speaker 1, but speaker 0 held the most of this segment's speech, 57% of it, and only that speaker could be confirmed, so no speaker is proposed. The model's reason: replies to the question speaker 0 just asked")
         // The acoustic evidence beside the decline is the merger's, untouched.
         #expect(decline.acousticOutcome == "no_dominant_speaker")
         #expect(decline.acousticCandidates == speakerProposalEvidence()[0].candidates)
@@ -453,8 +661,8 @@ import Testing
             #expect(decline.cause == .noTopRankedCandidate)
             #expect(decline.topRankedCandidate == nil)
             #expect(decline.modelAnswer == answer)
-            #expect(decline.reason.contains(
-                "the acoustic candidates 0 and 1 hold equal overlap, so there is no top-ranked candidate to confirm"
+            #expect(decline.reason.hasPrefix(
+                "Speaker 0 and speaker 1 held the same time in this segment, so there was nobody to confirm and no speaker is proposed. "
             ))
             #expect(decline.reason.contains(answer.reason))
         }

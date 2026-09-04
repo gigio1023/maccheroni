@@ -168,6 +168,16 @@ enum LibraryItemState: String, Codable, Sendable {
         case .interrupted: appString("Interrupted", locale: locale)
         }
     }
+
+    /// The states whose run opens in the transcript view. A partial run
+    /// (D51) is filed in one of these like a succeeded run; the manifest's
+    /// own status and coverage say what it lost.
+    var isReadable: Bool {
+        switch self {
+        case .done, .hasConflicts: true
+        case .recorded, .transcribing, .failed, .cancelled, .interrupted: false
+        }
+    }
 }
 
 enum LibrarySourceKind: String, Codable, Sendable {
@@ -203,6 +213,16 @@ struct LibraryRecord: Codable, Equatable, Identifiable, Sendable {
     /// existed.
     var translationReviewAcknowledgements: [TranslationReviewAcknowledgement]? = nil
     var failureMessage: String?
+    /// The engine request this record's latest run or post-processing went
+    /// through, while its scratch directory still exists: the runner names
+    /// that directory after this value (`EngineRequestScratch`).
+    ///
+    /// Written when the request is launched and cleared when it succeeds,
+    /// because a succeeded request discards its scratch. A failed, cancelled or
+    /// interrupted request keeps both, so the record can say where the
+    /// engine's own account of the failure is, and a move to the Trash can
+    /// take it along. Optional so indexes written before it decode.
+    var requestID: UUID? = nil
 }
 
 struct DerivedCorrectionResolution: Codable, Equatable, Sendable {
@@ -394,6 +414,173 @@ struct LoadedRun: Equatable, Sendable {
                 && $0.segmentIndex == segmentIndex
                 && $0.translatedText == text
         } == true
+    }
+}
+
+extension LibraryRecord {
+    /// The name the reading surface shows for one global speaker ID: the
+    /// reader's own name for it when one is set, and the roster's worded
+    /// fallback otherwise, so an ID never reaches the screen as a bare digit.
+    func displayName(forSpeaker speaker: String, locale: Locale? = nil) -> String {
+        if let name = speakerNames[speaker], !name.isEmpty { return name }
+        return SpeakerRoster.fallbackName(for: speaker, locale: locale)
+    }
+}
+
+extension LoadedRun {
+    /// The global speaker IDs this run resolved: what a proposal reason may
+    /// legitimately refer to. `UNKNOWN` and `UNASSIGNED` are not speakers.
+    var resolvedSpeakerIDs: Set<String> {
+        Set(effectiveSourceTranscript.segments.map(\.speaker))
+            .subtracting(UnattributedSpeaker.labels)
+    }
+
+    /// The speaker-proposal document with every speaker reference in its
+    /// reasons rendered with the record's current display names.
+    ///
+    /// Computed at read time and never stored: the artifact keeps the
+    /// merger's IDs, because a display name is assigned by the reader later,
+    /// lives only on the library record, and can change after the proposal
+    /// exists. Every ID-bearing field — `proposedSpeaker`,
+    /// `topRankedCandidate`, the candidates — is left as the ID; only the
+    /// sentences change. See `SpeakerReasonRendering`.
+    func speakerProposal(
+        renderedFor record: LibraryRecord,
+        locale: Locale? = nil
+    ) -> SpeakerProposalDocument? {
+        guard let speakerProposal else { return nil }
+        return SpeakerReasonRendering.render(
+            speakerProposal,
+            speakers: resolvedSpeakerIDs
+        ) { record.displayName(forSpeaker: $0, locale: locale) }
+    }
+}
+
+/// Renders the speaker references in a proposal reason with display names.
+///
+/// The proposal artifact names speakers by the merger's global speaker ID,
+/// `0`, `1`, and so on, while the reading surface shows the reader's names
+/// for them. The two cannot be reconciled in the artifact: names are assigned
+/// after the proposal exists and change afterwards. So the artifact keeps the
+/// IDs and this substitutes them when a sentence is read.
+///
+/// A bare ID is not a safe token — `1` is also a segment number, a count, and
+/// half of `0.5` — so the only forms recognised are the ones the prompt asks
+/// the model to write and the runner's own sentences use: the word `speaker`
+/// (any case) or its Korean counterpart `화자`, followed by the exact ID of a
+/// speaker this run resolved, and the Korean ordinal form `0번 화자` that the
+/// first real run's Korean answers also wrote. A reference to an ID the run
+/// does not know is left exactly as written. The one other form accepted is
+/// the runner's pre-2026-09-04 tie sentence, `the acoustic candidates 0 and 1
+/// hold equal overlap`, which sealed artifacts still carry and which named
+/// the tied speakers as bare IDs (D52: a sealed artifact is read through its
+/// legacy form, never rewritten).
+enum SpeakerReasonRendering {
+    /// `reason` with each recognised reference replaced by `displayName(id)`.
+    static func render(
+        _ reason: String,
+        speakers: some Sequence<String>,
+        displayName: (String) -> String
+    ) -> String {
+        guard let alternation = idAlternation(speakers), !reason.isEmpty else {
+            return reason
+        }
+        var rendered = reason
+        // The legacy tie clause first: its IDs are bare and only recognisable
+        // by the sentence around them.
+        rendered = replacing(
+            pattern: "(?<=the acoustic candidates )(?:\(alternation))(?:, (?:\(alternation)))* and (?:\(alternation))(?= hold equal overlap)",
+            in: rendered
+        ) { clause in
+            replacing(
+                pattern: "(?<![\\p{N}A-Za-z_])(\(alternation))(?![\\p{N}A-Za-z_])",
+                in: clause
+            ) { displayName($0) }
+        }
+        // The Korean ordinal form puts the ID first: `0번 화자`.
+        rendered = replacing(
+            pattern: "(?<![\\p{N}A-Za-z_])(\(alternation))번[ \u{00A0}]*화자",
+            in: rendered
+        ) { displayName($0) }
+        // Then the token form. The boundary after the ID excludes digits and
+        // Latin letters, so `1` never matches inside `10` and `SPEAKER_0`
+        // never inside `SPEAKER_00`, but lets a Korean particle follow
+        // directly: `화자 0이` is how a Korean answer writes it.
+        return replacing(
+            pattern: "(?<![\\p{L}\\p{N}_])(?:(?i:speaker)|화자)[ \u{00A0}]*(\(alternation))(?![\\p{N}A-Za-z_])",
+            in: rendered
+        ) { displayName($0) }
+    }
+
+    /// The document with every reason rendered and every ID field untouched.
+    static func render(
+        _ document: SpeakerProposalDocument,
+        speakers: some Sequence<String>,
+        displayName: (String) -> String
+    ) -> SpeakerProposalDocument {
+        var rendered = document
+        for index in rendered.proposals.indices {
+            rendered.proposals[index].reason = render(
+                rendered.proposals[index].reason,
+                speakers: speakers,
+                displayName: displayName
+            )
+        }
+        for index in rendered.declined.indices {
+            rendered.declined[index].reason = render(
+                rendered.declined[index].reason,
+                speakers: speakers,
+                displayName: displayName
+            )
+            if let answer = rendered.declined[index].modelAnswer {
+                rendered.declined[index].modelAnswer?.reason = render(
+                    answer.reason,
+                    speakers: speakers,
+                    displayName: displayName
+                )
+            }
+        }
+        return rendered
+    }
+
+    /// The known IDs as one alternation, longest first so that where one ID
+    /// is a prefix of another the longer one is tried first. `nil` when there
+    /// is nothing to recognise.
+    private static func idAlternation(_ speakers: some Sequence<String>) -> String? {
+        let ids = Set(speakers.filter { !$0.isEmpty })
+            .sorted { ($0.count, $0) > ($1.count, $1) }
+        guard !ids.isEmpty else { return nil }
+        return ids.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
+    }
+
+    /// Every match of `pattern` in `text` replaced by `replacement` applied to
+    /// its first capture group, or to the whole match when there is none.
+    /// Built by hand rather than through a template so that a display name
+    /// containing `$` or a backslash is inserted literally.
+    private static func replacing(
+        pattern: String,
+        in text: String,
+        with replacement: (String) -> String
+    ) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let whole = NSRange(text.startIndex..., in: text)
+        var output = ""
+        var cursor = text.startIndex
+        for match in regex.matches(in: text, range: whole) {
+            guard let matchRange = Range(match.range, in: text) else { continue }
+            let captured: String
+            if match.numberOfRanges > 1,
+               let range = Range(match.range(at: 1), in: text) {
+                captured = String(text[range])
+            } else {
+                captured = String(text[matchRange])
+            }
+            output += text[cursor ..< matchRange.lowerBound]
+            output += replacement(captured)
+            cursor = matchRange.upperBound
+        }
+        output += text[cursor...]
+        return output
     }
 }
 
@@ -601,6 +788,10 @@ struct TranscriptionRequest: Equatable, Sendable {
     var postprocessMode: PostprocessMode = .correction
     var translationTargetLanguage: String? = nil
     var glossaryURL: URL?
+    /// Names the engine's scratch directory for this request. Chosen by the
+    /// caller so the library record can carry it before the engine starts;
+    /// see `EngineRequestScratch`.
+    var requestID: UUID = UUID()
 }
 
 struct ExistingRunPostprocessRequest: Equatable, Sendable {
@@ -611,6 +802,65 @@ struct ExistingRunPostprocessRequest: Equatable, Sendable {
     var translationTargetLanguage: String?
     var glossarySemantics: DerivedGlossarySemantics = .currentProfile
     var glossaryURL: URL?
+    /// See `TranscriptionRequest.requestID`.
+    var requestID: UUID = UUID()
+}
+
+/// The engine's per-request scratch directory, `Requests/request-<id>/`,
+/// holding the profile handed to the engine and its stdout and stderr.
+///
+/// A succeeded request discards it. A failed or cancelled request keeps it,
+/// because `stderr.log` is the only complete record of what the engine said
+/// and the failure message shown in the app is cut from it. Nothing pruned
+/// it, so failed runs accumulated scratch for ever. The retention policy is
+/// anchored on the run's own lifetime and declared here, in typed
+/// configuration, the way `docs/engineering-constraint-policy.md` asks for
+/// an execution-scope value:
+///
+/// - A directory named by a library record's `requestID` is *live*: it goes
+///   to the Trash with the record, together with the audio and the run, and
+///   is otherwise never touched.
+/// - A directory no record names is an *orphan*: a superseded request whose
+///   record went on to a newer one, a request whose record was removed while
+///   its files were already gone, a scratch written before records carried
+///   the link, or one the Finder put back after its record was dropped. It is
+///   pruned once it is older than `orphanMaximumAge`, on one trigger — the
+///   library load at launch — and every pruning is written to the library's
+///   maintenance log, so nothing is dropped silently (judgment rule 2).
+enum EngineRequestScratch {
+    static let directoryPrefix = "request-"
+
+    /// The single naming rule the runner writes with and the library reads
+    /// with. Lower-case so the directory reads the same as the older ones.
+    static func directoryName(for requestID: UUID) -> String {
+        directoryPrefix + requestID.uuidString.lowercased()
+    }
+
+    /// Whether a directory under the requests root is one of the engine's.
+    /// Only these are ever candidates for pruning.
+    static func isScratchDirectoryName(_ name: String) -> Bool {
+        name.hasPrefix(directoryPrefix) && name.count > directoryPrefix.count
+    }
+
+    /// How old an orphan may be before the library load prunes it: 30 days,
+    /// measured from the directory's creation date against the clock at the
+    /// time of the load. Exactly at the bound is kept; the rule is strict.
+    ///
+    /// Ledger, in the terms of the constraint policy:
+    /// - `per_request_bytes`: two log files and one profile; observed under
+    ///   1 KB for an engine that refused a request and under 200 B of stderr
+    ///   for the real 20.7-minute run of 2026-09-01, whose engine stderr is
+    ///   quiet. Headroom assumed: 1 MB per request.
+    /// - `orphan_arrival_rate`: at most one per run that failed and was then
+    ///   retried or removed; a run takes minutes, so an upper bound of 100
+    ///   orphans a day is already absurd.
+    /// - `retained_orphan_bytes <= orphan_arrival_rate * 30 d * per_request_bytes`
+    ///   = 3,000 MB at that absurd rate, and a few MB at any real one.
+    /// An age rather than a count, because an orphan's only remaining value
+    /// is diagnostic and decays with time, not with how many other runs
+    /// failed; a count bound would drop the newest evidence on the day it is
+    /// most likely wanted.
+    static let orphanMaximumAge: TimeInterval = 30 * 24 * 60 * 60
 }
 
 struct ExistingRunPostprocessProgress: Equatable, Sendable {

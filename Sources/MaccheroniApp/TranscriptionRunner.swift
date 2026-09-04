@@ -70,7 +70,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
         }
         let launchInput = try inputIdentity(at: request.sourceURL)
         cancelRequested = false
-        let requestDirectory = try createRequestDirectory()
+        let requestDirectory = try createRequestDirectory(for: request.requestID)
         let profileURL = requestDirectory.appendingPathComponent("profiles.json")
         try writeProfile(for: request, to: profileURL)
         let stdoutURL = requestDirectory.appendingPathComponent("stdout.log")
@@ -203,12 +203,26 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
             requestedPostprocessModelID: request.postprocess.requestedModelID,
             accumulator: &progressAccumulator
         ))
-        guard manifest.status == .succeeded else {
+        // A partial run is a completed run (D51): it lost one named range and
+        // kept everything else, `merged/segments.json` included, so it is
+        // returned to be read. Only a failed or cancelled run is an error
+        // here. The manifest's own `partial` status and coverage remain the
+        // record of the loss; nothing here restates them.
+        switch manifest.status {
+        case .succeeded:
+            requestSucceeded = true
+        case .partial:
+            // The scratch is kept, as for a failure: the manifest names the
+            // lost range and its cause, but the engine's stderr is its only
+            // full account of the leaf it lost, and the retention policy
+            // (`EngineRequestScratch`) already bounds a kept directory by the
+            // record's own lifetime. The record keeps naming it.
+            requestSucceeded = false
+        case .failed, .canceled:
             throw TranscriptionRunnerError.pipelineFailed(
                 manifest.failure?.message ?? appString("The run did not succeed.")
             )
         }
-        requestSucceeded = true
         return runURL
     }
 
@@ -221,7 +235,7 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
         }
         _ = try RunIntegrityVerifier.verifyCompletedRun(at: request.sourceRunURL)
         cancelRequested = false
-        let requestDirectory = try createRequestDirectory()
+        let requestDirectory = try createRequestDirectory(for: request.requestID)
         let profileURL = requestDirectory.appendingPathComponent("profiles.json")
         try writeProfile(for: request, to: profileURL)
         let stdoutURL = requestDirectory.appendingPathComponent("stdout.log")
@@ -402,19 +416,25 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
     /// verified nothing reads them again, so a succeeded request leaves
     /// nothing behind. A failed or cancelled request keeps its directory:
     /// `stderr.log` is the only complete record of what the engine said, and
-    /// the failure message shown in the app is cut from it.
+    /// the failure message shown in the app is cut from it. What happens to a
+    /// kept directory afterwards is the library's retention policy,
+    /// `EngineRequestScratch`: it follows its record to the Trash, and is
+    /// pruned only once no record names it and it is older than the bound.
     private func discardRequestDirectory(_ directory: URL) {
         guard directory.path.hasPrefix(requestsRoot.path + "/") else { return }
         try? FileManager.default.removeItem(at: directory)
     }
 
-    private func createRequestDirectory() throws -> URL {
+    /// Named after the request's own ID so the library record that launched
+    /// it can find it again without the runner having to report anything
+    /// back. Refuses to reuse a directory that already exists.
+    private func createRequestDirectory(for requestID: UUID) throws -> URL {
         try FileManager.default.createDirectory(
             at: requestsRoot,
             withIntermediateDirectories: true
         )
         let directory = requestsRoot.appendingPathComponent(
-            "request-\(UUID().uuidString.lowercased())",
+            EngineRequestScratch.directoryName(for: requestID),
             isDirectory: true
         )
         try FileManager.default.createDirectory(
@@ -635,7 +655,8 @@ final class ProcessTranscriptionRunner: TranscriptionRunning {
     ) -> RunProgressSnapshot {
         let message = manifest.coverage.message ?? manifest.failure?.message
         let stage: PipelineStage
-        if manifest.status == .succeeded {
+        if manifest.status == .succeeded || manifest.status == .partial {
+            // Partial is complete with a named loss, not a failed stage.
             stage = .complete
         } else if manifest.failure?.code != "RUN_INCOMPLETE" {
             stage = .failed

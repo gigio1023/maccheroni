@@ -857,6 +857,13 @@ public struct PinnedASRAdapter: ASRBackend, Sendable {
             var flags: [String] = []
             if !segment.speaker.isEmpty { flags.append("backend_speaker_evidence") }
             if segment.degenerate == true { flags.append("repetition_looping") }
+            // A segment whose whole text is one of the engine's non-speech
+            // markers, `[Silence]` and the like, is typed here so no later
+            // stage has to know the vocabulary. The text itself is kept as
+            // emitted; a marker inside speech is speech and gets no flag.
+            if NonSpeechEvent.classify(text: segment.text) != nil {
+                flags.append(NonSpeechEvent.flag)
+            }
             return Segment(
                 speaker: "UNASSIGNED",
                 startS: segment.startS,

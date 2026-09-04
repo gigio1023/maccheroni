@@ -16,12 +16,20 @@
 	<string>%@ 항목이 휴지통에 있지만 라이브러리를 저장하지 못해 녹음이 목록에 남아 있습니다. Finder에서 되돌려 놓으세요.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@이(가) 라이브러리가 기대한 위치에 없어 아무것도 옮기지 않았습니다.</string>
+	<key>%@ not transcribed</key>
+	<string>%@ 전사되지 않음</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%2$@ 중 %1$@ (%3$@)</string>
 	<key>%@ of speech</key>
 	<string>발화의 %@</string>
+	<key>%@ of this recording produced no transcript, from %@. The transcript covers %@ of %@.</key>
+	<string>이 녹음 중 %@ 구간은 전사되지 않았습니다 (%@). 전사본은 전체 %@ 중 %@ 를 다룹니다.</string>
 	<key>%@ of this recording produced no transcript, so these proposals cover %@ of %@.</key>
 	<string>이 녹음 중 %@는 전사문이 없어 이 제안은 %@ / %@만 다룹니다.</string>
+	<key>%@ of this recording produced no transcript. The transcript covers %@ of %@.</key>
+	<string>이 녹음 중 %@ 구간은 전사되지 않았습니다. 전사본은 전체 %@ 중 %@ 를 다룹니다.</string>
+	<key>%@ to %@</key>
+	<string>%@부터 %@까지</string>
 	<key>%@, %@</key>
 	<string>%@, %@</string>
 	<key>%lld bytes</key>
@@ -262,6 +270,8 @@
 	<string>영어가 기본입니다. Mac 시스템 언어를 바꾸지 않고 Maccheroni에서 언어를 직접 선택할 수 있습니다.</string>
 	<key>Enhancement</key>
 	<string>음질 개선</string>
+	<key>Environmental sounds</key>
+	<string>주변 소리</string>
 	<key>Exact Identities</key>
 	<string>정확한 식별자</string>
 	<key>Export</key>
@@ -300,6 +310,8 @@
 	<string>충돌 있음</string>
 	<key>How</key>
 	<string>방식</string>
+	<key>Human sounds</key>
+	<string>사람 소리</string>
 	<key>Import Audio</key>
 	<string>오디오 가져오기</string>
 	<key>Import Audio…</key>
@@ -414,6 +426,8 @@
 	<string>휴지통으로 이동…</string>
 	<key>Move “%@” to the Trash?</key>
 	<string>'%@'을(를) 휴지통으로 이동할까요?</string>
+	<key>Music</key>
+	<string>음악</string>
 	<key>New Recording</key>
 	<string>새 녹음</string>
 	<key>No</key>
@@ -432,6 +446,14 @@
 	<string>제안된 화자 없음</string>
 	<key>No speaker was active on the speaker timeline during this segment.</key>
 	<string>이 구간 동안 화자 타임라인에서 말한 화자가 없습니다.</string>
+	<key>No transcript for %@ of the recording.</key>
+	<string>녹음 중 %@ 구간은 전사 없음.</string>
+	<key>No transcript from %@ to %@ (%@).</key>
+	<string>%@부터 %@까지 전사 없음 (%@).</string>
+	<key>Noise</key>
+	<string>소음</string>
+	<key>Non-speech event: %@</key>
+	<string>비음성 이벤트: %@</string>
 	<key>None</key>
 	<string>없음</string>
 	<key>Not Created</key>
@@ -650,6 +672,8 @@
 	<string>이 실행이 어떻게 만들어졌는지 표시하거나 숨깁니다.</string>
 	<key>Show this layer of the transcript.</key>
 	<string>전사문의 이 레이어를 표시합니다.</string>
+	<key>Silence</key>
+	<string>무음</string>
 	<key>Size</key>
 	<string>크기</string>
 	<key>Some segments carry no recorded speaker evidence.</key>
@@ -696,6 +720,8 @@
 	<string>음성 인식이 Maccheroni가 검증할 수 없는 출력을 내놓아 전사문에 아무것도 반영되지 않았습니다.</string>
 	<key>Speech recognition stopped producing new words and repeated itself to the end of its output budget, so that stretch of audio produced no usable text.</key>
 	<string>음성 인식이 새 단어를 내놓기를 멈추고 출력 한도 끝까지 같은 말을 반복해서, 그 구간에서는 쓸 만한 텍스트가 나오지 않았습니다.</string>
+	<key>Speech without words</key>
+	<string>단어 없는 발화</string>
 	<key>Stale Bookmark</key>
 	<string>오래된 책갈피</string>
 	<key>Start Recording</key>
@@ -806,6 +832,8 @@
 	<string>화자 타임라인이 이 구간의 %@만 덮어 이 실행의 기준에 못 미칩니다.</string>
 	<key>The speech model also reported a speaker for this segment. It is kept as evidence and never becomes the speaker.</key>
 	<string>음성 모델도 이 구간의 화자를 보고했습니다. 이 값은 근거로 남고 화자가 되지는 않습니다.</string>
+	<key>The speech model marked this segment as a non-speech event, not as words.</key>
+	<string>음성 인식 모델이 이 구간을 단어가 아닌 비음성 이벤트로 표시했습니다.</string>
 	<key>The speech model that answered is not the exact model this profile pins, so its output was refused.</key>
 	<string>응답한 음성 모델이 이 프로필이 고정한 모델과 정확히 일치하지 않아 그 출력을 받아들이지 않았습니다.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
@@ -826,6 +854,10 @@
 	<string>활성 녹음이 없습니다.</string>
 	<key>This Run</key>
 	<string>이 실행</string>
+	<key>This also moves the engine log kept from the failed run.</key>
+	<string>실패한 실행에서 보관한 엔진 로그도 함께 옮깁니다.</string>
+	<key>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>실패한 실행에서 보관한 엔진 로그를 휴지통으로 옮깁니다. 아무것도 삭제하지 않으며 Finder의 '되돌려놓기'로 복구할 수 있습니다.</string>
 	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
 	<string>실행 결과를 휴지통으로 옮깁니다. 아무것도 삭제하지 않으며 Finder의 '되돌려놓기'로 복구할 수 있습니다.</string>
 	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>

@@ -145,7 +145,11 @@ with zero missing duration.
   own `layer`, the merged transcript hash it was made over, the same source
   coverage the manifest records, the constraint every entry was held to, the
   unattributed speaker labels it may cover, the proposals, the declines with
-  their reasons, and the per-batch prompt and byte ledger. Each proposal carries
+  their reasons, the unattributed segments it did not examine with their
+  reason (`not_examined`, absent on artifacts written before 2026-09-04; the
+  one reason is `non_speech_event`, a row the source flags as a non-speech
+  event, which has no speaker to find), and the per-batch prompt and byte
+  ledger. Each proposal carries
   the acoustic candidates and their shares beside it. It cannot represent a
   segment's text, time range, or source speaker, so it cannot change the
   acoustic structure the source run recorded.
@@ -278,7 +282,13 @@ checked.
   `speaker/proposals.json` repeats the same `source_coverage` and the same
   merged transcript hash the manifest records. Every proposed segment index is
   an index the source transcript left unattributed, appears once, and carries
-  the acoustic candidates the source run disclosed.
+  the acoustic candidates the source run disclosed. Every index the source
+  left unattributed appears exactly once across the proposals, the declines
+  and `not_examined`, and an index may be listed as not examined only when the
+  source segment itself carries the `non_speech_event` flag. Correction and
+  translation never send such a row to the model either: a correction leaves
+  its text as written, and a translation carries its text verbatim so the
+  translation still covers every segment.
 
 `benchmarks/scripts/scoring/check_contracts.py` validates schema examples and
 the applicable conditions above against run manifests.

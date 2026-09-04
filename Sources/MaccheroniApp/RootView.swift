@@ -89,7 +89,7 @@ struct RootView: View {
                             model: model,
                             record: record,
                             run: run,
-                            proposal: run.speakerProposal
+                            proposal: run.speakerProposal(renderedFor: record)
                         )
                     } else {
                         RunUnavailableView(

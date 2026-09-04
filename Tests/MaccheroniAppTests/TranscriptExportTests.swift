@@ -293,6 +293,144 @@ struct TranscriptExportTests {
         #expect(fixture.record == originalRecord)
     }
 
+    /// The copy rule for a segment that holds no speech: the engine's marker,
+    /// verbatim, in the text position, with the speaker the acoustics gave the
+    /// interval. Brackets are the caption convention for a non-speech event
+    /// in plain text, and the clipboard is the data surface, so it carries
+    /// what the run recorded rather than the reader's-language label the row
+    /// prints. Every row, speech or event, is byte-exact.
+    @Test
+    func aNonSpeechEventRowCopiesTheEnginesMarkerVerbatimAndSpeechRowsStayByteExact() throws {
+        var fixture = exportFixture()
+        fixture.run.transcript.segments.insert(
+            Segment(
+                speaker: "UNKNOWN",
+                startS: 2,
+                endS: 3.5,
+                text: "[Silence]",
+                flags: ["non_speech_event", "conflict", "uncertain"]
+            ),
+            at: 1
+        )
+        fixture.run.transcript.segments.insert(
+            Segment(
+                speaker: "SPEAKER_00",
+                startS: 3.5,
+                endS: 5,
+                text: "we heard a [Buzzer] just then"
+            ),
+            at: 2
+        )
+        fixture.run.segments = fixture.run.transcript.segments.enumerated().map { index, segment in
+            TranscriptSegment(
+                id: TranscriptSegmentID(runID: "run-001", index: index),
+                index: index,
+                segment: segment,
+                conflict: nil
+            )
+        }
+        fixture.run.conflicts = []
+        fixture.record.conflictResolutions = [:]
+
+        let payload = try TranscriptExporter.copyText(
+            run: fixture.run,
+            record: fixture.record,
+            selectedSegmentIndices: [],
+            locale: Locale(identifier: "en"),
+            layer: .speakerLabelled
+        )
+
+        #expect(payload == """
+        Transcript layer: Speaker-labelled
+
+        [00:00:00.000 – 00:00:01.235] **Jina:** Original text [UNCERTAIN]
+
+        [00:00:02.000 – 00:00:03.500] **UNKNOWN:** [Silence] [UNCERTAIN]
+
+        [00:00:03.500 – 00:00:05.000] **Jina:** we heard a [Buzzer] just then
+
+        [01:01:01.006 – 01:01:03.500] **Speaker 2:** Unresolved wording
+
+        """)
+        let srt = try TranscriptExporter.srt(run: fixture.run, record: fixture.record)
+        #expect(srt.contains("00:00:02,000 --> 00:00:03,500\nUNKNOWN: [Silence] [UNCERTAIN]\n"))
+        let json = try TranscriptExporter.data(format: .segmentsJSON, run: fixture.run, record: fixture.record)
+        let exported = try JSONDecoder().decode(SegmentsDocument.self, from: json)
+        #expect(exported.segments[1].text == "[Silence]")
+        #expect(exported.segments[1].flags == ["non_speech_event", "conflict", "uncertain"])
+    }
+
+    /// A partial run's hole is named in every text export: under the layer
+    /// header, and at its place among the rows on a whole-transcript copy, in
+    /// the Markdown file, and as its own subtitle in the SRT. Speech rows are
+    /// byte-exact around it, and a selection copy names it under the header
+    /// only.
+    @Test
+    func aPartialRunExportNamesItsMissingRangeAndKeepsSpeechRowsByteExact() throws {
+        let english = Locale(identifier: "en")
+        let root = try derivedLayerTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try derivedLayerRunFixture(in: root, complete: false)
+        let run = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+        let record = TranscriptFixtures.record(runURL: fixture.runURL)
+        let sentence = "2.0 sec of this recording produced no transcript, from 00:06 to 00:08. The transcript covers 00:06 of 00:08."
+        let gapLine = "[00:00:06.000 – 00:00:08.000] No transcript for 2.0 sec of the recording."
+
+        let whole = try TranscriptExporter.copyText(
+            run: run,
+            record: record,
+            selectedSegmentIndices: [],
+            locale: english,
+            layer: .speakerLabelled
+        )
+        let lines = whole.components(separatedBy: "\n")
+        #expect(lines[0] == "Transcript layer: Speaker-labelled")
+        #expect(lines[1] == sentence)
+        #expect(lines[2] == "")
+        let rows = lines.filter { $0.hasPrefix("[") }
+        #expect(rows == [
+            "[00:00:00.000 – 00:00:02.000] **SPEAKER_00:** Zero",
+            "[00:00:02.000 – 00:00:04.000] **UNKNOWN:** One [CONFLICT]",
+            "[00:00:04.000 – 00:00:06.000] **UNKNOWN:** Two [CONFLICT]",
+            gapLine,
+            "[00:00:06.000 – 00:00:08.000] **SPEAKER_01:** Three",
+        ])
+
+        // The same rows, byte for byte, when the run has no hole to name: the
+        // gap line and the sentence are the only difference.
+        let complete = try derivedLayerRunFixture(in: root, runID: "complete-run")
+        let completeCopy = try TranscriptExporter.copyText(
+            run: try LibraryRepository(root: root).loadRun(at: complete.runURL),
+            record: TranscriptFixtures.record(runURL: complete.runURL),
+            selectedSegmentIndices: [],
+            locale: english,
+            layer: .speakerLabelled
+        )
+        #expect(completeCopy.components(separatedBy: "\n").filter { $0.hasPrefix("[") }
+            == rows.filter { $0 != gapLine })
+        #expect(!completeCopy.contains("produced no transcript"))
+
+        // A selection names the hole under the header only.
+        let selection = try TranscriptExporter.copyText(
+            run: run,
+            record: record,
+            selectedSegmentIndices: [1, 3],
+            locale: english,
+            layer: .speakerLabelled
+        )
+        #expect(selection.components(separatedBy: "\n")[1] == sentence)
+        #expect(!selection.contains(gapLine))
+        #expect(selection.contains("**UNKNOWN:** One [CONFLICT]"))
+        #expect(selection.contains("**SPEAKER_01:** Three"))
+
+        let markdown = try TranscriptExporter.markdown(run: run, record: record)
+        #expect(markdown.hasPrefix(sentence + "\n\n[00:00:00.000 – 00:00:02.000] **SPEAKER_00:** Zero\n\n"))
+        #expect(markdown.contains("\n\n" + gapLine + "\n\n[00:00:06.000 – 00:00:08.000] **SPEAKER_01:** Three\n"))
+
+        let srt = try TranscriptExporter.srt(run: run, record: record)
+        #expect(srt.contains("3\n00:00:04,000 --> 00:00:06,000\nUNKNOWN: Two [CONFLICT]\n\n4\n00:00:06,000 --> 00:00:08,000\nNo transcript for 2.0 sec of the recording.\n\n5\n00:00:06,000 --> 00:00:08,000\nSPEAKER_01: Three\n"))
+    }
+
     @Test @MainActor
     func copyCommandWritesOnceAndReportsLayerAndScope() throws {
         let fixture = exportFixture()

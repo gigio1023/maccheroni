@@ -16,12 +16,20 @@
 	<string>%@ находится в Корзине, но библиотеку не удалось сохранить, поэтому запись осталась в списке. Верните её на место в Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ больше не находится там, где ожидает библиотека, поэтому ничего не перемещено.</string>
+	<key>%@ not transcribed</key>
+	<string>%@ не расшифровано</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%1$@ из %2$@ (%3$@)</string>
 	<key>%@ of speech</key>
 	<string>%@ речи</string>
+	<key>%@ of this recording produced no transcript, from %@. The transcript covers %@ of %@.</key>
+	<string>%@ этой записи не дали расшифровки: %@. Расшифровка охватывает %@ из %@.</string>
 	<key>%@ of this recording produced no transcript, so these proposals cover %@ of %@.</key>
 	<string>%@ этой записи не дали расшифровки, поэтому предложения охватывают %@ из %@.</string>
+	<key>%@ of this recording produced no transcript. The transcript covers %@ of %@.</key>
+	<string>%@ этой записи не дали расшифровки. Расшифровка охватывает %@ из %@.</string>
+	<key>%@ to %@</key>
+	<string>%@ – %@</string>
 	<key>%@, %@</key>
 	<string>%@, %@</string>
 	<key>%lld bytes</key>
@@ -262,6 +270,8 @@
 	<string>Английский используется по умолчанию. Ручной выбор применяется к Maccheroni без изменения языка системы Mac.</string>
 	<key>Enhancement</key>
 	<string>Улучшение</string>
+	<key>Environmental sounds</key>
+	<string>Звуки окружения</string>
 	<key>Exact Identities</key>
 	<string>Точные идентификаторы</string>
 	<key>Export</key>
@@ -300,6 +310,8 @@
 	<string>Имеет конфликты</string>
 	<key>How</key>
 	<string>Как</string>
+	<key>Human sounds</key>
+	<string>Звуки человека</string>
 	<key>Import Audio</key>
 	<string>Импорт аудио</string>
 	<key>Import Audio…</key>
@@ -414,6 +426,8 @@
 	<string>Переместить в корзину…</string>
 	<key>Move “%@” to the Trash?</key>
 	<string>Переместить «%@» в корзину?</string>
+	<key>Music</key>
+	<string>Музыка</string>
 	<key>New Recording</key>
 	<string>Новая запись</string>
 	<key>No</key>
@@ -432,6 +446,14 @@
 	<string>Говорящий не предложен</string>
 	<key>No speaker was active on the speaker timeline during this segment.</key>
 	<string>В этом сегменте на шкале говорящих никто не был активен.</string>
+	<key>No transcript for %@ of the recording.</key>
+	<string>Нет расшифровки для %@ записи.</string>
+	<key>No transcript from %@ to %@ (%@).</key>
+	<string>Нет расшифровки с %@ по %@ (%@).</string>
+	<key>Noise</key>
+	<string>Шум</string>
+	<key>Non-speech event: %@</key>
+	<string>Неречевое событие: %@</string>
 	<key>None</key>
 	<string>Нет</string>
 	<key>Not Created</key>
@@ -650,6 +672,8 @@
 	<string>Показать или скрыть, как был получен этот запуск.</string>
 	<key>Show this layer of the transcript.</key>
 	<string>Показать этот слой расшифровки.</string>
+	<key>Silence</key>
+	<string>Тишина</string>
 	<key>Size</key>
 	<string>Размер</string>
 	<key>Some segments carry no recorded speaker evidence.</key>
@@ -696,6 +720,8 @@
 	<string>Распознавание речи вернуло вывод, который Maccheroni не смог проверить, поэтому в расшифровку ничего не попало.</string>
 	<key>Speech recognition stopped producing new words and repeated itself to the end of its output budget, so that stretch of audio produced no usable text.</key>
 	<string>Распознавание речи перестало выдавать новые слова и повторялось до исчерпания бюджета вывода, поэтому этот отрезок аудио не дал пригодного текста.</string>
+	<key>Speech without words</key>
+	<string>Речь без слов</string>
 	<key>Stale Bookmark</key>
 	<string>Устаревшая закладка</string>
 	<key>Start Recording</key>
@@ -806,6 +832,8 @@
 	<string>Шкала говорящих покрыла %@ этого сегмента, ниже требований этого запуска.</string>
 	<key>The speech model also reported a speaker for this segment. It is kept as evidence and never becomes the speaker.</key>
 	<string>Речевая модель также сообщила говорящего для этого сегмента. Это сохраняется как свидетельство и никогда не становится говорящим.</string>
+	<key>The speech model marked this segment as a non-speech event, not as words.</key>
+	<string>Речевая модель отметила этот сегмент как неречевое событие, а не как слова.</string>
 	<key>The speech model that answered is not the exact model this profile pins, so its output was refused.</key>
 	<string>Ответившая речевая модель не совпадает с моделью, закреплённой в этом профиле, поэтому её вывод отклонён.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
@@ -826,6 +854,10 @@
 	<string>Активной записи нет.</string>
 	<key>This Run</key>
 	<string>Этот запуск</string>
+	<key>This also moves the engine log kept from the failed run.</key>
+	<string>Также будет перемещён журнал движка, сохранённый после неудачного запуска.</string>
+	<key>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>Журнал движка, сохранённый после неудачного запуска, будет перемещён в корзину. Ничего не удаляется, и команда «Положить обратно» в Finder его восстановит.</string>
 	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
 	<string>Результат запуска будет перемещён в корзину. Ничего не удаляется, и команда «Положить обратно» в Finder его восстановит.</string>
 	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>

@@ -315,12 +315,16 @@ enum TranscriptExporter {
 
     static func markdown(run: LoadedRun, record: LibraryRecord) throws -> String {
         let document = try correctedSegmentsDocument(run: run, record: record)
-        return markdown(
+        let coverage = TranscriptMissingCoverage.load(run: run, record: record)
+        let body = markdown(
             document: document,
             run: run,
             record: record,
-            selectedSegmentIndices: nil
+            selectedSegmentIndices: nil,
+            gaps: coverage?.gaps ?? []
         )
+        guard let coverage else { return body }
+        return coverage.sentence() + "\n\n" + body
     }
 
     /// What the clipboard receives.
@@ -347,16 +351,23 @@ enum TranscriptExporter {
         let proposalLayer = displayed == .proposed
             ? proposal.map(TranscriptProposalLayer.init(document:))
             : nil
+        // A hole in the record is named twice on a whole-transcript copy: once
+        // under the header with its ranges, and once at its place among the
+        // rows. A selection names it under the header only; the rows a reader
+        // chose are the rows they get (judgment rule 2 either way).
+        let coverage = TranscriptMissingCoverage.load(run: run, record: record)
         let body = markdown(
             document: document,
             run: run,
             record: record,
             selectedSegmentIndices: selectedIndices,
             proposalLayer: proposalLayer,
-            locale: locale
+            locale: locale,
+            gaps: selectedIndices == nil ? (coverage?.gaps ?? []) : []
         )
         let header = (
             [displayed.copyHeader(locale: locale)]
+                + (coverage.map { [$0.sentence(locale: locale)] } ?? [])
                 + proposalDisclosure(proposalLayer, locale: locale)
         ).joined(separator: "\n")
         return body.isEmpty ? header + "\n" : header + "\n\n" + body
@@ -392,10 +403,17 @@ enum TranscriptExporter {
         record: LibraryRecord,
         selectedSegmentIndices: Set<Int>?,
         proposalLayer: TranscriptProposalLayer? = nil,
-        locale: Locale? = nil
+        locale: Locale? = nil,
+        gaps: [TranscriptGap] = []
     ) -> String {
-        let body = document.segments.enumerated().compactMap { index, segment -> String? in
-            guard selectedSegmentIndices?.contains(index) ?? true else { return nil }
+        let positions = TranscriptGap.positions(
+            of: gaps,
+            amongSegmentsStartingAt: document.segments.map(\.startS)
+        )
+        var blocks: [String] = []
+        for (index, segment) in document.segments.enumerated() {
+            blocks.append(contentsOf: (positions[index] ?? []).map { gapLine($0, locale: locale) })
+            guard selectedSegmentIndices?.contains(index) ?? true else { continue }
             let row = "[\(markdownTimestamp(segment.startS) ?? "Unknown time") – \(markdownTimestamp(segment.endS) ?? "Unknown time")] **\(segment.speaker):** \(segment.text)\(unresolvedMarkers(for: index, run: run, record: record))"
             let proposal = proposalLines(
                 at: index,
@@ -403,9 +421,17 @@ enum TranscriptExporter {
                 record: record,
                 locale: locale
             )
-            return ([row] + proposal).joined(separator: "\n")
-        }.joined(separator: "\n\n")
+            blocks.append(([row] + proposal).joined(separator: "\n"))
+        }
+        blocks.append(contentsOf: (positions[document.segments.count] ?? []).map { gapLine($0, locale: locale) })
+        let body = blocks.joined(separator: "\n\n")
         return body.isEmpty ? "" : body + "\n"
+    }
+
+    /// A gap at its place among the rows: the same timestamp form as a row,
+    /// no speaker, and the sentence that says the range produced no text.
+    private static func gapLine(_ gap: TranscriptGap, locale: Locale?) -> String {
+        "[\(markdownTimestamp(gap.startS) ?? "Unknown time") – \(markdownTimestamp(gap.endS) ?? "Unknown time")] \(gap.exportSentence(locale: locale))"
     }
 
     /// What one row of the proposed layer carries under its text: the proposed
@@ -450,15 +476,34 @@ enum TranscriptExporter {
 
     static func srt(run: LoadedRun, record: LibraryRecord) throws -> String {
         let document = try correctedSegmentsDocument(run: run, record: record)
-        let entries = try document.segments.enumerated().map { index, segment in
+        // A gap is a subtitle of its own at its place, so a player shows the
+        // hole while it plays. Entry numbers are positions, not content, and
+        // renumber around it; every segment's own text stays as it was.
+        let gaps = TranscriptMissingCoverage.load(run: run, record: record)?.gaps ?? []
+        let positions = TranscriptGap.positions(
+            of: gaps,
+            amongSegmentsStartingAt: document.segments.map(\.startS)
+        )
+        var bodies: [String] = []
+        func gapBody(_ gap: TranscriptGap) throws -> String {
+            guard let start = timestampMilliseconds(gap.startS),
+                  let end = timestampMilliseconds(gap.endS),
+                  end > start
+            else { throw TranscriptExportError.invalidSRTTimestamp(segmentIndex: bodies.count) }
+            return "\(srtTimestamp(start)) --> \(srtTimestamp(end))\n\(gap.exportSentence())"
+        }
+        for (index, segment) in document.segments.enumerated() {
+            for gap in positions[index] ?? [] { bodies.append(try gapBody(gap)) }
             guard let start = timestampMilliseconds(segment.startS),
                   let end = timestampMilliseconds(segment.endS),
                   end > start
             else {
                 throw TranscriptExportError.invalidSRTTimestamp(segmentIndex: index)
             }
-            return "\(index + 1)\n\(srtTimestamp(start)) --> \(srtTimestamp(end))\n\(segment.speaker): \(segment.text)\(unresolvedMarkers(for: index, run: run, record: record))"
+            bodies.append("\(srtTimestamp(start)) --> \(srtTimestamp(end))\n\(segment.speaker): \(segment.text)\(unresolvedMarkers(for: index, run: run, record: record))")
         }
+        for gap in positions[document.segments.count] ?? [] { bodies.append(try gapBody(gap)) }
+        let entries = bodies.enumerated().map { offset, body in "\(offset + 1)\n\(body)" }
         return entries.isEmpty ? "" : entries.joined(separator: "\n\n") + "\n"
     }
 

@@ -501,6 +501,47 @@ public struct SpeakerProposalDecline: Codable, Equatable, Sendable {
     }
 }
 
+/// Why the proposer left an unattributed segment unexamined: it never asked
+/// the model about it and the segment is neither proposed nor declined.
+public enum SpeakerProposalSkipReason: String, Codable, Equatable, Sendable {
+    /// The segment is a non-speech event the ASR adapter marked with the
+    /// `non_speech_event` flag — a `[Silence]`-style row. It has no speaker to
+    /// find, so a model call on it is wasted and an answer would be noise.
+    case nonSpeechEvent = "non_speech_event"
+}
+
+/// An unattributed segment the proposer did not examine, and why. Listed so
+/// a reader can tell "not asked" from "asked and declined", and so the
+/// artifact still accounts for every unattributed segment exactly once.
+public struct SpeakerProposalSkip: Codable, Equatable, Sendable {
+    public var segmentIndex: Int
+    public var reason: SpeakerProposalSkipReason
+
+    public init(segmentIndex: Int, reason: SpeakerProposalSkipReason) {
+        self.segmentIndex = segmentIndex
+        self.reason = reason
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case reason
+        case segmentIndex = "segment_index"
+    }
+}
+
+/// The wire flag the ASR adapter writes on a segment whose text is a
+/// non-speech event rather than speech. Kept as the bare string here so this
+/// module does not depend on the typed event; the reading surface's
+/// `NonSpeechEvent.flag` names the same value.
+private let nonSpeechEventFlag = "non_speech_event"
+
+private extension Segment {
+    /// True for a row that is a non-speech event: no speaker to find, no
+    /// text to correct, nothing to translate.
+    var isNonSpeechEvent: Bool {
+        flags?.contains(nonSpeechEventFlag) == true
+    }
+}
+
 /// The derived run's speaker-proposal artifact.
 ///
 /// Every segment the source run left unattributed appears exactly once, in
@@ -530,6 +571,10 @@ public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
     public var unattributedSpeakers: [String]
     public var proposals: [SpeakerProposal]
     public var declined: [SpeakerProposalDecline]
+    /// Unattributed segments the proposer did not ask about, with the reason.
+    /// Absent on artifacts written before 2026-09-04, which examined every
+    /// unattributed segment; present, possibly empty, on every later one.
+    public var notExamined: [SpeakerProposalSkip]?
     public var batches: [TranslationBatchRecord]
 
     public init(
@@ -541,6 +586,7 @@ public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
         unattributedSpeakers: [String] = UnattributedSpeaker.labels,
         proposals: [SpeakerProposal],
         declined: [SpeakerProposalDecline],
+        notExamined: [SpeakerProposalSkip]? = nil,
         batches: [TranslationBatchRecord]
     ) {
         self.schemaVersion = schemaVersion
@@ -551,6 +597,7 @@ public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
         self.unattributedSpeakers = unattributedSpeakers
         self.proposals = proposals
         self.declined = declined
+        self.notExamined = notExamined
         self.batches = batches
     }
 
@@ -560,6 +607,7 @@ public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
         case sourceSegmentsSHA256 = "source_segments_sha256"
         case sourceCoverage = "source_coverage"
         case unattributedSpeakers = "unattributed_speakers"
+        case notExamined = "not_examined"
     }
 }
 
@@ -721,9 +769,13 @@ public struct TranscriptPostprocessor: Sendable {
     }
 
     public func process(_ request: PostprocessRequest) async throws -> PostprocessResult {
+        // A non-speech row is never sent: its text is a marker, not speech,
+        // and it passes through unchanged. A proposal can only target a
+        // segment of its batch, so none can reach it.
         let batches = try TextBatchPlanner.plan(
             document: request.document,
-            policy: backend.batchPolicy
+            policy: backend.batchPolicy,
+            excluding: \.isNonSpeechEvent
         ) { segments in
             try PostprocessPrompt.make(for: request, segments: segments)
         }
@@ -865,9 +917,13 @@ public struct TranscriptTranslator: Sendable {
         guard isSHA256(request.sourceSegmentsSHA256) else {
             throw PostprocessError.invalidSourceSegmentsSHA256
         }
+        // A non-speech row is never sent; it is carried into the translation
+        // verbatim below, because a marker is the same in every language and
+        // the artifact must still cover every segment exactly once.
         let batches = try TextBatchPlanner.plan(
             document: request.document,
-            policy: backend.batchPolicy
+            policy: backend.batchPolicy,
+            excluding: \.isNonSpeechEvent
         ) { segments in
             try TranslationPrompt.make(
                 for: request,
@@ -914,6 +970,14 @@ public struct TranscriptTranslator: Sendable {
                 outputTextUTF8Bytes: outputTextUTF8Bytes,
                 responseUTF8Bytes: response.responseUTF8Bytes,
                 acceptedOutputTokenUpperBound: acceptedOutputTokenUpperBound
+            ))
+        }
+        for (index, segment) in request.document.segments.enumerated()
+            where segment.isNonSpeechEvent
+        {
+            translations.append(SegmentTranslation(
+                segmentIndex: index,
+                translatedText: segment.text
             ))
         }
         translations.sort { $0.segmentIndex < $1.segmentIndex }
@@ -1017,8 +1081,18 @@ public struct SpeakerProposer: Sendable {
         }
 
         let segments = request.document.segments
+        // An unattributed non-speech row has no speaker to find: it is
+        // listed as not examined, never asked about, never declined. On the
+        // first real run three such rows cost model calls and one drew a
+        // proposal.
+        let notExamined = segments.indices.filter {
+            UnattributedSpeaker.isUnattributed(segments[$0].speaker)
+                && segments[$0].isNonSpeechEvent
+        }
+        let skipped = Set(notExamined)
         let unattributed = segments.indices.filter {
             UnattributedSpeaker.isUnattributed(segments[$0].speaker)
+                && !skipped.contains($0)
         }
         guard !unattributed.isEmpty else {
             throw PostprocessError.noUnattributedSegments
@@ -1030,6 +1104,9 @@ public struct SpeakerProposer: Sendable {
 
         var evidenceByIndex: [Int: SegmentSpeakerEvidence] = [:]
         for record in request.evidence {
+            // Evidence for a skipped row is legitimate — the merger measured
+            // it — and simply unused.
+            if skipped.contains(record.segmentIndex) { continue }
             guard segments.indices.contains(record.segmentIndex),
                   targets.contains(record.segmentIndex)
             else {
@@ -1048,7 +1125,8 @@ public struct SpeakerProposer: Sendable {
 
         let batches = try TextBatchPlanner.plan(
             document: request.document,
-            policy: backend.batchPolicy
+            policy: backend.batchPolicy,
+            excluding: \.isNonSpeechEvent
         ) { batchSegments in
             try SpeakerProposalPrompt.make(
                 segments: batchSegments,
@@ -1189,6 +1267,9 @@ public struct SpeakerProposer: Sendable {
                 constraint: .confirmOrDecline,
                 proposals: proposals,
                 declined: declined,
+                notExamined: notExamined.map {
+                    SpeakerProposalSkip(segmentIndex: $0, reason: .nonSpeechEvent)
+                },
                 batches: records
             ),
             manifestPostprocess: provenance
@@ -1233,10 +1314,16 @@ public struct SpeakerProposer: Sendable {
                 modelAnswer: modelAnswer
             ))
         }
+        // The sentences below are read by a person, on screen and in the
+        // clipboard, whenever this app has no sentence of its own for the
+        // cause. They are written in plain language and name a speaker only
+        // in the `speaker <id>` form: the ID is what the artifact knows, and
+        // the reading surface renders that form with the reader's own names
+        // at read time. None of the prompt's field names appear in them.
         guard let decision else {
             return decline(
                 .noDecision,
-                reason: "the proposer returned no decision for this segment"
+                reason: "The proposal run returned no answer for this segment, so no speaker is proposed."
             )
         }
         guard let topRanked else {
@@ -1245,14 +1332,14 @@ public struct SpeakerProposer: Sendable {
             if evidence.candidates.isEmpty {
                 return decline(
                     .noAcousticCandidates,
-                    reason: "Declined under confirm-or-decline: no diarization turn overlapped this segment, so there is no top-ranked candidate to confirm. "
+                    reason: "No speaker was active on the speaker timeline during this segment, so there was nobody to confirm and no speaker is proposed. "
                         + Self.modelAnswerClause(decision),
                     modelAnswer: decision
                 )
             }
             return decline(
                 .noTopRankedCandidate,
-                reason: "Declined under confirm-or-decline: the acoustic candidates \(Self.tiedSpeakers(in: evidence.candidates)) hold equal overlap, so there is no top-ranked candidate to confirm. "
+                reason: "\(Self.tiedSpeakers(in: evidence.candidates)) held the same time in this segment, so there was nobody to confirm and no speaker is proposed. "
                     + Self.modelAnswerClause(decision),
                 modelAnswer: decision
             )
@@ -1275,7 +1362,7 @@ public struct SpeakerProposer: Sendable {
                 .map { Self.percent($0.share) } ?? "an unknown share"
             return decline(
                 .modelDisagreedWithTopRankedCandidate,
-                reason: "Declined under confirm-or-decline: the language evidence pointed to speaker \(decision.proposedSpeaker), but the top-ranked candidate is speaker \(topRanked) at \(share) of the overlapped speech, and a proposal may only confirm that candidate. The model's reason: \(decision.reason)",
+                reason: "The conversation pointed to speaker \(decision.proposedSpeaker), but speaker \(topRanked) held the most of this segment's speech, \(share) of it, and only that speaker could be confirmed, so no speaker is proposed. The model's reason: \(decision.reason)",
                 modelAnswer: decision
             )
         }
@@ -1292,17 +1379,20 @@ public struct SpeakerProposer: Sendable {
         }
     }
 
-    /// The speakers sharing the top overlap, named in the order the merger
-    /// ranked them.
+    /// The speakers sharing the top overlap, each in the `speaker <id>` form,
+    /// named in the order the merger ranked them and capitalised to open a
+    /// sentence: "Speaker 0 and speaker 1".
     private static func tiedSpeakers(
         in candidates: [SpeakerCandidateEvidence]
     ) -> String {
         let top = candidates.map(\.overlapS).max() ?? 0
         let names = candidates
             .filter { top - $0.overlapS <= SpeakerProposalConstraint.topRankedMarginS }
-            .map(\.speaker)
-        guard names.count > 1 else { return names.joined() }
-        return names.dropLast().joined(separator: ", ") + " and " + names.last!
+            .map { "speaker \($0.speaker)" }
+        let listed = names.count > 1
+            ? names.dropLast().joined(separator: ", ") + " and " + names.last!
+            : names.joined()
+        return listed.prefix(1).uppercased() + listed.dropFirst()
     }
 
     private static func percent(_ share: Double) -> String {
@@ -1377,15 +1467,19 @@ private struct BatchOutputEvidence: Sendable {
 }
 
 private enum TextBatchPlanner {
+    /// - Parameter excluding: segments that never enter a batch, so the
+    ///   model is never asked about them and can never answer for them. A
+    ///   non-speech row is the case: it is passed through unchanged.
     static func plan(
         document: SegmentsDocument,
         policy: PostprocessBatchPolicy,
+        excluding: (Segment) -> Bool = { _ in false },
         prompt: ([IndexedTextSegment]) throws -> String
     ) throws -> [PlannedTextBatch] {
         guard !document.segments.isEmpty else { throw PostprocessError.emptyDocument }
-        let indexed = document.segments.enumerated().map {
-            IndexedTextSegment(index: $0.offset, text: $0.element.text)
-        }
+        let indexed = document.segments.enumerated()
+            .filter { !excluding($0.element) }
+            .map { IndexedTextSegment(index: $0.offset, text: $0.element.text) }
         var result: [PlannedTextBatch] = []
         var current: [IndexedTextSegment] = []
 
@@ -1671,6 +1765,22 @@ public enum SpeakerProposalPrompt {
         return (value * 1_000).rounded() / 1_000
     }
 
+    /// How the model is told to write the one field a person reads.
+    ///
+    /// On the first real run the reasons named speakers by bare ID, in
+    /// whichever form the model chose, and leaned on this prompt's own
+    /// vocabulary — `acoustic`, `candidate`, `top-ranked`, `confirm`,
+    /// `overlap`, `share`, `turn`, `target` — which means nothing to a reader
+    /// who has not seen the prompt. Two rules fix that at the source. The
+    /// speaker form is fixed to `speaker <id>`, because the artifact must keep
+    /// the merger's IDs (display names are assigned later and change) and
+    /// that is the one form the reading surface can render with a name
+    /// safely: a bare `1` is also a segment number and half of `0.5`. And the
+    /// sentence is written for the transcript's reader, in the transcript's
+    /// language, about the conversation rather than about the evidence
+    /// fields. The output schema is unchanged.
+    static let reasonInstruction = "Write each reason for a reader of the transcript who has not seen this instruction and will not see these fields. Say what in the conversation supports or undermines the speaker: who asked, who is answering, whose sentence continues. Refer to a speaker only as the word speaker followed by its exact id from known_speakers, for example speaker 0, and never by a name, a role, or a bare number. Do not mention candidates, shares, overlap, seconds, acoustics, diarization, targets, confirmation, or any field name of this input. Write in the language the transcript is written in."
+
     fileprivate static func make(
         segments: [IndexedTextSegment],
         document: SegmentsDocument,
@@ -1712,6 +1822,7 @@ public enum SpeakerProposalPrompt {
             "acoustic_candidates lists the speakers whose diarization turns overlapped a target segment, how many seconds each held, and each one's share of the segment's attributed time. top_ranked_candidate names the candidate with the largest share, or is null when no candidate leads: none overlapped the segment, or the top candidates tie. What you add is the conversation: who was answering whom, who was mid-sentence, who the surrounding turns belong to.",
             "Propose only to confirm top_ranked_candidate: when the conversation supports that speaker, set proposed_speaker to top_ranked_candidate. Never propose any other speaker, even when the conversation points to one, and never invent a speaker.",
             "Decline when top_ranked_candidate is null, when the conversation gives no real reason to confirm that candidate, or when the conversation points to a different speaker; in that last case, name in the reason the speaker the conversation pointed to. A decline is a correct answer; a guess dressed as a proposal is not.",
+            Self.reasonInstruction,
             "Return exactly one JSON object with this shape and no commentary:",
             #"{"speaker_proposals":[{"segment_index":0,"proposed_speaker":"0","disposition":"propose","reason":"brief reason"}]}"#,
             #"The only root key is speaker_proposals. Every entry has exactly segment_index, proposed_speaker, disposition, and reason. disposition is propose or decline. When disposition is decline, proposed_speaker must be the empty string. Answer exactly once for every segment whose target is true, and for no other segment."#,

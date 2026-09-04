@@ -109,9 +109,73 @@ struct RunnerCaptureRecoveryTests {
             includingPropertiesForKeys: nil
         )
         #expect(kept.count == 1, "a failed run keeps its request scratch for diagnosis")
+        // Named after the request's own ID, so the library record that
+        // launched it can find it without the runner reporting anything.
+        #expect(
+            kept.first?.lastPathComponent
+                == EngineRequestScratch.directoryName(for: fixture.request.requestID)
+        )
+        #expect(kept.first?.lastPathComponent.hasPrefix("request-") == true)
         let stderrLog = try #require(kept.first).appendingPathComponent("stderr.log")
         #expect(try String(contentsOf: stderrLog, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines) == "engine refused the request")
+    }
+
+    /// A partial run (D51) lost one named range and kept everything else, so
+    /// it is a completed run to read, not a failure to file. Its scratch is
+    /// kept like a failure's: the manifest names the loss, the engine's
+    /// stderr is its only full account of the leaf that was lost, and the
+    /// retention policy bounds a kept directory by the record's lifetime.
+    @Test @MainActor
+    func partialRunReturnsItsURLAndKeepsItsRequestScratch() async throws {
+        let fixture = try RunnerRecoveryFixture()
+        defer { fixture.remove() }
+        let runID = "partial-with-one-lost-range"
+        let manifest = try fixture.manifestPayload(
+            runID: runID,
+            status: .partial,
+            failure: Failure(
+                code: "ASR_REPETITION_LOOPING",
+                message: "promoted 1212.52 s of 1243.08 s; 1 range(s) produced no transcript: [871.552, 902.112) s"
+            ),
+            coverage: Coverage(
+                inputDurationS: 1_243.08,
+                processedDurationS: 1_212.52,
+                truncated: true,
+                strategy: .backendTruncated,
+                chunksPlanned: 3,
+                chunksCompleted: 3
+            )
+        )
+        let expectedRunURL = fixture.outputRoot.appendingPathComponent(runID)
+        let script = try fixture.script(
+            creating: [(runID, manifest)],
+            printing: expectedRunURL.path
+        )
+        let runner = try fixture.runner(executableURL: script)
+        var lastSnapshot: RunProgressSnapshot?
+
+        let result = try await runner.run(fixture.request) { lastSnapshot = $0 }
+
+        #expect(result.standardizedFileURL == expectedRunURL.standardizedFileURL)
+        // The last snapshot reads as complete: a partial run finished.
+        #expect(lastSnapshot?.stage == .complete)
+        #expect(lastSnapshot?.runURL?.standardizedFileURL == expectedRunURL.standardizedFileURL)
+        // The failure record is still readable where it lives, in the manifest,
+        // and says what was lost.
+        let sealed = try JSONDecoder().decode(
+            Manifest.self,
+            from: Data(contentsOf: result.appendingPathComponent("manifest.json"))
+        )
+        #expect(sealed.status == .partial)
+        #expect(sealed.failure?.code == "ASR_REPETITION_LOOPING")
+        #expect(sealed.coverage.processedDurationS == 1_212.52)
+        let kept = try FileManager.default.contentsOfDirectory(
+            at: fixture.requestsRoot,
+            includingPropertiesForKeys: nil
+        )
+        #expect(kept.map(\.lastPathComponent)
+            == [EngineRequestScratch.directoryName(for: fixture.request.requestID)])
     }
 
     @Test @MainActor
@@ -287,7 +351,8 @@ private struct RunnerRecoveryFixture {
         runID: String,
         inputData: Data? = nil,
         status: RunStatus = .succeeded,
-        failure: Failure? = nil
+        failure: Failure? = nil,
+        coverage: Coverage? = nil
     ) throws -> Data {
         let data = inputData ?? sourceData
         return try JSONEncoder().encode(Manifest(
@@ -308,7 +373,7 @@ private struct RunnerRecoveryFixture {
                 vad: ProcessingSwitch(enabled: true, backend: "fixture"),
                 enhancement: ProcessingSwitch(enabled: false, backend: nil)
             ),
-            coverage: Coverage(
+            coverage: coverage ?? Coverage(
                 inputDurationS: 1,
                 processedDurationS: 1,
                 truncated: false,

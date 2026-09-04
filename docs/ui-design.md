@@ -285,8 +285,82 @@ a resolved chip differ in both.
 
 Raw flag tokens never appear in the reading surface. `conflict` and
 `uncertain` are represented by the chip; `backend_speaker_evidence` is
-provenance on 245 of 248 segments and belongs in the segment's detail; any flag
-the app has no word for is shown only there, under *Other markers*.
+provenance on 245 of 248 segments and belongs in the segment's detail;
+`non_speech_event` is represented by the row itself (below); any flag the app
+has no word for is shown only in the detail, under *Other markers*.
+
+#### A segment that holds no speech
+
+The speech model marks audio that carried no words with a bracketed label in
+the text field: `[Silence]`, `[Human Sounds]`, `[Environmental Sounds]`,
+`[Music]`, `[Noise]`, `[Speech]`. On the measured run three of the 248
+segments are nothing but such a marker, and the text column printed them as
+speech, in the primary ink beside a speaker cell. The field's term is a
+**non-speech event** (`docs/terminology.md`), and the row treats it as one.
+
+- **What decides it.** A segment whose whole text is one marker is an event.
+  Since 2026-09-04 the ASR adapter types it with the `non_speech_event` flag
+  beside the verbatim text; a run sealed before that carries no flag and is
+  read through its text, which judgment rule 3 leaves exactly as written. A
+  marker inside speech, `we heard a [Buzzer] just then`, is speech: the words
+  are the record and the marker reads inline as the engine placed it.
+- **The event treatment.** The text column prints the event in the reader's
+  language, *Silence*, *Human sounds*, *Environmental sounds*, *Music*,
+  *Noise*, *Speech without words*, at the body size, italic, in the secondary
+  ink. The italic is the mark that survives a reader who cannot tell the two
+  inks apart, and it is what a script uses for a stage direction, which is
+  what the row is. No glyph, no chip, no brackets, no fill. A label outside the
+  known vocabulary prints its own marker, because the marker is the only
+  record of what it was. The accessibility label reads *Non-speech event*
+  before the word, and the tooltip says the model marked it, not a person.
+- **The gutter is unchanged.** The speaker cell, the figures and the band keep
+  saying what the acoustics said about the interval. A *Silence* row under
+  *Speaker not named* with two candidates and a band is a disagreement between
+  diarization and the speech model, and it is worth seeing; the row does not
+  resolve it, and the review chip stays.
+- **Copy and export.** The clipboard, Markdown and SRT carry the engine's
+  marker verbatim in the text position, with the speaker the acoustics gave
+  the interval, exactly as the row would copy if it were speech. Brackets are
+  the caption convention for a non-speech event in plain text, and the copy
+  is the data surface where the reading surface's word would be a second
+  vocabulary. Every row, speech or event, is therefore byte-exact against the
+  run. The segments-JSON export is the document itself and keeps the flag.
+
+#### A run that lost a stretch of the recording
+
+A `partial` run promoted everything it could and lost a range; under D51 it
+writes `primary/partial-coverage.json` naming each lost range, and the
+measured run lost `[871.552, 902.112) s`, 30.56 s of 1243.08. The transcript
+screen states the hole in two places so a reader sees where it is, not only
+that one exists:
+
+- **The notice**, in the header under the tabs on every layer: *30.6 sec of
+  this recording produced no transcript, from 14:31 to 15:02. The transcript
+  covers 20:12 of 20:43.* It is the open colour beside the warning glyph, the
+  one use of status colour the header already had for a missing range, and it
+  names every range when there are several. A run short of its input whose
+  record is missing still gets the sentence without the ranges, so the hole is
+  never silent (judgment rule 2). The proposal notice's own coverage sentence
+  stands down when this one is present, because this one says the same thing
+  with the places named.
+- **The gap row**, at the hole's place in the row order: before the first
+  segment that starts at or after it, or after the last. It keeps the table's
+  columns, the gap's start in the time column and one sentence in the text
+  column, *No transcript from 14:31 to 15:02 (30.6 sec).*, both in the open
+  colour beside the glyph, nothing in the speaker or review columns, and the
+  same hairline as any row. No fill, no strip. A search narrows the rows to
+  the matches and shows no gap rows; the notice stays.
+- **Copy and export.** The clipboard prints the notice sentence on the line
+  under the layer header on every layer, and a whole-transcript copy also
+  prints each gap at its place among the rows, in the row's own timestamp
+  form and with no speaker: `[00:14:31.552 – 00:15:02.112] No transcript for
+  30.6 sec of the recording.` A selection copy prints the sentence under the
+  header only: the rows a reader chose are the rows they get. The Markdown
+  export opens with the sentence and carries the same gap lines; the SRT
+  export carries each gap as a subtitle of its own at its place, renumbering
+  around it, so a player shows the hole while it plays. Speech rows are
+  byte-exact in every format. The segments-JSON export is the document and
+  is unchanged; the manifest and the coverage record name the ranges there.
 
 #### The proposal layer on a row
 
@@ -425,7 +499,8 @@ heading stops competing with the body it heads); transcript body 15 with 3 pt
 line spacing; speaker name 13 semibold; meta and figures 12; label 11 heavy,
 used only for chips and column headers. Numbers that align down a column are
 set in tabular figures. Nothing a reader reads is smaller than 11, and 11 is
-reserved for the heavy-weight label face.
+reserved for the heavy-weight label face. A non-speech event is the body face
+in italic and the secondary ink, the one italic on the surface.
 
 **Spacing.** 4 / 8 / 12 / 16 / 24. Row vertical padding 12, column gap 8, gap
 before the text 12, no inter-row spacing (the hairline is the separation).
@@ -464,7 +539,15 @@ The shipped `TranscriptView` renders as itself, but its own `ScrollView`
 settles at a non-zero offset offscreen and its `.navigationTitle` wrapper lays
 the screen out taller than the frame, so that image starts part-way down the
 list and carries no header. The images this section measures are composed from
-the same shipped header and segment-column views the screen builds. SwiftUI's
+the same shipped header and segment-column views the screen builds. Amended
+2026-09-04: hosted bare, the view reports a fitting height of zero, and opened
+on the proposed layer it drew nothing at all; hosted inside the
+`NavigationSplitView` that `RootView` composes it in, with a stub sidebar, the
+same shipped view lays out inside the frame with its title, counts, tabs,
+notice, rule and rows. That is how the layer switch was rendered for the first
+time, on the synthetic four-segment run with a speaker-proposal set, and read
+back by OCR and by the position of the accent underline. The sidebar column
+itself still does not draw. SwiftUI's
 own `ImageRenderer`, the path D48 first recorded, returns nothing at all for a
 scroll container, a `List` or a grouped form and draws `TextField`, `Slider`
 and AppKit-backed button styles as placeholder blocks; this surface's `.plain`

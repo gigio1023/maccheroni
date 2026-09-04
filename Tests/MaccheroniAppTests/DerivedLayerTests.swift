@@ -416,6 +416,79 @@ struct DerivedLayerTests {
         try expectRejectedProposal(root: root, runURL: fixture.runURL, id: "incomplete")
     }
 
+    /// A non-speech row — `[Silence]`, flagged `non_speech_event` by the ASR
+    /// adapter — has no speaker to find, so the proposer lists it as not
+    /// examined rather than spending a model call on it. The listing is
+    /// accepted only when the source itself carries the flag: an artifact
+    /// may not declare a speech row to be silence and excuse itself.
+    @Test
+    func aNonSpeechRowMayBeListedAsNotExaminedOnlyWhenTheSourceFlagsIt() throws {
+        let root = try derivedLayerTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let flagged = try derivedLayerRunFixture(
+            in: root,
+            runID: "flagged-run",
+            segmentTwoIsNonSpeech: true
+        )
+        try derivedLayerWriteSpeakerProposal(
+            fixture: flagged,
+            id: "skips-silence",
+            finishedAt: "2026-09-04T12:00:00Z",
+            segmentTwoNotExamined: true
+        )
+
+        let loaded = try LibraryRepository(root: root).loadRun(at: flagged.runURL)
+
+        let proposal = try #require(loaded.speakerProposal)
+        #expect(proposal.proposals.map(\.segmentIndex) == [1])
+        #expect(proposal.declined.isEmpty)
+        #expect(proposal.notExamined == [SpeakerProposalSkip(segmentIndex: 2, reason: .nonSpeechEvent)])
+        #expect(loaded.unreadableDerivedSets.isEmpty)
+        #expect(loaded.derivedResults[0].speakerProposalCounts == SpeakerProposalCounts(proposed: 1, declined: 0))
+
+        // The same artifact over a source whose segment 2 is speech is a
+        // proposal set that quietly skipped a segment, and is rejected.
+        let speech = try derivedLayerRunFixture(in: root, runID: "speech-run")
+        try derivedLayerWriteSpeakerProposal(
+            fixture: speech,
+            id: "excuses-itself",
+            finishedAt: "2026-09-04T12:00:00Z",
+            segmentTwoNotExamined: true
+        )
+        try expectRejectedProposal(root: root, runURL: speech.runURL, id: "excuses-itself")
+
+        // And a set that both declines and lists the same row is rejected:
+        // every unattributed index appears exactly once.
+        let twice = try derivedLayerRunFixture(
+            in: root,
+            runID: "twice-run",
+            segmentTwoIsNonSpeech: true
+        )
+        try derivedLayerWriteSpeakerProposal(
+            fixture: twice,
+            id: "listed-twice",
+            finishedAt: "2026-09-04T12:00:00Z"
+        ) { declines in
+            declines
+        }
+        // The plain writer declines segment 2; rewrite the sealed artifact to
+        // add the listing beside the decline.
+        let artifactURL = twice.runURL.appendingPathComponent(
+            "derived/listed-twice/speaker/proposals.json"
+        )
+        var document = try JSONDecoder().decode(
+            SpeakerProposalDocument.self,
+            from: Data(contentsOf: artifactURL)
+        )
+        document.notExamined = [SpeakerProposalSkip(segmentIndex: 2, reason: .nonSpeechEvent)]
+        try JSONEncoder().encode(document).write(to: artifactURL)
+        let manifestURL = twice.runURL.appendingPathComponent("derived/listed-twice/manifest.json")
+        var manifest = try JSONDecoder().decode(DerivedManifest.self, from: Data(contentsOf: manifestURL))
+        manifest.artifacts[0].sha256 = try derivedLayerSHA256(of: artifactURL)
+        try JSONEncoder().encode(manifest).write(to: manifestURL)
+        try expectRejectedProposal(root: root, runURL: twice.runURL, id: "listed-twice")
+    }
+
     /// The acoustic evidence in the artifact is checked against the run's own
     /// conflicts, not taken on trust from the artifact.
     @Test
@@ -760,7 +833,10 @@ private func expectRejectedProposal(
 
 // MARK: - Fixtures
 
-private struct DerivedLayerRunFixture {
+/// Shared with the offscreen render suite, which renders the shipped
+/// transcript view over this run: it is the one synthetic run that carries
+/// two available layers, so it needs no private recording.
+struct DerivedLayerRunFixture {
     var runURL: URL
     var segmentsURL: URL
     var conflictsURL: URL
@@ -790,7 +866,7 @@ private func derivedLayerRecord() -> LibraryRecord {
     )
 }
 
-private func derivedLayerTemporaryDirectory() throws -> URL {
+func derivedLayerTemporaryDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(
         "MaccheroniDerivedLayerTests-\(UUID().uuidString)",
         isDirectory: true
@@ -813,10 +889,14 @@ private let derivedLayerThresholds = SpeakerAttributionThresholds(
 /// A four-segment run with two segments the acoustics declined to name: one
 /// with a clear sub-threshold top-ranked candidate, one an exact tie with no top-ranked candidate at all.
 /// Those are the two shapes the proposer and D50 behave differently on.
-private func derivedLayerRunFixture(
+func derivedLayerRunFixture(
     in root: URL,
     runID: String = "derived-layer-run",
-    complete: Bool = true
+    complete: Bool = true,
+    /// Mark segment 2 as a non-speech event, the row the proposer may list
+    /// as not examined. Its acoustic record is unchanged: the merger measured
+    /// a tie there whatever the text was.
+    segmentTwoIsNonSpeech: Bool = false
 ) throws -> DerivedLayerRunFixture {
     let runURL = root.appendingPathComponent(runID, isDirectory: true)
     let primaryURL = runURL.appendingPathComponent("primary", isDirectory: true)
@@ -844,7 +924,9 @@ private func derivedLayerRunFixture(
         segments: [
             Segment(speaker: "SPEAKER_00", startS: 0, endS: 2, text: "Zero"),
             Segment(speaker: "UNKNOWN", startS: 2, endS: 4, text: "One"),
-            Segment(speaker: "UNKNOWN", startS: 4, endS: 6, text: "Two"),
+            segmentTwoIsNonSpeech
+                ? Segment(speaker: "UNKNOWN", startS: 4, endS: 6, text: "[Silence]", flags: ["non_speech_event"])
+                : Segment(speaker: "UNKNOWN", startS: 4, endS: 6, text: "Two"),
             Segment(speaker: "SPEAKER_01", startS: 6, endS: 8, text: "Three"),
         ],
         numSpeakers: 2,
@@ -1087,7 +1169,7 @@ private func derivedLayerTranslationBatch(
 
 /// Writes a sealed speaker-proposal derived set exactly as the CLI does, with
 /// named holes for the ways one can lie about its source.
-private func derivedLayerWriteSpeakerProposal(
+func derivedLayerWriteSpeakerProposal(
     fixture: DerivedLayerRunFixture,
     id: String,
     finishedAt: String,
@@ -1100,6 +1182,9 @@ private func derivedLayerWriteSpeakerProposal(
     extraProposalOnAttributedSegment: Bool = false,
     inflateFirstCandidateShare: Bool = false,
     claimCompleteCoverage: Bool = false,
+    /// List segment 2 as not examined, a non-speech event, instead of
+    /// declining it. True only of a proposer that never asked about it.
+    segmentTwoNotExamined: Bool = false,
     /// The last hook: rewrite the sealed declines. A decline explains why no
     /// speaker was proposed, and every way of lying about that lies in a field
     /// the hash still covers.
@@ -1164,7 +1249,7 @@ private func derivedLayerWriteSpeakerProposal(
             )
         )
     }
-    var declined = omitDeclines ? [] : [
+    var declined = omitDeclines || segmentTwoNotExamined ? [] : [
         SpeakerProposalDecline(
             segmentIndex: 2,
             reason: "The two speakers held equal overlap, so there is no top-ranked candidate to confirm.",
@@ -1207,7 +1292,10 @@ private func derivedLayerWriteSpeakerProposal(
         constraint: .confirmOrDecline,
         proposals: proposals,
         declined: rewritingDeclines(declined),
-        batches: [derivedLayerBatch(segmentIndices: [1, 2])]
+        notExamined: segmentTwoNotExamined
+            ? [SpeakerProposalSkip(segmentIndex: 2, reason: .nonSpeechEvent)]
+            : nil,
+        batches: [derivedLayerBatch(segmentIndices: segmentTwoNotExamined ? [1] : [1, 2])]
     )
     let artifactURL = speakerDirectory.appendingPathComponent("proposals.json")
     try JSONEncoder().encode(document).write(to: artifactURL)

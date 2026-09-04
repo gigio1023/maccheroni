@@ -149,10 +149,13 @@ struct TranscriptReadingTests {
             layer: .translated
         )
 
-        #expect(raw.text.hasPrefix("Transcript layer: Speaker-labelled\n\n"))
+        // The fixture has the real run's partial coverage, so the hole is named
+        // on the line under the layer header, on both layers.
+        let hole = "30.6 sec of this recording produced no transcript. The transcript covers 20:12 of 20:43."
+        #expect(raw.text.hasPrefix("Transcript layer: Speaker-labelled\n\(hole)\n\n"))
         #expect(raw.text.contains(source.segments[0].text))
         #expect(!raw.text.contains("Translated line "))
-        #expect(translated.text.hasPrefix("Transcript layer: Translated\n\n"))
+        #expect(translated.text.hasPrefix("Transcript layer: Translated\n\(hole)\n\n"))
         #expect(translated.text.contains("Translated line "))
         #expect(!translated.text.contains(source.segments[0].text))
         // The layer is a reading of what is loaded; copying it writes nothing.
@@ -582,6 +585,146 @@ struct TranscriptReadingTests {
         #expect(TranscriptFlagVocabulary.otherMarkers(flags) == ["clipped_edge"])
         #expect(TranscriptFlagVocabulary.otherMarkers(["backend_speaker_evidence"]).isEmpty)
         #expect(!TranscriptFlagVocabulary.marksUncertainty(["backend_speaker_evidence"]))
+        // The event flag has a word of its own — the row — so it is not an
+        // "other marker" either, and it marks nothing for review.
+        #expect(TranscriptFlagVocabulary.otherMarkers(["non_speech_event"]).isEmpty)
+        #expect(!TranscriptFlagVocabulary.marksUncertainty(["non_speech_event"]))
+    }
+
+    // MARK: A run short of its input
+
+    /// A partial run names its missing range where the reader looks: once in
+    /// the header with the places, and once as a row at the hole's place.
+    @Test
+    func aPartialRunNamesItsMissingRangeInTheHeaderAndAtItsPlaceInTheRows() throws {
+        let english = Locale(identifier: "en")
+        let root = try derivedLayerTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try derivedLayerRunFixture(in: root, complete: false)
+        let run = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+        let record = TranscriptFixtures.record(runURL: fixture.runURL)
+
+        let coverage = try #require(TranscriptMissingCoverage.load(run: run, record: record))
+        #expect(coverage.missingDurationS == 2)
+        #expect(coverage.gaps == [TranscriptGap(startS: 6, endS: 8)])
+        #expect(coverage.sentence(locale: english)
+            == "2.0 sec of this recording produced no transcript, from 00:06 to 00:08. The transcript covers 00:06 of 00:08.")
+        #expect(coverage.gaps[0].sentence(locale: english)
+            == "No transcript from 00:06 to 00:08 (2.0 sec).")
+
+        // The gap sits before the first segment that starts at or after it.
+        let entries = TranscriptSegmentColumn.entries(segments: run.segments, gaps: coverage.gaps)
+        #expect(entries.map(\.id) == [
+            .segment(run.segments[0].id), .segment(run.segments[1].id),
+            .segment(run.segments[2].id), .gap(coverage.gaps[0].id),
+            .segment(run.segments[3].id),
+        ])
+        // A gap after the last segment, and one before the first.
+        let tail = TranscriptGap(startS: 8, endS: 9)
+        #expect(TranscriptSegmentColumn.entries(segments: run.segments, gaps: [tail]).last?.id == .gap(tail.id))
+        let head = TranscriptGap(startS: 0, endS: 1)
+        #expect(TranscriptSegmentColumn.entries(segments: run.segments, gaps: [head]).first?.id == .gap(head.id))
+
+        // A complete run has no notice and no gap rows.
+        let complete = try derivedLayerRunFixture(in: root, runID: "complete-run")
+        let completeRun = try LibraryRepository(root: root).loadRun(at: complete.runURL)
+        #expect(TranscriptMissingCoverage.load(
+            run: completeRun,
+            record: TranscriptFixtures.record(runURL: complete.runURL)
+        ) == nil)
+        #expect(TranscriptSegmentColumn.entries(segments: completeRun.segments, gaps: []).count == 4)
+
+        // A run short of its input whose coverage record is missing still
+        // says how much is missing, without the places.
+        let withoutRecord = try #require(TranscriptMissingCoverage(
+            coverage: run.manifest.coverage,
+            status: run.manifest.status,
+            partial: nil
+        ))
+        #expect(withoutRecord.gaps.isEmpty)
+        #expect(withoutRecord.sentence(locale: english)
+            == "2.0 sec of this recording produced no transcript. The transcript covers 00:06 of 00:08.")
+    }
+
+    // MARK: Non-speech events
+
+    /// On the 2026-09-01 run three of 248 rows are nothing but the engine's
+    /// non-speech marker, and the text column printed them as speech. The row
+    /// reads the event through the flag, or through the text for a run sealed
+    /// before the flag existed, and prints it in the reader's language; a
+    /// marker inside speech is speech and prints verbatim.
+    @Test
+    func aRowThatHoldsNoSpeechPrintsTheEventNotTheEnginesMarker() {
+        let english = Locale(identifier: "en")
+        let korean = Locale(identifier: "ko")
+
+        let sealedBeforeTheFlag = NonSpeechEvent.of(
+            text: "[Silence]", flags: ["conflict", "uncertain"]
+        )
+        #expect(sealedBeforeTheFlag?.kind == .silence)
+        #expect(sealedBeforeTheFlag?.label(locale: english) == "Silence")
+        #expect(sealedBeforeTheFlag?.label(locale: korean) == "무음")
+
+        let flagged = NonSpeechEvent.of(
+            text: "[Human Sounds]", flags: ["non_speech_event", "conflict"]
+        )
+        #expect(flagged?.label(locale: english) == "Human sounds")
+        #expect(NonSpeechEvent.of(text: "[Environmental Sounds]", flags: nil)?
+            .label(locale: english) == "Environmental sounds")
+        #expect(NonSpeechEvent.of(text: "[Speech]", flags: nil)?
+            .label(locale: english) == "Speech without words")
+
+        // Every known kind has a word in the reader's language, and none of
+        // those words is the engine's marker.
+        for kind in NonSpeechEvent.Kind.allCases where kind != .other {
+            let label = NonSpeechEvent(kind: kind, marker: "[x]").label(locale: english)
+            #expect(!label.isEmpty, Comment(rawValue: "\(kind)"))
+            #expect(!label.hasPrefix("["), Comment(rawValue: "\(kind)"))
+        }
+        // A label outside the vocabulary has no word and prints its marker,
+        // which is the only record of what it was.
+        #expect(NonSpeechEvent.of(text: "[Buzzer]", flags: nil)?.label(locale: english) == "[Buzzer]")
+
+        // Speech with a marker inside it is speech.
+        #expect(NonSpeechEvent.of(text: "we heard a [Buzzer] just then", flags: nil) == nil)
+        #expect(NonSpeechEvent.of(
+            text: "Overlapping exchange segment 000001 about the release plan.",
+            flags: ["backend_speaker_evidence", "conflict", "uncertain"]
+        ) == nil)
+    }
+
+    /// The event row is one line tall like a speech row, and its text column
+    /// is the event treatment rather than selectable transcript text.
+    @Test @MainActor
+    func anEventRowKeepsTheRowPitchOfASpeechRow() {
+        var fixture = TranscriptFixtures.meetingShaped()
+        // Rows 1 and 2 are both attributed and one line tall; row 2 becomes
+        // the event row, keeping the review flags the real run's three carry.
+        fixture.run.segments[2].segment.text = "[Silence]"
+        let speech = fixture.run.segments[1]
+        let event = fixture.run.segments[2]
+        #expect(SpeakerRoster.isAttributed(speech.segment.speaker))
+        #expect(SpeakerRoster.isAttributed(event.segment.speaker))
+        let roster = SpeakerRoster(segments: fixture.run.transcript.segments)
+        func height(_ item: TranscriptSegment) -> CGFloat {
+            let row = TranscriptSegmentRow(
+                item: item,
+                attribution: SegmentAttributionSummary(item: item),
+                displaySpeaker: "Jina",
+                speakerName: { $0 },
+                speakerColor: { roster.color(for: $0) },
+                text: item.segment.text,
+                reviewState: nil,
+                isFocused: false,
+                isPlaying: false,
+                isSelected: false,
+                play: {}, select: {}, rename: {}, review: {}
+            )
+            let hosting = NSHostingView(rootView: row.frame(width: 1_000))
+            return hosting.fittingSize.height
+        }
+        #expect(NonSpeechEvent.of(text: event.segment.text, flags: event.segment.flags) != nil)
+        #expect(abs(height(event) - height(speech)) < 1)
     }
 
     @Test
@@ -1641,7 +1784,9 @@ enum TranscriptFixtures {
         )
     }
 
-    private static func record() -> LibraryRecord {
+    static func record(
+        runURL: URL = URL(fileURLWithPath: "/tmp/20260901T122702Z-f2d938")
+    ) -> LibraryRecord {
         LibraryRecord(
             id: UUID(uuidString: "00000000-0000-0000-0000-0000000000f2")!,
             createdAt: Date(timeIntervalSince1970: 1_788_000_000),
@@ -1651,7 +1796,7 @@ enum TranscriptFixtures {
             securityScopedBookmark: nil,
             microphoneURL: nil,
             systemAudioURL: nil,
-            runURL: URL(fileURLWithPath: "/tmp/20260901T122702Z-f2d938"),
+            runURL: runURL,
             profileID: .koreanITMeeting,
             postprocess: .none,
             durationS: recordingDurationS,

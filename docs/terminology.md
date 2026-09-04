@@ -259,6 +259,26 @@ field has no word for the distinction the project needs.
   attributes it. The field has *speaker-attributed ASR* for the capability
   (Kanda et al., Interspeech 2020 and 2021) and no term for a label withheld
   from authority on purpose. `Sources/MaccheroniASR/ASRAdapters.swift:858`
+- **non-speech event** [field]: A segment whose text is not words a speaker
+  said but the speech model's marker for what the audio held instead:
+  VibeVoice writes `[Silence]`, `[Human Sounds]`, `[Environmental Sounds]`,
+  `[Music]`, `[Noise]` and `[Speech]` as the whole `Content` of a transcript
+  object. The captioning and ASR literature calls these non-speech events (or
+  non-speech sounds); at the tokenizer level they are sometimes called
+  *non-speech tokens*, which is loose here because they are ordinary text to
+  the Qwen2.5 tokenizer, not special tokens, and neither the model card nor
+  `mlx-audio` publishes the list, so the vocabulary is the one observed in run
+  artifacts. A segment that is nothing but one marker is an event; a marker
+  inside speech is speech. The marker is never rewritten (judgment rule 3);
+  since 2026-09-04 the ASR adapter types the segment with the flag
+  `non_speech_event` beside it, and a reader of a run sealed before that
+  classifies the text instead, in the D52 manner.
+  `Sources/MaccheroniCore/NonSpeechEvent.swift:17` for the type,
+  `Sources/MaccheroniCore/NonSpeechEvent.swift:43` for the flag,
+  `Sources/MaccheroniCore/NonSpeechEvent.swift:53` for the whole-text test,
+  written at `Sources/MaccheroniASR/ASRAdapters.swift:865`; how the reading
+  surface shows one is fixed in `docs/ui-design.md` under *A segment that
+  holds no speech*.
 - **global speaker namespace** [project]: The single set of speaker IDs produced
   by running diarization once over the complete file. Every chunk's segments are
   attributed into that one namespace; per-chunk speaker labels are never a

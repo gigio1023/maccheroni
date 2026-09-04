@@ -947,6 +947,190 @@ struct AppShellTests {
         #expect(model.selectedRun?.manifest.runID == "run-b")
     }
 
+    /// The link between a record and the engine scratch its request keeps on
+    /// failure. Written to the index before the engine starts, kept by a
+    /// failure, and cleared by a success, because a succeeded request
+    /// discards its scratch (`EngineRequestScratch`).
+    @Test @MainActor
+    func aRecordNamesItsEngineRequestFromLaunchUntilTheRequestSucceeds() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = LibraryRepository(root: root)
+        let run = try appShellRunFixture(in: root, runID: "run-a", text: "Transcript A")
+        var record = appShellRecord(sourceURL: run.inputURL)
+        record.id = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
+        try repository.saveRecords([record])
+        let runner = AppShellControllableRunner()
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: runner,
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+        #expect(model.records[0].requestID == nil)
+
+        model.select(.record(record.id))
+        model.retrySelectedTranscription()
+        await appShellWait { runner.isWaiting }
+        let launched = try #require(runner.latestRequest?.requestID)
+        // Named before the engine started, and already on disk.
+        #expect(model.records[0].requestID == launched)
+        #expect(try repository.loadRecords()[0].requestID == launched)
+
+        runner.fail(with: AppShellFakeError.notImplemented)
+        await appShellWait { !model.isTranscribing }
+        #expect(model.records[0].state == .failed)
+        #expect(model.records[0].requestID == launched)
+        #expect(try repository.loadRecords()[0].requestID == launched)
+
+        // A retry is a new request: the record moves to the new one, and the
+        // superseded scratch becomes an orphan for the retention policy.
+        model.retrySelectedTranscription()
+        await appShellWait { runner.isWaiting }
+        let retried = try #require(runner.latestRequest?.requestID)
+        #expect(retried != launched)
+        #expect(model.records[0].requestID == retried)
+
+        runner.succeed(with: run.runURL)
+        await appShellWait { !model.isTranscribing }
+        #expect(model.records[0].state == .hasConflicts || model.records[0].state == .done)
+        #expect(model.records[0].requestID == nil)
+        #expect(try repository.loadRecords()[0].requestID == nil)
+    }
+
+    // MARK: - A partial run is a completed run (D51)
+
+    /// Before 2026-09-04 the runner threw on a `partial` manifest and the
+    /// record was filed as failed, so the project's own real recording —
+    /// 1212.52 of 1243.08 s with one named lost range and a merged
+    /// transcript on disk — could never be opened in the app. A partial run
+    /// now files exactly like a succeeded one; the manifest's own status and
+    /// coverage stay the record of the loss, read out for the sidebar.
+    @Test @MainActor
+    func aPartialRunIsFiledAsReadableWithItsLossNamedAndItsScratchKept() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = LibraryRepository(root: root)
+        let run = try appShellRunFixture(
+            in: root,
+            runID: "partial-run",
+            text: "Transcript with one lost range",
+            partial: AppShellPartialLoss()
+        )
+        #expect(run.manifest.status == .partial)
+        var record = appShellRecord(sourceURL: run.inputURL)
+        record.id = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
+        try repository.saveRecords([record])
+        let runner = AppShellControllableRunner()
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: runner,
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+
+        model.select(.record(record.id))
+        model.retrySelectedTranscription()
+        await appShellWait { runner.isWaiting }
+        let launched = try #require(runner.latestRequest?.requestID)
+        runner.succeed(with: run.runURL)
+        await appShellWait { !model.isTranscribing }
+
+        let filed = model.records[0]
+        // Readable, with review pending because the fixture carries a
+        // conflict: the same states a succeeded run takes.
+        #expect(filed.state == .hasConflicts)
+        #expect(filed.state.isReadable)
+        #expect(filed.failureMessage == nil)
+        #expect(filed.runURL?.standardizedFileURL == run.runURL.standardizedFileURL)
+        // No failure to diagnose; a loss to name, from the run's own file.
+        #expect(model.failure(for: filed) == nil)
+        let coverage = try #require(model.partialCoverage(for: filed))
+        #expect(coverage.missingDurationS == 0.5)
+        #expect(coverage.missing.map(\.startS) == [1.5])
+        // The runner kept the scratch of a partial run, and the record still
+        // names it, so the Trash will take it along.
+        #expect(filed.requestID == launched)
+        #expect(try repository.loadRecords()[0].requestID == launched)
+        // What the routing needs: the run is open and has no issue, and the
+        // manifest itself still says partial.
+        #expect(model.selectedRun?.manifest.status == .partial)
+        #expect(model.selectedRunIssue == nil)
+        #expect(model.selectedRun?.manifest.coverage.processedDurationS == 1.5)
+        // The row's own words for it.
+        #expect(
+            LibraryRowStatus.partialPhrase(
+                missingDurationS: coverage.missingDurationS,
+                locale: Locale(identifier: "en")
+            ) == "1s not transcribed"
+        )
+    }
+
+    @Test @MainActor
+    func aFailedRecordWhoseRunIsPartialBecomesReadableAtLaunchWhileAFailedRunStaysFailed() async throws {
+        let root = try appShellTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = LibraryRepository(root: root)
+        let partial = try appShellRunFixture(
+            in: root,
+            runID: "partial-filed-as-failed",
+            text: "Readable after all",
+            partial: AppShellPartialLoss(inputDurationS: 2, missingStartS: 1, missingEndS: 2)
+        )
+        let failed = try appShellFailedRunFixture(
+            in: root,
+            runID: "really-failed",
+            code: "ASR_ERROR",
+            message: "The speech model produced nothing."
+        )
+        var wasPartial = appShellRecord(sourceURL: partial.inputURL)
+        wasPartial.id = UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!
+        wasPartial.runURL = partial.runURL
+        wasPartial.state = .failed
+        wasPartial.failureMessage = partial.manifest.failure?.message
+        var stillFailed = appShellRecord(sourceURL: failed.inputURL)
+        stillFailed.id = UUID(uuidString: "00000000-0000-0000-0000-0000000000B2")!
+        stillFailed.runURL = failed.runURL
+        stillFailed.state = .failed
+        stillFailed.failureMessage = failed.manifest.failure?.message
+        try repository.saveRecords([wasPartial, stillFailed])
+        let (defaults, suiteName) = try appShellIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let model = try MaccheroniAppModel(
+            repository: repository,
+            profiles: try AppProfileRegistry.load(),
+            runner: AppShellFakeRunner(),
+            recorder: AppShellFakeRecorder(),
+            defaults: defaults
+        )
+
+        let reconciled = try #require(model.records.first { $0.id == wasPartial.id })
+        #expect(reconciled.state == .hasConflicts)
+        #expect(reconciled.failureMessage == nil)
+        #expect(model.failure(for: reconciled) == nil)
+        #expect(model.partialCoverage(for: reconciled)?.missingDurationS == 1)
+        // Written back, so the next launch does not re-file it.
+        #expect(try repository.loadRecords().first { $0.id == wasPartial.id }?.state == .hasConflicts)
+
+        let untouched = try #require(model.records.first { $0.id == stillFailed.id })
+        #expect(untouched.state == .failed)
+        #expect(untouched.failureMessage == failed.manifest.failure?.message)
+        #expect(model.failure(for: untouched)?.code == "ASR_ERROR")
+        #expect(model.partialCoverage(for: untouched) == nil)
+
+        // And the reconciled run opens.
+        model.select(.record(wasPartial.id))
+        #expect(model.selectedRun?.manifest.status == .partial)
+        #expect(model.selectedRunIssue == nil)
+    }
+
     @Test @MainActor
     func recordingFinalizationFailureIndexesPreservedChannelsForRemixRetry() async throws {
         let root = try appShellTemporaryDirectory()
@@ -2210,10 +2394,21 @@ private func appShellRecord(sourceURL: URL) -> LibraryRecord {
     )
 }
 
+/// What a partial run fixture lost: one range, named, with the manifest's
+/// coverage short by the same amount.
+private struct AppShellPartialLoss {
+    var inputDurationS: Double = 2
+    var missingStartS: Double = 1.5
+    var missingEndS: Double = 2
+    var missingDurationS: Double { missingEndS - missingStartS }
+    var processedDurationS: Double { inputDurationS - missingDurationS }
+}
+
 private func appShellRunFixture(
     in root: URL,
     runID: String = "fixture-run",
-    text: String = "Fixture text"
+    text: String = "Fixture text",
+    partial: AppShellPartialLoss? = nil
 ) throws -> AppShellRunFixture {
     let runURL = root.appendingPathComponent(runID, isDirectory: true)
     let primaryURL = runURL.appendingPathComponent("primary", isDirectory: true)
@@ -2258,10 +2453,27 @@ private func appShellRunFixture(
         TimelineSegment(speaker: "SPEAKER_00", startS: 0, endS: 2),
     ]).write(to: timelineURL)
     try JSONEncoder().encode(conflicts).write(to: conflictsURL)
+    var partialArtifacts: [Artifact] = []
+    if let partial {
+        let partialCoverageURL = primaryURL.appendingPathComponent("partial-coverage.json")
+        try Data("""
+        {"schema_version":"1.0.0","input_duration_s":\(partial.inputDurationS),\
+        "promoted_duration_s":\(partial.processedDurationS),\
+        "missing_duration_s":\(partial.missingDurationS),\
+        "missing":[{"start_s":\(partial.missingStartS),"end_s":\(partial.missingEndS),\
+        "attempt_id":"a0","stop_reason":"repetitionLooping"}],\
+        "partial_attempt_ids":["a0"]}
+        """.utf8).write(to: partialCoverageURL)
+        partialArtifacts.append(Artifact(
+            kind: "partial_coverage",
+            path: "primary/partial-coverage.json",
+            sha256: try appShellSHA256(of: partialCoverageURL)
+        ))
+    }
 
     let manifest = Manifest(
         runID: runID,
-        status: .succeeded,
+        status: partial == nil ? .succeeded : .partial,
         input: InputAudio(
             fileName: inputURL.lastPathComponent,
             sha256: source.sha256,
@@ -2285,10 +2497,10 @@ private func appShellRunFixture(
             enhancement: ProcessingSwitch(enabled: false, backend: nil)
         ),
         coverage: Coverage(
-            inputDurationS: 2,
-            processedDurationS: 2,
-            truncated: false,
-            strategy: .full,
+            inputDurationS: partial?.inputDurationS ?? 2,
+            processedDurationS: partial?.processedDurationS ?? 2,
+            truncated: partial != nil,
+            strategy: partial == nil ? .full : .backendTruncated,
             chunksPlanned: 1,
             chunksCompleted: 1
         ),
@@ -2311,8 +2523,13 @@ private func appShellRunFixture(
             Artifact(kind: "primary_raw", path: "primary/raw.txt", sha256: try appShellSHA256(of: rawURL)),
             Artifact(kind: "primary_segments", path: "primary/segments.json", sha256: try appShellSHA256(of: primarySegmentsURL)),
             Artifact(kind: "diarization_timeline", path: "diarization/timeline.json", sha256: try appShellSHA256(of: timelineURL)),
-        ],
-        failure: nil
+        ] + partialArtifacts,
+        failure: partial.map { loss in
+            Failure(
+                code: "ASR_REPETITION_LOOPING",
+                message: "promoted \(loss.processedDurationS) s of \(loss.inputDurationS) s; 1 range(s) produced no transcript: [\(loss.missingStartS), \(loss.missingEndS)) s"
+            )
+        }
     )
     try appShellWriteManifest(manifest, to: runURL)
     return AppShellRunFixture(

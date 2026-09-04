@@ -1315,3 +1315,99 @@ does not rest on E1 alone.
 - **One recording, one language, two speakers.** The 27 % cross-check is the same
   meeting's audio in a different window. AMI is the only independent recording
   here and it disagrees about where the bar belongs.
+
+## 2026-09-04 Failed-Request Scratch Retention
+
+The app runs the engine through a per-request scratch directory,
+`Requests/request-<id>/`, holding the profile handed to the engine and its
+stdout and stderr. A succeeded request discards it. A failed or cancelled
+request keeps it, because `stderr.log` is the only complete record of what
+the engine said and the failure message shown in the app is cut from it. No
+retention existed, so failed runs accumulated scratch indefinitely. A
+retention period is an execution-scope value under this policy, so it is
+declared and tested here rather than chosen in a comment.
+
+### Observations
+
+- On this machine after one month of use the requests root held two kept
+  directories of 20 KB in total: a 326-byte profile, a 216-byte stderr and an
+  81-byte stdout for the request that failed, and 276 / 191 / 0 bytes for the
+  other. The real 20.7-minute run of 2026-09-01 wrote 120 bytes of stderr.
+  The engine's stderr is quiet; the run's own artifacts are elsewhere.
+- Nothing recorded which record a kept directory belonged to. The runner
+  chose the name and reported nothing back, so the app could neither take
+  the directory with the recording nor tell a superseded one from a live one.
+
+### Decision
+
+The anchor is the run's own lifetime, and the declaration is the typed
+`EngineRequestScratch` in `Sources/MaccheroniApp/AppDomain.swift`:
+
+- The request ID is chosen by the caller (`TranscriptionRequest.requestID`,
+  `ExistingRunPostprocessRequest.requestID`) and written to the library
+  record before the engine starts; a success clears it, because the scratch
+  is gone. A directory a record names is *live*: it moves to the Trash in the
+  same move as the audio and the run, the Finder's Put Back returns it, and
+  nothing else ever touches it, whatever the record's state or the
+  directory's age.
+- A directory no record names is an *orphan*: superseded by a retry, left by
+  a record removed while its files were already gone, written before records
+  carried the link, or put back by the Finder after its record was dropped.
+  An orphan is pruned when it is older than `orphanMaximumAge`, 30 days from
+  its creation date, strictly: exactly at the bound is kept.
+- Trigger: once per launch, immediately after the library index is loaded and
+  reconciled (`MaccheroniAppModel.init` →
+  `LibraryRepository.pruneOrphanedRequestDirectories`). No other path prunes.
+- Every pruning, and every pruning that failed, is appended to
+  `library-maintenance.log` beside `library.json`, with the directory name,
+  its creation date, its age and the bound. Judgment rule 2: nothing is
+  dropped silently.
+
+### Ledger
+
+| Variable | Unit | Source | Value |
+|---|---|---|---|
+| `per_request_bytes` | bytes | observed above | < 1 KB; headroom assumed 1 MB |
+| `orphan_maximum_age` | seconds | `EngineRequestScratch.orphanMaximumAge` | 2,592,000 (30 d) |
+| `orphan_arrival_rate` | per day | bounded by run duration; assumed worst case | 100 |
+| `retained_orphan_bytes` | bytes | `rate × age × per_request_bytes` | ≤ 3 GB at the absurd rate, a few MB at any real one |
+| `live_request_bytes` | bytes | one per record that failed and was not retried | unbounded by this policy; bounded by the library, which the Trash bounds |
+
+An age rather than a count, because an orphan's remaining value is
+diagnostic and decays with time, not with how many other runs failed. A count
+bound would drop the newest evidence on the day it is most likely wanted.
+
+### Boundary tests
+
+`Tests/MaccheroniAppTests/LibraryMaintenanceTests.swift`:
+
+- `anOrphanIsPrunedOnlyPastTheBoundAndTheMaintenanceLogSaysWhich` creates
+  orphans at `L − 1 s`, `L`, `L + 1 s` and asserts that only the last is
+  removed, that non-scratch entries under the requests root are never
+  candidates, and that the log names exactly the removed directory with its
+  age and the bound; a second run prunes and logs nothing.
+- `aRequestDirectoryARecordStillNamesIsNeverPrunedWhateverItsAge` launches
+  the model over a years-old live directory, a years-old directory of a
+  record still marked transcribing, and a years-old orphan: the launch
+  reconciles the transcribing record to interrupted, keeps both named
+  directories, and prunes only the orphan.
+- `theTrashPlanTakesTheEngineLogOfAFailedRunOnlyWhileItIsOnDisk`,
+  `movingAFailedRunToTheTrashTakesItsEngineLogInTheSameMove`,
+  `aPartialMoveThatRefusesTheRunPutsTheEngineLogBackToo` and
+  `anEngineLogTheFinderPutBackIsKeptUntilTheBoundAndPrunedAfterIt` cover the
+  lifetime anchor: together or not at all, put back on a partial move, and
+  a Put Back that leaves an orphan the bound governs.
+- `Tests/MaccheroniAppTests/RunnerCaptureRecoveryTests.swift`
+  `failedRunKeepsItsRequestDirectoryWithTheEngineStderr` pins the directory
+  name to the request ID; `AppShellTests`
+  `aRecordNamesItsEngineRequestFromLaunchUntilTheRequestSucceeds` pins when
+  the record writes and clears the link.
+
+### Execution evidence
+
+The library record carries `requestID`; the run manifest is the engine's
+sealed artifact and carries nothing new (its `failure` record stays `code` and
+`message`, `docs/contracts/manifest.schema.json`). The maintenance log is the
+record of every pruning. Directories written before this policy carry no
+link, are orphans by construction, and are pruned 30 days after their
+creation date at the first launch past it.

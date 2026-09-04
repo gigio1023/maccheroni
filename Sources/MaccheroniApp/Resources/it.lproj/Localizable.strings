@@ -16,12 +16,20 @@
 	<string>%@ è nel Cestino, ma non è stato possibile salvare la libreria, quindi la registrazione resta in elenco. Rimettila a posto nel Finder.</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ non si trova più dove l'archivio se lo aspetta, quindi non è stato spostato nulla.</string>
+	<key>%@ not transcribed</key>
+	<string>%@ non trascritti</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%1$@ di %2$@ (%3$@)</string>
 	<key>%@ of speech</key>
 	<string>%@ del parlato</string>
+	<key>%@ of this recording produced no transcript, from %@. The transcript covers %@ of %@.</key>
+	<string>%@ di questa registrazione non hanno prodotto trascrizione, da %@. La trascrizione copre %@ di %@.</string>
 	<key>%@ of this recording produced no transcript, so these proposals cover %@ of %@.</key>
 	<string>%@ di questa registrazione non ha prodotto trascrizione, quindi queste proposte coprono %@ su %@.</string>
+	<key>%@ of this recording produced no transcript. The transcript covers %@ of %@.</key>
+	<string>%@ di questa registrazione non hanno prodotto trascrizione. La trascrizione copre %@ di %@.</string>
+	<key>%@ to %@</key>
+	<string>%@ a %@</string>
 	<key>%@, %@</key>
 	<string>%@, %@</string>
 	<key>%lld bytes</key>
@@ -262,6 +270,8 @@
 	<string>L'inglese è l'impostazione predefinita. Una scelta manuale si applica a Maccheroni senza modificare la lingua del sistema Mac.</string>
 	<key>Enhancement</key>
 	<string>Miglioramento</string>
+	<key>Environmental sounds</key>
+	<string>Suoni ambientali</string>
 	<key>Exact Identities</key>
 	<string>Identità esatte</string>
 	<key>Export</key>
@@ -300,6 +310,8 @@
 	<string>Ha conflitti</string>
 	<key>How</key>
 	<string>Come</string>
+	<key>Human sounds</key>
+	<string>Suoni umani</string>
 	<key>Import Audio</key>
 	<string>Importa audio</string>
 	<key>Import Audio…</key>
@@ -414,6 +426,8 @@
 	<string>Sposta nel cestino…</string>
 	<key>Move “%@” to the Trash?</key>
 	<string>Spostare «%@» nel cestino?</string>
+	<key>Music</key>
+	<string>Musica</string>
 	<key>New Recording</key>
 	<string>Nuova registrazione</string>
 	<key>No</key>
@@ -432,6 +446,14 @@
 	<string>Nessun parlante proposto</string>
 	<key>No speaker was active on the speaker timeline during this segment.</key>
 	<string>Nessun parlante era attivo nella timeline durante questo segmento.</string>
+	<key>No transcript for %@ of the recording.</key>
+	<string>Nessuna trascrizione per %@ della registrazione.</string>
+	<key>No transcript from %@ to %@ (%@).</key>
+	<string>Nessuna trascrizione da %@ a %@ (%@).</string>
+	<key>Noise</key>
+	<string>Rumore</string>
+	<key>Non-speech event: %@</key>
+	<string>Evento non verbale: %@</string>
 	<key>None</key>
 	<string>Nessuno</string>
 	<key>Not Created</key>
@@ -650,6 +672,8 @@
 	<string>Mostra o nascondi come è stata prodotta questa esecuzione.</string>
 	<key>Show this layer of the transcript.</key>
 	<string>Mostra questo livello della trascrizione.</string>
+	<key>Silence</key>
+	<string>Silenzio</string>
 	<key>Size</key>
 	<string>Dimensione</string>
 	<key>Some segments carry no recorded speaker evidence.</key>
@@ -696,6 +720,8 @@
 	<string>Il riconoscimento vocale ha restituito un output che Maccheroni non ha potuto verificare, quindi nulla è stato promosso nella trascrizione.</string>
 	<key>Speech recognition stopped producing new words and repeated itself to the end of its output budget, so that stretch of audio produced no usable text.</key>
 	<string>Il riconoscimento vocale ha smesso di produrre parole nuove e si è ripetuto fino a esaurire il budget di output, quindi quel tratto di audio non ha prodotto testo utilizzabile.</string>
+	<key>Speech without words</key>
+	<string>Parlato senza parole</string>
 	<key>Stale Bookmark</key>
 	<string>Segnalibro obsoleto</string>
 	<key>Start Recording</key>
@@ -806,6 +832,8 @@
 	<string>La timeline copriva %@ di questo segmento, sotto quanto richiede questa esecuzione.</string>
 	<key>The speech model also reported a speaker for this segment. It is kept as evidence and never becomes the speaker.</key>
 	<string>Anche il modello vocale ha indicato un parlante per questo segmento. Viene conservato come prova e non diventa mai il parlante.</string>
+	<key>The speech model marked this segment as a non-speech event, not as words.</key>
+	<string>Il modello di riconoscimento vocale ha contrassegnato questo segmento come evento non verbale, non come parole.</string>
 	<key>The speech model that answered is not the exact model this profile pins, so its output was refused.</key>
 	<string>Il modello vocale che ha risposto non è esattamente quello fissato da questo profilo, quindi il suo output è stato rifiutato.</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
@@ -826,6 +854,10 @@
 	<string>Non c'è alcuna registrazione attiva.</string>
 	<key>This Run</key>
 	<string>Questa esecuzione</string>
+	<key>This also moves the engine log kept from the failed run.</key>
+	<string>Sposta anche il log del motore conservato dall'esecuzione non riuscita.</string>
+	<key>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>Sposta nel cestino il log del motore conservato dall'esecuzione non riuscita. Non viene eliminato nulla e «Rimetti a posto» nel Finder lo ripristina.</string>
 	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
 	<string>Sposta nel cestino l'output dell'esecuzione. Non viene eliminato nulla e «Rimetti a posto» nel Finder lo ripristina.</string>
 	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>

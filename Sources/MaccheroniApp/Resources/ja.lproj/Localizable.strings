@@ -16,12 +16,20 @@
 	<string>%@ はゴミ箱にありますが、ライブラリを保存できなかったため、この録音は一覧に残っています。Finder で元に戻してください。</string>
 	<key>%@ is no longer where the library expects it, so nothing was moved.</key>
 	<string>%@ はライブラリが想定する場所にないため、何も移動しませんでした。</string>
+	<key>%@ not transcribed</key>
+	<string>%@ 未転写</string>
 	<key>%@ of %@ (%@)</key>
 	<string>%2$@ 中 %1$@ (%3$@)</string>
 	<key>%@ of speech</key>
 	<string>発話の %@</string>
+	<key>%@ of this recording produced no transcript, from %@. The transcript covers %@ of %@.</key>
+	<string>この録音のうち %@ は文字起こしされませんでした（%@）。文字起こしは %@ / %@ をカバーしています。</string>
 	<key>%@ of this recording produced no transcript, so these proposals cover %@ of %@.</key>
 	<string>この録音のうち %@ は文字起こしが得られなかったため、これらの提案は %@ / %@ を対象としています。</string>
+	<key>%@ of this recording produced no transcript. The transcript covers %@ of %@.</key>
+	<string>この録音のうち %@ は文字起こしされませんでした。文字起こしは %@ / %@ をカバーしています。</string>
+	<key>%@ to %@</key>
+	<string>%@〜%@</string>
 	<key>%@, %@</key>
 	<string>%@、%@</string>
 	<key>%lld bytes</key>
@@ -262,6 +270,8 @@
 	<string>英語がデフォルトです。手動選択は、Mac システム言語を変更せずに Maccheroni に適用されます。</string>
 	<key>Enhancement</key>
 	<string>強化</string>
+	<key>Environmental sounds</key>
+	<string>環境音</string>
 	<key>Exact Identities</key>
 	<string>正確な識別子</string>
 	<key>Export</key>
@@ -300,6 +310,8 @@
 	<string>競合がある</string>
 	<key>How</key>
 	<string>方法</string>
+	<key>Human sounds</key>
+	<string>人の発する音</string>
 	<key>Import Audio</key>
 	<string>オーディオをインポートする</string>
 	<key>Import Audio…</key>
@@ -414,6 +426,8 @@
 	<string>ゴミ箱に移動…</string>
 	<key>Move “%@” to the Trash?</key>
 	<string>「%@」をゴミ箱に移動しますか？</string>
+	<key>Music</key>
+	<string>音楽</string>
 	<key>New Recording</key>
 	<string>新規録音</string>
 	<key>No</key>
@@ -432,6 +446,14 @@
 	<string>話者の提案なし</string>
 	<key>No speaker was active on the speaker timeline during this segment.</key>
 	<string>このセグメントの間、話者タイムライン上で話していた話者はいません。</string>
+	<key>No transcript for %@ of the recording.</key>
+	<string>録音のうち %@ は文字起こしなし。</string>
+	<key>No transcript from %@ to %@ (%@).</key>
+	<string>%@〜%@ は文字起こしなし（%@）。</string>
+	<key>Noise</key>
+	<string>雑音</string>
+	<key>Non-speech event: %@</key>
+	<string>非音声イベント: %@</string>
 	<key>None</key>
 	<string>なし</string>
 	<key>Not Created</key>
@@ -650,6 +672,8 @@
 	<string>この実行がどのように作られたかを表示または非表示にします。</string>
 	<key>Show this layer of the transcript.</key>
 	<string>文字起こしのこのレイヤーを表示します。</string>
+	<key>Silence</key>
+	<string>無音</string>
 	<key>Size</key>
 	<string>サイズ</string>
 	<key>Some segments carry no recorded speaker evidence.</key>
@@ -696,6 +720,8 @@
 	<string>音声認識が Maccheroni では検証できない出力を返したため、文字起こしには何も反映されませんでした。</string>
 	<key>Speech recognition stopped producing new words and repeated itself to the end of its output budget, so that stretch of audio produced no usable text.</key>
 	<string>音声認識が新しい語を出さなくなり、出力予算の終わりまで同じ語を繰り返したため、その区間からは使えるテキストが得られませんでした。</string>
+	<key>Speech without words</key>
+	<string>言葉のない発話</string>
 	<key>Stale Bookmark</key>
 	<string>古いブックマーク</string>
 	<key>Start Recording</key>
@@ -806,6 +832,8 @@
 	<string>話者タイムラインはこのセグメントの %@ しか覆っておらず、この実行が求める水準を下回ります。</string>
 	<key>The speech model also reported a speaker for this segment. It is kept as evidence and never becomes the speaker.</key>
 	<string>音声モデルもこのセグメントの話者を報告しました。これは根拠として保持され、話者になることはありません。</string>
+	<key>The speech model marked this segment as a non-speech event, not as words.</key>
+	<string>音声認識モデルはこのセグメントを言葉ではなく非音声イベントとして記録しました。</string>
 	<key>The speech model that answered is not the exact model this profile pins, so its output was refused.</key>
 	<string>応答した音声モデルがこのプロフィールの固定モデルと一致しないため、その出力は拒否されました。</string>
 	<key>The speech recognition model this profile needs is not installed on this Mac.</key>
@@ -826,6 +854,10 @@
 	<string>アクティブな録音はありません。</string>
 	<key>This Run</key>
 	<string>この実行</string>
+	<key>This also moves the engine log kept from the failed run.</key>
+	<string>失敗した実行から保持していたエンジンのログも一緒に移動します。</string>
+	<key>This moves the engine log kept from the failed run to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
+	<string>失敗した実行から保持していたエンジンのログをゴミ箱に移動します。何も削除されず、Finder の「戻す」で元に戻せます。</string>
 	<key>This moves the run output to the Trash. Nothing is deleted, and the Finder's Put Back restores it.</key>
 	<string>実行結果をゴミ箱に移動します。何も削除されず、Finder の「戻す」で元に戻せます。</string>
 	<key>This moves the source audio and the run output to the Trash together. Nothing is deleted, and the Finder's Put Back restores them.</key>

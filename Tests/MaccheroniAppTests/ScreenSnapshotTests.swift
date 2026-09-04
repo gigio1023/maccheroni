@@ -2,10 +2,10 @@
 //
 // These tests write PNGs; they are not assertions about pixels. They are the
 // instrument D48 asks for, kept in the repository so the next person who
-// changes a screen can look at it instead of guessing. Every test is a no-op
+// changes a screen can look at it instead of guessing. Every test is skipped
 // unless `P6_RENDER` is set, and every test that needs the private 2026-09-01
-// recording skips itself when that directory is absent, so a fresh clone runs
-// this file green without it.
+// recording is skipped when that directory is absent, so a fresh clone reports
+// this file as skipped rather than as passing tests that asserted nothing.
 //
 // Two rendering paths, because they see different things:
 //
@@ -28,6 +28,7 @@ import MaccheroniMerge
 import MaccheroniPostprocess
 import SwiftUI
 import Testing
+import Vision
 @testable import MaccheroniApp
 
 @Suite(.serialized)
@@ -37,9 +38,14 @@ struct ScreenSnapshotTests {
     static let home = NSHomeDirectory()
     static let usage = URL(fileURLWithPath: "\(home)/maccheroni-usage-20260901", isDirectory: true)
     /// `screens/<tag>`, so a later pass writes its own images beside the ones
-    /// it is being compared against rather than over them.
+    /// it is being compared against rather than over them. `P6_OUT` names a
+    /// directory to write to instead, for a pass that must keep its images
+    /// outside the usage directory.
     static var outRoot: URL {
-        usage.appendingPathComponent("screens/\(tag)", isDirectory: true)
+        if let out = ProcessInfo.processInfo.environment["P6_OUT"], !out.isEmpty {
+            return URL(fileURLWithPath: out, isDirectory: true)
+        }
+        return usage.appendingPathComponent("screens/\(tag)", isDirectory: true)
     }
     /// The real 20.7-minute run, `status: partial`, 248 merged segments.
     static let realRunURL = usage.appendingPathComponent(
@@ -59,6 +65,21 @@ struct ScreenSnapshotTests {
 
     static var enabled: Bool { ProcessInfo.processInfo.environment["P6_RENDER"] != nil }
     static var tag: String { ProcessInfo.processInfo.environment["P6_TAG"] ?? "p6" }
+
+    /// Skipped, not passed. Without `P6_RENDER` these tests used to return
+    /// early and count as green on a fresh clone while asserting nothing;
+    /// as traits, `swift test` reports them as skipped and says why.
+    static var whenRendering: ConditionTrait {
+        .enabled(if: enabled, "P6_RENDER is not set")
+    }
+
+    /// The same, for a test that renders the private 2026-09-01 recording.
+    static var whenRenderingTheRealRun: ConditionTrait {
+        .enabled(
+            if: enabled && exists(proposalRunURL),
+            "P6_RENDER is not set or the private 2026-09-01 run is absent"
+        )
+    }
     static let english = Locale(identifier: "en")
 
     static func exists(_ url: URL) -> Bool {
@@ -258,7 +279,8 @@ struct ScreenSnapshotTests {
         state: LibraryItemState,
         id: UUID = UUID(uuidString: "00000000-0000-0000-0000-0000000000f2")!,
         postprocess: PostprocessChoice = .none,
-        failureMessage: String? = nil
+        failureMessage: String? = nil,
+        speakerNames: [String: String] = ["0": "Jina"]
     ) -> LibraryRecord {
         LibraryRecord(
             id: id,
@@ -274,10 +296,82 @@ struct ScreenSnapshotTests {
             postprocess: postprocess,
             durationS: durationS,
             state: state,
-            speakerNames: ["0": "Jina"],
+            speakerNames: speakerNames,
             conflictResolutions: [:],
             failureMessage: failureMessage
         )
+    }
+
+    // MARK: - Reading an image back
+
+    /// Every line of text Vision recognises in the image, top to bottom and
+    /// left to right, so an assertion can say what the screen printed rather
+    /// than what the view model held.
+    static func recognisedText(in url: URL) throws -> [String] {
+        guard let image = NSImage(contentsOf: url),
+              let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else { throw RenderError.noImage(url.lastPathComponent) }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        request.recognitionLanguages = ["en-US"]
+        try VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+        let sorted = (request.results ?? []).sorted { left, right in
+            if abs(left.boundingBox.midY - right.boundingBox.midY) > 0.006 {
+                return left.boundingBox.midY > right.boundingBox.midY
+            }
+            return left.boundingBox.minX < right.boundingBox.minX
+        }
+        return sorted.compactMap { $0.topCandidates(1).first?.string }
+    }
+
+    /// Letters and digits only, lowercased, so a comparison survives the
+    /// hyphens, commas and spacing OCR is loose about.
+    static func compact(_ text: String) -> String {
+        text.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    /// The horizontal extent, in pixels, of the longest run of accent-coloured
+    /// pixels in the top half of the image: the 2-point underline beneath the
+    /// displayed layer tab. The playhead knob is accent too, but round and a
+    /// dozen pixels wide, so a run has to be at least `minimumRun` long to
+    /// count. `nil` when no such run exists.
+    static func accentUnderline(
+        in url: URL,
+        hex: String,
+        tolerance: Int = 28,
+        minimumRun: Int = 60
+    ) throws -> ClosedRange<Int>? {
+        guard let rep = NSBitmapImageRep(data: try Data(contentsOf: url)),
+              rep.bitsPerSample == 8,
+              let data = rep.bitmapData
+        else { throw RenderError.noImage(url.lastPathComponent) }
+        let digits = hex.dropFirst()
+        let target = (0 ..< 3).map { index -> Int in
+            let start = digits.index(digits.startIndex, offsetBy: index * 2)
+            return Int(digits[start ..< digits.index(start, offsetBy: 2)], radix: 16) ?? 0
+        }
+        let samples = rep.samplesPerPixel
+        let bytesPerRow = rep.bytesPerRow
+        let channel = rep.bitmapFormat.contains(.alphaFirst) ? 1 : 0
+        func isAccent(_ x: Int, _ y: Int) -> Bool {
+            let pixel = data + y * bytesPerRow + x * samples
+            return (0 ..< 3).allSatisfy { abs(Int(pixel[channel + $0]) - target[$0]) <= tolerance }
+        }
+        var best: ClosedRange<Int>?
+        for y in 0 ..< rep.pixelsHigh / 2 {
+            var start: Int?
+            for x in 0 ... rep.pixelsWide {
+                if x < rep.pixelsWide, isAccent(x, y) {
+                    if start == nil { start = x }
+                } else if let runStart = start {
+                    let run = runStart ... (x - 1)
+                    if run.count >= minimumRun, run.count > (best?.count ?? 0) { best = run }
+                    start = nil
+                }
+            }
+        }
+        return best
     }
 
     @MainActor
@@ -351,9 +445,8 @@ struct ScreenSnapshotTests {
 
     // MARK: - Screens: capture readiness
 
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
     func captureReadiness() async throws {
-        guard Self.enabled else { return }
         for (label, report) in [
             ("notready", Self.unprovisionedReport()),
             ("ready", Self.readyReport()),
@@ -375,9 +468,8 @@ struct ScreenSnapshotTests {
 
     // MARK: - Screens: run failure
 
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
     func runFailureScreens() throws {
-        guard Self.enabled else { return }
         let cases: [(String, URL, LibraryItemState, Double)] = [
             ("runerror", Self.runErrorURL, .failed, 1_243.08),
             ("diarizationerror", Self.diarizationErrorURL, .failed, 420.048),
@@ -411,13 +503,8 @@ struct ScreenSnapshotTests {
 
     // MARK: - Screens: transcript
 
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRenderingTheRealRun) @MainActor
     func transcriptScreen() throws {
-        guard Self.enabled else { return }
-        guard Self.exists(Self.proposalRunURL) else {
-            print("SKIP transcript: real run absent")
-            return
-        }
         // The P1-merged copy. `t4-verify/full-acceptance` was merged on
         // 2026-09-01, before P1, so its `conflicts.json` carries no
         // `speaker_attribution` at all; that run is rendered separately below
@@ -500,17 +587,12 @@ struct ScreenSnapshotTests {
     /// screen is composed here from the same shipped views the real screen
     /// uses: `TranscriptHeaderBar`, `ProposalLayerNotice`, `AppHairline` and
     /// `TranscriptSegmentColumn`.
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRenderingTheRealRun) @MainActor
     func proposalLayerScreen() throws {
-        guard Self.enabled else { return }
-        guard Self.exists(Self.proposalRunURL) else {
-            print("SKIP proposal: proposal run absent")
-            return
-        }
         let real = try Self.realRun(
             at: Self.proposalRunURL, name: "Weekly product sync", state: .hasConflicts
         )
-        guard let document = real.run.speakerProposal else {
+        guard let document = real.run.speakerProposal(renderedFor: real.record) else {
             print("SKIP proposal: run carries no speaker proposal")
             return
         }
@@ -560,7 +642,8 @@ struct ScreenSnapshotTests {
         width: CGFloat,
         focused: Int?,
         selected: Set<Int>,
-        rows: Int = 40
+        rows: Int = 40,
+        firstRow: Int = 0
     ) -> some View {
         let run = real.run
         let record = real.record
@@ -594,7 +677,8 @@ struct ScreenSnapshotTests {
         let unattributed = run.transcript.segments.count { !SpeakerRoster.isAttributed($0.speaker) }
         let summary = "\(run.transcript.segments.count) segments · \(run.transcript.numSpeakers) speakers · \(unattributed) without a speaker · \(queue.count) to review"
         let playback = TranscriptPlaybackController()
-        let visible = Array(run.segments.prefix(rows))
+        let missingCoverage = TranscriptMissingCoverage.load(run: run, record: record)
+        let visible = Array(run.segments.dropFirst(firstRow).prefix(rows))
         let selectedIDs = Set(visible.filter { selected.contains($0.index) }.map(\.id))
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.medium) {
@@ -610,13 +694,14 @@ struct ScreenSnapshotTests {
                     focusedSegmentIndex: focused,
                     step: { _ in },
                     missingEvidence: missingEvidence,
+                    missingCoverage: missingCoverage,
                     playback: playback,
                     totalDurationS: run.manifest.coverage.inputDurationS,
                     togglePlayback: {},
                     seek: { _ in }
                 )
                 if layer == .proposed, let proposalLayer {
-                    ProposalLayerNotice(layer: proposalLayer)
+                    ProposalLayerNotice(layer: proposalLayer, showsCoverage: missingCoverage == nil)
                 }
             }
             .frame(maxWidth: AppTheme.Layout.measure, alignment: .leading)
@@ -637,6 +722,9 @@ struct ScreenSnapshotTests {
                 selectedSegmentIDs: selectedIDs,
                 evidenceIsLoaded: true,
                 proposalLayer: layer == .proposed ? proposalLayer : nil,
+                gaps: missingCoverage?.gaps.filter { gap in
+                    visible.contains { $0.segment.startS >= gap.startS }
+                } ?? [],
                 play: { _ in },
                 select: { _ in },
                 rename: { _ in },
@@ -648,14 +736,12 @@ struct ScreenSnapshotTests {
 
     /// One row of each D50 decline cause, plus a confirmation, so the three
     /// sentences a reader has to tell apart are on screen together.
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRenderingTheRealRun) @MainActor
     func proposalDeclineCauses() throws {
-        guard Self.enabled else { return }
-        guard Self.exists(Self.proposalRunURL) else { return }
         let real = try Self.realRun(
             at: Self.proposalRunURL, name: "Weekly product sync", state: .hasConflicts
         )
-        guard let document = real.run.speakerProposal else { return }
+        guard let document = real.run.speakerProposal(renderedFor: real.record) else { return }
         // 4: the model declined. 38: the top candidates hold exactly equal
         // overlap. 25: no overlapping turn at all. 3: a confirmation.
         let wanted = [3, 4, 38, 25]
@@ -722,11 +808,264 @@ struct ScreenSnapshotTests {
         }
     }
 
+    /// The shipped screen inside the container the app gives it. On its own,
+    /// `TranscriptView` reports a fitting height of zero and its
+    /// `.navigationTitle` wrapper lays the screen out taller than the frame,
+    /// so a bare render starts part-way down the list with no header, and one
+    /// opened on the proposed layer drew nothing at all. Inside the
+    /// `NavigationSplitView` that `RootView` composes it in, with a stub
+    /// sidebar, the same view lays out inside the frame: title, counts, tabs,
+    /// notice, rule and rows. This is the path for rendering the shipped
+    /// composition; the sidebar column itself still does not draw.
+    static func shippedScreen(_ screen: some View) -> some View {
+        NavigationSplitView {
+            Text(verbatim: "Library")
+        } detail: {
+            screen
+        }
+    }
+
+    // MARK: - Screens: the layer switch in the shipped view
+
+    /// The shipped `TranscriptView` opened on each of its two available layers
+    /// through the initial-selection seam, over the synthetic four-segment run
+    /// that carries a D50 speaker-proposal set, so no private recording is
+    /// needed. The app end-to-end pass ran with post-processing off and the
+    /// switch had never been rendered. Each image is read back twice: by OCR,
+    /// for what the rows say, and by pixel, for where the accent underline
+    /// under the displayed tab sits.
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
+    func layerSwitchRendersEachAvailableLayerInTheShippedView() throws {
+        let root = try derivedLayerTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try derivedLayerRunFixture(in: root, complete: false)
+        try derivedLayerWriteSpeakerProposal(
+            fixture: fixture,
+            id: "proposal-a",
+            finishedAt: "2026-09-01T23:13:07Z"
+        )
+        let run = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+        let record = Self.record(
+            named: "Layer switch fixture",
+            runURL: fixture.runURL,
+            durationS: 8,
+            state: .hasConflicts,
+            speakerNames: ["SPEAKER_00": "Jina", "SPEAKER_01": "Minsu"]
+        )
+        // Through the same read-time rendering `RootView` applies, so the
+        // reasons carry the reader's names here exactly as in the app.
+        let proposal = try #require(run.speakerProposal(renderedFor: record))
+        let model = try Self.model()
+        let layers: [TranscriptDisplayLayer] = [.speakerLabelled, .proposed]
+        var readings: [TranscriptDisplayLayer: String] = [:]
+        var underlines: [TranscriptDisplayLayer: [String: ClosedRange<Int>]] = [:]
+        for layer in layers {
+            for (schemeLabel, scheme) in Self.schemes {
+                let name = "\(Self.tag)-layerswitch-\(layer.rawValue)-\(schemeLabel)"
+                let size = try Self.host(
+                    Self.shippedScreen(
+                        TranscriptView(
+                            model: model,
+                            record: record,
+                            run: run,
+                            proposal: proposal,
+                            initialLayer: layer
+                        )
+                    ),
+                    width: 1_400, height: 700, scheme: scheme, name: name
+                )
+                let url = Self.outRoot.appendingPathComponent("\(name).png")
+                let swatch = AppTheme.Palette.accentSwatch
+                let underline = try Self.accentUnderline(
+                    in: url, hex: scheme == .dark ? swatch.dark : swatch.light
+                )
+                underlines[layer, default: [:]][schemeLabel] = underline
+                print("layerswitch \(layer.rawValue) \(schemeLabel) \(size) underline \(String(describing: underline))")
+                if scheme == .light {
+                    let lines = try Self.recognisedText(in: url)
+                    print("layerswitch \(layer.rawValue) OCR lines: \(lines.count)")
+                    readings[layer] = Self.compact(lines.joined(separator: "\n"))
+                }
+            }
+        }
+        let source = try #require(readings[.speakerLabelled])
+        let proposed = try #require(readings[.proposed])
+        // Both images carry the header, the tabs and the unnamed rows.
+        for text in [source, proposed] {
+            #expect(text.contains(Self.compact("Layer switch fixture")))
+            #expect(text.contains(Self.compact("Speaker-labelled")))
+            #expect(text.contains(Self.compact("Proposed")))
+            #expect(text.contains(Self.compact("Speaker not named")))
+        }
+        // The proposal speaks on the two unnamed rows and in the notice only
+        // when its layer is displayed.
+        #expect(!source.contains(Self.compact("Proposed, not measured")))
+        #expect(!source.contains(Self.compact("No speaker proposed")))
+        #expect(!source.contains(Self.compact("1 proposed, 1 declined")))
+        #expect(proposed.contains(Self.compact("Proposed, not measured")))
+        #expect(proposed.contains(Self.compact("No speaker proposed")))
+        #expect(proposed.contains(Self.compact("1 proposed, 1 declined")))
+        // The accent underline sits under a different tab in each image, and
+        // Proposed is the rightmost of the four, in both appearances.
+        for (schemeLabel, _) in Self.schemes {
+            let sourceUnderline = try #require(underlines[.speakerLabelled]?[schemeLabel])
+            let proposedUnderline = try #require(underlines[.proposed]?[schemeLabel])
+            #expect(sourceUnderline != proposedUnderline)
+            #expect(proposedUnderline.lowerBound > sourceUnderline.upperBound)
+        }
+    }
+
+    // MARK: - Screens: a run short of its input
+
+    /// The shipped view over the synthetic partial run: the notice under the
+    /// tabs naming the lost range, and the gap row at its place among the
+    /// rows. Read back by OCR. The real 20.7-minute run's own gap, at 14:31,
+    /// is rendered through `composedTranscript` when that run is present.
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
+    func partialTranscriptScreen() throws {
+        let root = try derivedLayerTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try derivedLayerRunFixture(in: root, complete: false)
+        let run = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
+        let record = Self.record(
+            named: "Partial run fixture",
+            runURL: fixture.runURL,
+            durationS: 8,
+            state: .hasConflicts,
+            speakerNames: ["SPEAKER_00": "Jina", "SPEAKER_01": "Minsu"]
+        )
+        let model = try Self.model()
+        var readings: [String: String] = [:]
+        for (widthLabel, width) in Self.widths {
+            for (schemeLabel, scheme) in Self.schemes {
+                let name = "\(Self.tag)-partial-\(widthLabel)-\(schemeLabel)"
+                try Self.host(
+                    Self.shippedScreen(
+                        TranscriptView(model: model, record: record, run: run, proposal: nil)
+                    ),
+                    width: width, height: 700, scheme: scheme, name: name
+                )
+                if scheme == .light {
+                    let lines = try Self.recognisedText(in: Self.outRoot.appendingPathComponent("\(name).png"))
+                    print("partial \(widthLabel) OCR lines: \(lines.count)")
+                    readings[widthLabel] = Self.compact(lines.joined(separator: "\n"))
+                }
+            }
+        }
+        for (widthLabel, text) in readings {
+            #expect(text.contains(Self.compact("2.0 sec of this recording produced no transcript, from 00:06 to 00:08")), Comment(rawValue: widthLabel))
+            #expect(text.contains(Self.compact("The transcript covers 00:06 of 00:08")), Comment(rawValue: widthLabel))
+            #expect(text.contains(Self.compact("No transcript from 00:06 to 00:08 (2.0 sec)")), Comment(rawValue: widthLabel))
+            // The gap row sits between the third and fourth segments.
+            let two = text.range(of: Self.compact("Two"))
+            // The row's sentence, not the header's, which also starts this way.
+            let gap = text.range(of: Self.compact("No transcript from 00:06 to 00:08 (2.0 sec)."))
+            let three = text.range(of: Self.compact("Three"))
+            if let two, let gap, let three {
+                #expect(two.lowerBound < gap.lowerBound, Comment(rawValue: widthLabel))
+                #expect(gap.lowerBound < three.lowerBound, Comment(rawValue: widthLabel))
+            } else {
+                Issue.record("rows or gap not read back at \(widthLabel)")
+            }
+        }
+        // The real run, composed from the shipped views around its own gap at
+        // 14:31: the rows on either side of the lost range and the row between.
+        guard Self.exists(Self.proposalRunURL) else {
+            print("SKIP partial real: real run absent")
+            return
+        }
+        let real = try Self.realRun(
+            at: Self.proposalRunURL, name: "Weekly product sync", state: .hasConflicts
+        )
+        let coverage = try #require(TranscriptMissingCoverage.load(run: real.run, record: real.record))
+        print("partial real gaps: \(coverage.gaps.map { [$0.startS, $0.endS] })")
+        for (schemeLabel, scheme) in Self.schemes {
+            try Self.host(
+                Self.composedTranscript(
+                    real: real, proposal: nil, layer: .speakerLabelled, width: 1_400,
+                    focused: nil, selected: [], rows: 8,
+                    firstRow: max(0, (real.run.segments.firstIndex {
+                        $0.segment.startS >= (coverage.gaps.first?.startS ?? 0)
+                    } ?? 0) - 4)
+                ),
+                width: 1_400, height: 900, scheme: scheme,
+                name: "\(Self.tag)-partial-real-\(schemeLabel)"
+            )
+        }
+    }
+
+    // MARK: - Screens: non-speech events
+
+    /// Rows that hold no speech, between rows that do. The synthetic fixture
+    /// runs on any machine; the real run's three event rows (indexes 25, 135
+    /// and 247, each `UNKNOWN` and flagged for review) are rendered beside
+    /// their neighbours when the private recording is present.
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
+    func nonSpeechEventRows() throws {
+        var fixture = TranscriptFixtures.meetingShaped()
+        // Row 2 is attributed with a contested share; row 3 is unnamed with
+        // two candidates and a band. Both become event rows, as the real run's
+        // are, and rows 1 and 4 stay speech around them, one carrying a marker
+        // inside its words.
+        fixture.run.segments[2].segment.text = "[Human Sounds]"
+        fixture.run.segments[3].segment.text = "[Silence]"
+        fixture.run.segments[4].segment.text = "Then we heard a [Buzzer] just then, and went on."
+        fixture.run.segments[5].segment.text = "[Speech]"
+        for index in [2, 3, 5] {
+            fixture.run.segments[index].segment.flags?.append("non_speech_event")
+        }
+        let synthetic = RealRun(run: fixture.run, record: fixture.record)
+        for (widthLabel, width) in Self.widths {
+            for (schemeLabel, scheme) in Self.schemes {
+                try Self.host(
+                    Self.composedRows(real: synthetic, proposal: nil, indices: [1, 2, 3, 4, 5, 6], focused: nil),
+                    width: width, height: 520, scheme: scheme,
+                    name: "\(Self.tag)-nonspeech-synthetic-\(widthLabel)-\(schemeLabel)"
+                )
+            }
+        }
+        // The event row focused, so the reason sentence and the event share a
+        // text column.
+        try Self.host(
+            Self.composedRows(real: synthetic, proposal: nil, indices: [2, 3, 4], focused: 3),
+            width: 1_400, height: 320, scheme: .light,
+            name: "\(Self.tag)-nonspeech-synthetic-focused-light"
+        )
+        guard Self.exists(Self.proposalRunURL) else {
+            print("SKIP nonspeech real rows: real run absent")
+            return
+        }
+        let real = try Self.realRun(
+            at: Self.proposalRunURL, name: "Weekly product sync", state: .hasConflicts
+        )
+        let events = real.run.segments.filter {
+            NonSpeechEvent.of(text: $0.segment.text, flags: $0.segment.flags) != nil
+        }.map(\.index)
+        print("nonspeech real rows: \(events)")
+        let neighbours = Array(Set(events.flatMap { [$0 - 1, $0, $0 + 1] })).sorted()
+            .filter { real.run.segments.indices.contains($0) }
+        for (schemeLabel, scheme) in Self.schemes {
+            try Self.host(
+                Self.composedRows(real: real, proposal: nil, indices: neighbours, focused: nil),
+                width: 1_400, height: 900, scheme: scheme,
+                name: "\(Self.tag)-nonspeech-real-\(schemeLabel)"
+            )
+        }
+        // The same rows under the proposal layer, where the derived set also
+        // spoke about them.
+        if let document = real.run.speakerProposal(renderedFor: real.record) {
+            try Self.host(
+                Self.composedRows(real: real, proposal: document, indices: neighbours, focused: nil),
+                width: 1_400, height: 1_100, scheme: .light,
+                name: "\(Self.tag)-nonspeech-real-proposed-light"
+            )
+        }
+    }
+
     // MARK: - Screens: sidebar
 
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
     func sidebarScreens() throws {
-        guard Self.enabled else { return }
         let states: [(LibraryItemState, String, Bool)] = [
             (.recorded, "Board review", false),
             (.transcribing, "Weekly product sync", false),
@@ -822,13 +1161,8 @@ struct ScreenSnapshotTests {
 
     // MARK: - Screens: inspector
 
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRenderingTheRealRun) @MainActor
     func inspectorScreens() throws {
-        guard Self.enabled else { return }
-        guard Self.exists(Self.proposalRunURL) else {
-            print("SKIP inspector: run absent")
-            return
-        }
         let real = try Self.realRun(
             at: Self.proposalRunURL, name: "Weekly product sync", state: .hasConflicts
         )
@@ -862,9 +1196,8 @@ struct ScreenSnapshotTests {
 
     /// Records, in an image, exactly what the `ImageRenderer` path loses. The
     /// report cites this rather than asserting the limits from memory.
-    @Test @MainActor
+    @Test(ScreenSnapshotTests.whenRendering) @MainActor
     func rendererComparison() throws {
-        guard Self.enabled else { return }
         let sample = VStack(alignment: .leading, spacing: 10) {
             Text(verbatim: "Renderer probe").font(.title2)
             TextField("Search", text: .constant("glossary"))
