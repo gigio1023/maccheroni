@@ -592,7 +592,7 @@ struct ScreenSnapshotTests {
         let real = try Self.realRun(
             at: Self.proposalRunURL, name: "Weekly product sync", state: .hasConflicts
         )
-        guard let document = real.run.speakerProposal else {
+        guard let document = real.run.speakerProposal(renderedFor: real.record) else {
             print("SKIP proposal: run carries no speaker proposal")
             return
         }
@@ -741,7 +741,7 @@ struct ScreenSnapshotTests {
         let real = try Self.realRun(
             at: Self.proposalRunURL, name: "Weekly product sync", state: .hasConflicts
         )
-        guard let document = real.run.speakerProposal else { return }
+        guard let document = real.run.speakerProposal(renderedFor: real.record) else { return }
         // 4: the model declined. 38: the top candidates hold exactly equal
         // overlap. 25: no overlapping turn at all. 3: a confirmation.
         let wanted = [3, 4, 38, 25]
@@ -845,7 +845,6 @@ struct ScreenSnapshotTests {
             finishedAt: "2026-09-01T23:13:07Z"
         )
         let run = try LibraryRepository(root: root).loadRun(at: fixture.runURL)
-        let proposal = try #require(run.speakerProposal)
         let record = Self.record(
             named: "Layer switch fixture",
             runURL: fixture.runURL,
@@ -853,6 +852,9 @@ struct ScreenSnapshotTests {
             state: .hasConflicts,
             speakerNames: ["SPEAKER_00": "Jina", "SPEAKER_01": "Minsu"]
         )
+        // Through the same read-time rendering `RootView` applies, so the
+        // reasons carry the reader's names here exactly as in the app.
+        let proposal = try #require(run.speakerProposal(renderedFor: record))
         let model = try Self.model()
         let layers: [TranscriptDisplayLayer] = [.speakerLabelled, .proposed]
         var readings: [TranscriptDisplayLayer: String] = [:]
@@ -1051,7 +1053,7 @@ struct ScreenSnapshotTests {
         }
         // The same rows under the proposal layer, where the derived set also
         // spoke about them.
-        if let document = real.run.speakerProposal {
+        if let document = real.run.speakerProposal(renderedFor: real.record) {
             try Self.host(
                 Self.composedRows(real: real, proposal: document, indices: neighbours, focused: nil),
                 width: 1_400, height: 1_100, scheme: .light,
