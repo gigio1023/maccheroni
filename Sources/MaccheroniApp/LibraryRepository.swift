@@ -1397,14 +1397,34 @@ struct LibraryRepository: Sendable {
                 throw LibraryRepositoryError.derivedLineageMismatch(manifest.derivedID)
             }
         }
-        // Exactly once over proposals plus declined, across every segment the
-        // source left unattributed. A proposal set that quietly skipped
-        // segments would read as though they had never been examined.
+        // A row the proposer did not examine is accounted for only when the
+        // source itself says why: the artifact may not declare a speech row
+        // to be a non-speech event and so excuse itself from answering.
+        for skip in document.notExamined ?? [] {
+            guard expected[skip.segmentIndex] != nil,
+                  seen.insert(skip.segmentIndex).inserted,
+                  skip.reason == .nonSpeechEvent,
+                  source.document.segments[skip.segmentIndex].flags?
+                      .contains(Self.nonSpeechEventFlag) == true
+            else {
+                throw LibraryRepositoryError.derivedLineageMismatch(manifest.derivedID)
+            }
+        }
+        // Exactly once over proposals, declined and not examined, across
+        // every segment the source left unattributed. A proposal set that
+        // quietly skipped segments would read as though they had never been
+        // examined.
         guard seen == Set(expected.keys) else {
             throw LibraryRepositoryError.derivedLineageMismatch(manifest.derivedID)
         }
         return document
     }
+
+    /// The wire flag the ASR adapter writes on a non-speech row. The bare
+    /// string, so that this reader agrees with the proposer on the value
+    /// without a shared type; the reading surface's `NonSpeechEvent.flag`
+    /// names the same one.
+    private static let nonSpeechEventFlag = "non_speech_event"
 
     /// Whether a decline's explanation agrees with the evidence it carries.
     ///

@@ -501,6 +501,47 @@ public struct SpeakerProposalDecline: Codable, Equatable, Sendable {
     }
 }
 
+/// Why the proposer left an unattributed segment unexamined: it never asked
+/// the model about it and the segment is neither proposed nor declined.
+public enum SpeakerProposalSkipReason: String, Codable, Equatable, Sendable {
+    /// The segment is a non-speech event the ASR adapter marked with the
+    /// `non_speech_event` flag — a `[Silence]`-style row. It has no speaker to
+    /// find, so a model call on it is wasted and an answer would be noise.
+    case nonSpeechEvent = "non_speech_event"
+}
+
+/// An unattributed segment the proposer did not examine, and why. Listed so
+/// a reader can tell "not asked" from "asked and declined", and so the
+/// artifact still accounts for every unattributed segment exactly once.
+public struct SpeakerProposalSkip: Codable, Equatable, Sendable {
+    public var segmentIndex: Int
+    public var reason: SpeakerProposalSkipReason
+
+    public init(segmentIndex: Int, reason: SpeakerProposalSkipReason) {
+        self.segmentIndex = segmentIndex
+        self.reason = reason
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case reason
+        case segmentIndex = "segment_index"
+    }
+}
+
+/// The wire flag the ASR adapter writes on a segment whose text is a
+/// non-speech event rather than speech. Kept as the bare string here so this
+/// module does not depend on the typed event; the reading surface's
+/// `NonSpeechEvent.flag` names the same value.
+private let nonSpeechEventFlag = "non_speech_event"
+
+private extension Segment {
+    /// True for a row that is a non-speech event: no speaker to find, no
+    /// text to correct, nothing to translate.
+    var isNonSpeechEvent: Bool {
+        flags?.contains(nonSpeechEventFlag) == true
+    }
+}
+
 /// The derived run's speaker-proposal artifact.
 ///
 /// Every segment the source run left unattributed appears exactly once, in
@@ -530,6 +571,10 @@ public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
     public var unattributedSpeakers: [String]
     public var proposals: [SpeakerProposal]
     public var declined: [SpeakerProposalDecline]
+    /// Unattributed segments the proposer did not ask about, with the reason.
+    /// Absent on artifacts written before 2026-09-04, which examined every
+    /// unattributed segment; present, possibly empty, on every later one.
+    public var notExamined: [SpeakerProposalSkip]?
     public var batches: [TranslationBatchRecord]
 
     public init(
@@ -541,6 +586,7 @@ public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
         unattributedSpeakers: [String] = UnattributedSpeaker.labels,
         proposals: [SpeakerProposal],
         declined: [SpeakerProposalDecline],
+        notExamined: [SpeakerProposalSkip]? = nil,
         batches: [TranslationBatchRecord]
     ) {
         self.schemaVersion = schemaVersion
@@ -551,6 +597,7 @@ public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
         self.unattributedSpeakers = unattributedSpeakers
         self.proposals = proposals
         self.declined = declined
+        self.notExamined = notExamined
         self.batches = batches
     }
 
@@ -560,6 +607,7 @@ public struct SpeakerProposalDocument: Codable, Equatable, Sendable {
         case sourceSegmentsSHA256 = "source_segments_sha256"
         case sourceCoverage = "source_coverage"
         case unattributedSpeakers = "unattributed_speakers"
+        case notExamined = "not_examined"
     }
 }
 
@@ -721,9 +769,13 @@ public struct TranscriptPostprocessor: Sendable {
     }
 
     public func process(_ request: PostprocessRequest) async throws -> PostprocessResult {
+        // A non-speech row is never sent: its text is a marker, not speech,
+        // and it passes through unchanged. A proposal can only target a
+        // segment of its batch, so none can reach it.
         let batches = try TextBatchPlanner.plan(
             document: request.document,
-            policy: backend.batchPolicy
+            policy: backend.batchPolicy,
+            excluding: \.isNonSpeechEvent
         ) { segments in
             try PostprocessPrompt.make(for: request, segments: segments)
         }
@@ -865,9 +917,13 @@ public struct TranscriptTranslator: Sendable {
         guard isSHA256(request.sourceSegmentsSHA256) else {
             throw PostprocessError.invalidSourceSegmentsSHA256
         }
+        // A non-speech row is never sent; it is carried into the translation
+        // verbatim below, because a marker is the same in every language and
+        // the artifact must still cover every segment exactly once.
         let batches = try TextBatchPlanner.plan(
             document: request.document,
-            policy: backend.batchPolicy
+            policy: backend.batchPolicy,
+            excluding: \.isNonSpeechEvent
         ) { segments in
             try TranslationPrompt.make(
                 for: request,
@@ -914,6 +970,14 @@ public struct TranscriptTranslator: Sendable {
                 outputTextUTF8Bytes: outputTextUTF8Bytes,
                 responseUTF8Bytes: response.responseUTF8Bytes,
                 acceptedOutputTokenUpperBound: acceptedOutputTokenUpperBound
+            ))
+        }
+        for (index, segment) in request.document.segments.enumerated()
+            where segment.isNonSpeechEvent
+        {
+            translations.append(SegmentTranslation(
+                segmentIndex: index,
+                translatedText: segment.text
             ))
         }
         translations.sort { $0.segmentIndex < $1.segmentIndex }
@@ -1017,8 +1081,18 @@ public struct SpeakerProposer: Sendable {
         }
 
         let segments = request.document.segments
+        // An unattributed non-speech row has no speaker to find: it is
+        // listed as not examined, never asked about, never declined. On the
+        // first real run three such rows cost model calls and one drew a
+        // proposal.
+        let notExamined = segments.indices.filter {
+            UnattributedSpeaker.isUnattributed(segments[$0].speaker)
+                && segments[$0].isNonSpeechEvent
+        }
+        let skipped = Set(notExamined)
         let unattributed = segments.indices.filter {
             UnattributedSpeaker.isUnattributed(segments[$0].speaker)
+                && !skipped.contains($0)
         }
         guard !unattributed.isEmpty else {
             throw PostprocessError.noUnattributedSegments
@@ -1030,6 +1104,9 @@ public struct SpeakerProposer: Sendable {
 
         var evidenceByIndex: [Int: SegmentSpeakerEvidence] = [:]
         for record in request.evidence {
+            // Evidence for a skipped row is legitimate — the merger measured
+            // it — and simply unused.
+            if skipped.contains(record.segmentIndex) { continue }
             guard segments.indices.contains(record.segmentIndex),
                   targets.contains(record.segmentIndex)
             else {
@@ -1048,7 +1125,8 @@ public struct SpeakerProposer: Sendable {
 
         let batches = try TextBatchPlanner.plan(
             document: request.document,
-            policy: backend.batchPolicy
+            policy: backend.batchPolicy,
+            excluding: \.isNonSpeechEvent
         ) { batchSegments in
             try SpeakerProposalPrompt.make(
                 segments: batchSegments,
@@ -1189,6 +1267,9 @@ public struct SpeakerProposer: Sendable {
                 constraint: .confirmOrDecline,
                 proposals: proposals,
                 declined: declined,
+                notExamined: notExamined.map {
+                    SpeakerProposalSkip(segmentIndex: $0, reason: .nonSpeechEvent)
+                },
                 batches: records
             ),
             manifestPostprocess: provenance
@@ -1386,15 +1467,19 @@ private struct BatchOutputEvidence: Sendable {
 }
 
 private enum TextBatchPlanner {
+    /// - Parameter excluding: segments that never enter a batch, so the
+    ///   model is never asked about them and can never answer for them. A
+    ///   non-speech row is the case: it is passed through unchanged.
     static func plan(
         document: SegmentsDocument,
         policy: PostprocessBatchPolicy,
+        excluding: (Segment) -> Bool = { _ in false },
         prompt: ([IndexedTextSegment]) throws -> String
     ) throws -> [PlannedTextBatch] {
         guard !document.segments.isEmpty else { throw PostprocessError.emptyDocument }
-        let indexed = document.segments.enumerated().map {
-            IndexedTextSegment(index: $0.offset, text: $0.element.text)
-        }
+        let indexed = document.segments.enumerated()
+            .filter { !excluding($0.element) }
+            .map { IndexedTextSegment(index: $0.offset, text: $0.element.text) }
         var result: [PlannedTextBatch] = []
         var current: [IndexedTextSegment] = []
 
